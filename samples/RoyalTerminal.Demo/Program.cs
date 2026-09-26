@@ -12,6 +12,7 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (RoyalTerminal.Avalonia.App.Services.TerminalNotificationLaunch.IsInertActivation(args)) return;
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
     }

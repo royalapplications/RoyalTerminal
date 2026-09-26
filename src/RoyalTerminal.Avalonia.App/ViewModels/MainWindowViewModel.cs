@@ -40,6 +40,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _fontBaselineSnap = TerminalFontRenderingSettings.Default.BaselineSnap;
     private bool _fontEmbeddedBitmaps = TerminalFontRenderingSettings.Default.EmbeddedBitmaps;
     private bool _fontEmbolden = TerminalFontRenderingSettings.Default.Embolden;
+    private bool _fontThicken = TerminalFontRenderingSettings.Default.Thicken;
+    private byte _fontThickenStrength = TerminalFontRenderingSettings.Default.ThickenStrength;
     private bool _fontForceAutoHinting = TerminalFontRenderingSettings.Default.ForceAutoHinting;
     private bool _fontLinearMetrics = TerminalFontRenderingSettings.Default.LinearMetrics;
     private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
@@ -731,6 +733,20 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _fontEmbolden;
         set => this.RaiseAndSetIfChanged(ref _fontEmbolden, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing for terminal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => _fontThicken;
+        set => this.RaiseAndSetIfChanged(ref _fontThicken, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing strength (0–255).</summary>
+    public byte FontThickenStrength
+    {
+        get => _fontThickenStrength;
+        set => this.RaiseAndSetIfChanged(ref _fontThickenStrength, value);
     }
 
     public bool FontForceAutoHinting

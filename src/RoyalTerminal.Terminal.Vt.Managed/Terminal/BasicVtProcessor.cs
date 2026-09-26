@@ -7,10 +7,11 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using System.Globalization;
-using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Sixel;
+using RoyalTerminal.Terminal.Snapshots;
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Unicode;
 
@@ -25,29 +26,41 @@ namespace RoyalTerminal.Terminal;
 /// of the VT protocol to render typical shell output and full-screen TUI
 /// applications such as Midnight Commander, htop, vim, etc.
 /// </summary>
-public sealed class BasicVtProcessor : IVtProcessor,
+public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalThemeSink,
+    ITerminalModeDefaults,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
+    ITerminalCursorDefaults,
+    ITerminalMetadata,
     ITerminalFocusEventModeSource,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
+    ITerminalSearchSource,
+    ITerminalAsyncSearchSource,
+    ITerminalGlyphCoverageSink,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
     ITerminalPointerSequenceEncoderSource,
-    ITerminalMouseReportingStateSource,
+    ITerminalMouseModeStateSource,
+    ITerminalMouseShiftCaptureState,
+    ITerminalMouseShapeSource,
+    ITerminalModifyOtherKeysStateSource,
+    ITerminalKeySequenceEncoderSource,
+    ITerminalKeyEncodingPolicy,
+    ITerminalPointerButtonStateSink,
     ITerminalSixelOptionsSink,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
     ITerminalEffectSource,
-    ITerminalUnicodeWidthProvider
+    ITerminalNotificationSource,
+    ITerminalDragDropTarget,
+    ITerminalUnicodeWidthProvider,
+    ITerminalTimedRefreshSource
 {
-    private const int MaxOscBufferBytes = 4096;
-    private const int MaxDcsBufferBytes = 4096;
-    private const int KittyKeyboardFlagMask = 0x1F;
-    private const int KittyKeyboardMaxStackDepth = 32;
-    private const int ZeroWidthJoinerCodepoint = 0x200D;
-    private const int CombiningKeycapCodepoint = 0x20E3;
+    private const int MaxOscBufferBytes = 8 * 1024 * 1024;
+    private const int MaxDcsQueryBytes = 1024 * 1024;
+    private const int MaxUnknownSequenceBytes = 4096;
     private static readonly int[] ExtendedDecModes =
     [
         3,
@@ -75,7 +88,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
         2026,
         2027,
         2031,
+        2033,
         2048,
+        5522,
     ];
     private static readonly int[] ExtendedDecModesEnabledByDefault =
     [
@@ -84,7 +99,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
         1036,
     ];
 
-    private readonly TerminalScreen _screen;
+    private TerminalScreen _screen;
+    private readonly ManagedTerminalSearch _search = new();
+    private ManagedBackgroundSearch? _backgroundSearch;
+
+    /// <inheritdoc />
+    public ITerminalGlyphCoverageSource? GlyphCoverageSource { get; set; }
+    private readonly TerminalScreen _publishedScreen;
+    private RenderHoldState? _renderHold;
     private int _cursorCol;
     private int _cursorRow;
     private uint _currentFg;
@@ -96,45 +118,46 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private CellAttributes _currentAttrs;
     private TerminalUnderlineStyle _currentUnderlineStyle;
     private uint _currentUnderlineColor;
+    private TerminalColorIdentity _currentUnderlineIdentity;
     private bool _currentHasUnderlineColor;
     private CellDecorations _currentDecorations;
     private int _currentHyperlinkId;
+    private uint _primaryHyperlinkImplicitCounter;
+    private uint _alternateHyperlinkImplicitCounter;
     private TerminalTheme _theme;
+    private readonly ManagedTerminalColors _colors;
+    private readonly ManagedVtContinuation _continuation;
+    private ManagedKittyGraphicsStore _primaryKittyStore;
+    private ManagedKittyGraphicsStore? _alternateKittyStore;
+    private ManagedKittyGraphicsStore _kittyStore;
 
     // Parser state machine
     private ParserState _state = ParserState.Ground;
-    private readonly List<int> _params = [];
+    private int _inputBatchDepth;
+    private readonly List<int> _params = new(24);
+    private uint _csiColonSeparators;
+    private int _intermediateCount;
     private int _currentParam;
     private bool _hasParam;
     private char _csiPrivateMarker;
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
+    private readonly List<byte> _apcBuffer = [];
+    private bool _apcKittyRecognized;
+    private ManagedKittyGraphicsParser? _apcKittyParser;
+    private bool _glyphProtocolEnabled;
+    private bool _apcGlyphRecognized;
+    private bool _apcGlyphEnabled;
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
     private readonly TerminalShellIntegrationParser _shellIntegrationParser = new();
+    private readonly KittyClipboardProtocol _kittyClipboardProtocol;
     private bool _isDiscardingOscPayload;
     private bool _isDiscardingDcsPayload;
+    private bool _apcTruncated;
     private bool _sixelGraphicsEnabled;
     private bool _sixelDisplayMode;
-
-    // Saved cursor state (for DECSC/DECRC — ESC 7 / ESC 8)
-    private int _savedCursorCol;
-    private int _savedCursorRow;
-    private uint _savedFg;
-    private uint _savedBg;
-    private SgrColorKind _savedFgKind;
-    private SgrColorKind _savedBgKind;
-    private int _savedFgPaletteIndex;
-    private int _savedBgPaletteIndex;
-    private CellAttributes _savedAttrs;
-    private TerminalUnderlineStyle _savedUnderlineStyle;
-    private uint _savedUnderlineColor;
-    private bool _savedHasUnderlineColor;
-    private CellDecorations _savedDecorations;
-    private int _savedHyperlinkId;
-    private bool _savedUseLineDrawing;
-    private bool _savedDelayedWrap;
 
     // Scroll region (DECSTBM)
     private int _scrollTop;    // 0-based inclusive
@@ -145,12 +168,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int _savedMainCursorRow;
     private bool _savedMainDelayedWrap;
     private bool _inAltScreen;
-
-    // DEC line-drawing character set
-    private bool _useLineDrawing; // true when active charset is DEC Special Graphics
-    private bool _g0IsLineDrawing;
-    private bool _g1IsLineDrawing;
-    private bool _shiftOut; // SO/SI for G1/G0 switching
 
     // DEC private modes
     private bool _autoWrap = true;     // DECAWM (mode 7)
@@ -167,22 +184,23 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private bool _sendReceiveMode = true; // SRM (ANSI mode 12)
     private bool _insertMode;          // IRM (ANSI mode 4)
     private bool _lineFeedNewLineMode; // LNM (ANSI mode 20)
-    private int _cursorStyle = 1;      // DECSCUSR (CSI Ps SP q), default blinking block
-    private int _widthPx;
-    private int _heightPx;
-    private int _kittyKeyboardFlagsMain;
-    private int _kittyKeyboardFlagsAlt;
-    private readonly List<int> _kittyKeyboardStackMain = [];
-    private readonly List<int> _kittyKeyboardStackAlt = [];
+    private uint _widthPx;
+    private uint _heightPx;
+    private uint _reportCellWidthPx;
+    private uint _reportCellHeightPx;
     private readonly HashSet<int> _extendedDecModesEnabled = [];
+    private TerminalMouseModeState _mouseModeState;
+    private readonly ManagedMouseEncoder _mouseEncoder = new();
 
     // Tab stops
-    private readonly HashSet<int> _tabStops = [];
+    private HashSet<int> _tabStops = [];
 
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
     private int _utf8Remaining;
-    private int _lastGraphicCodepoint;
+    private byte _utf8NextMinimum;
+    private byte _utf8NextMaximum;
+    private int _lastGraphicCodepoint = -1;
     private byte[]? _enquiryResponse;
 
     private enum ParserState
@@ -193,10 +211,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
         CsiEntry,
         CsiParam,
         CsiIntermediate,
+        CsiIgnore,
         OscString,
-        OscEscape,
+        DcsEntry,
+        DcsParam,
+        DcsIntermediate,
+        DcsIgnore,
         DcsString,
-        DcsEscape,
+        ApcString,
     }
 
     private enum SgrColorKind : byte
@@ -214,13 +236,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
     }
 
     /// <summary>Current cursor column.</summary>
-    public int CursorCol => _cursorCol;
+    public int CursorCol => _renderHold?.CursorColumn ?? _cursorCol;
 
     /// <summary>Current cursor row.</summary>
-    public int CursorRow => _cursorRow;
+    public int CursorRow => _renderHold?.CursorRow ?? _cursorRow;
 
     /// <summary>Whether cursor should be visible.</summary>
-    public bool CursorVisible => _cursorVisible;
+    public bool CursorVisible => _renderHold?.CursorVisible ?? _cursorVisible;
 
     /// <summary>Whether application cursor key mode is active.</summary>
     public bool ApplicationCursorKeys => _applicationCursorKeys;
@@ -229,7 +251,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
     public bool ApplicationKeypad => _applicationKeypad;
 
     /// <summary>Whether the alternate screen buffer is active.</summary>
-    public bool AlternateScreen => _inAltScreen;
+    public bool AlternateScreen => _renderHold?.AlternateScreen ?? _inAltScreen;
 
     /// <summary>Whether bracketed paste mode is active.</summary>
     public bool BracketedPaste => _bracketedPaste;
@@ -244,13 +266,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
     public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
 
     /// <inheritdoc />
-    public TerminalCursorStyle CursorStyle => MapCursorStyle(_cursorStyle);
+    public TerminalCursorStyle CursorStyle => _renderHold?.CursorStyle ?? ActiveCursorStyle;
 
     /// <inheritdoc />
-    public bool CursorBlinking => IsCursorStyleBlinking(_cursorStyle);
+    public bool CursorBlinking => _renderHold?.CursorBlinking ?? _extendedDecModesEnabled.Contains(12);
 
     /// <inheritdoc />
-    public int KittyKeyboardFlags => _inAltScreen ? _kittyKeyboardFlagsAlt : _kittyKeyboardFlagsMain;
+    public int KittyKeyboardFlags => ActiveKittyKeyboard.Current;
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -262,9 +284,17 @@ public sealed class BasicVtProcessor : IVtProcessor,
         Win32InputMode,
         _backarrowKeyMode);
 
-    private TerminalMouseModeState MouseModeState => new(
-        GetMouseTrackingMode(),
-        GetMouseEncodingMode());
+    /// <inheritdoc />
+    public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    /// <inheritdoc />
+    public bool? MouseShiftCaptureOverride { get; set; }
+
+    /// <inheritdoc />
+    public TerminalMouseShape MouseShape { get; private set; } = TerminalMouseShape.Text;
+
+    /// <inheritdoc />
+    public void ObservePointerButton(in TerminalPointerEvent pointerEvent) => _mouseEncoder.ObserveButton(pointerEvent);
 
     /// <inheritdoc />
     public event EventHandler<TerminalModeState>? ModeChanged;
@@ -278,6 +308,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteReply>? ClipboardWriteRequestCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardRead, TerminalClipboardReadReply>? ClipboardReadCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalUnknownSequence>? UnknownSequenceCallback { get; set; }
 
     /// <inheritdoc />
     public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
@@ -342,6 +381,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
     }
 
+    /// <summary>
+    /// Enables future glyph APC commands. Disabling clears session registrations;
+    /// an already-identified command retains its original enablement, as in libvt.
+    /// </summary>
+    public bool GlyphProtocolEnabled
+    {
+        get => _glyphProtocolEnabled;
+        set
+        {
+            if (_glyphProtocolEnabled == value) return;
+            _glyphProtocolEnabled = value;
+            if (!value)
+            {
+                _screen.ClearRegisteredGlyphs();
+            }
+        }
+    }
+
     /// <inheritdoc />
     public bool ScrollOnEraseInDisplay { get; set; }
 
@@ -356,11 +413,25 @@ public sealed class BasicVtProcessor : IVtProcessor,
     public BasicVtProcessor(TerminalScreen screen, BasicVtProcessorOptions? options)
     {
         _screen = screen;
+        _publishedScreen = screen;
         _options = options ?? BasicVtProcessorOptions.Default;
+        TitleReportEnabled = _options.TitleReportEnabled;
+        ArgumentNullException.ThrowIfNull(_options.TimeProvider);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.ClipboardWriteLimitBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.ContinuationMaxBytes);
+        _continuation = new ManagedVtContinuation(_options.ContinuationMaxBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsStorageLimitBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsMaxApcBytes);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.KittyGraphicsMaxImageBytes);
+        _primaryKittyStore = new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
+        _kittyStore = _primaryKittyStore;
+        _kittyClipboardProtocol = new KittyClipboardProtocol(_options.ClipboardWriteLimitBytes);
         _sixelDecoder = new SixelDecoder(_options.SixelDecoderOptions);
         _sixelGraphicsEnabled = _options.SixelGraphicsEnabled;
+        _glyphProtocolEnabled = _options.GlyphProtocolEnabled;
         ScrollOnEraseInDisplay = _options.ScrollOnEraseInDisplay;
         _theme = screen.Theme;
+        _colors = new ManagedTerminalColors(_theme);
         _currentFg = screen.DefaultForeground;
         _currentBg = screen.DefaultBackground;
         _scrollBottom = screen.ViewportRows - 1;
@@ -370,6 +441,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void InitTabStops()
     {
+        _tabStopColumns = _screen.Columns;
         _tabStops.Clear();
         for (var i = 0; i < _screen.Columns; i += 8)
             _tabStops.Add(i);
@@ -377,23 +449,180 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     /// <summary>
     /// Processes a span of raw terminal output bytes.
+    /// Unrecoverable row-copy allocation failure faults this processor and its
+    /// screen. Dispose them and create a fresh pair; reset cannot repair a
+    /// partially completed structural mutation.
     /// </summary>
     public void Process(ReadOnlySpan<byte> data)
+        => ProcessCore(data, stopAtGround: false, out _);
+
+    private void ProcessCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed)
     {
-        if (data.IsEmpty)
+        _screen.ThrowIfSnapshotMutationFailed();
+        TerminalModeState before;
+        _inputBatchDepth++;
+        try
+        {
+            ProcessInputCore(data, stopAtGround, out consumed, out before);
+        }
+        finally
+        {
+            if (!_screen.SnapshotMutationFailed) ApplySnapshotCursorStyleDrops();
+            _inputBatchDepth--;
+            // Match the native adapter's write-then-render order. Protocol
+            // commands in one input batch must see a stable animation clock;
+            // an intervening render tick can otherwise invalidate frame loads.
+            if (!_screen.SnapshotMutationFailed && _inputBatchDepth == 0 && AdvanceKittyAnimations()) PublishKittyGraphics();
+        }
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    private void ProcessInputCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed, out TerminalModeState before)
+    {
+        consumed = 0;
+        _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
+        ApplySnapshotCursorStyleDrops();
+        RefreshTimedState();
+        before = ModeState;
+        if (data.IsEmpty || (stopAtGround && IsParserGround))
         {
             return;
         }
 
-        TerminalModeState before = ModeState;
+        int continuationStart = -1;
+        int continuationSegmentStart = 0;
 
         for (var i = 0; i < data.Length; i++)
         {
+            // Prior metadata edits can drop a pen without an SGR. Observe it
+            // before reports, DECSC or another control reads the registers.
+            if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
             var b = data[i];
+
+            // Only the final unfinished fragment needs retaining. Record starts
+            // without rescanning ordinary text or copying completed commands.
+            if (IsParserGround || (_state == ParserState.Ground && _utf8Remaining > 0 && !IsUtf8Continuation(b)))
+            {
+                continuationStart = i;
+            }
+
+            // Strings commit when ESC arrives, not after a subsequent backslash.
+            // Only the new ESC operation belongs to a replayable continuation.
+            if (_state is ParserState.OscString or ParserState.ApcString or ParserState.DcsString or
+                ParserState.DcsEntry or ParserState.DcsParam or ParserState.DcsIntermediate or ParserState.DcsIgnore && b == 0x1B)
+                continuationStart = i;
+
+            if (_state == ParserState.ApcString && b < 0x80 && b is not (0x18 or 0x1A or 0x1B))
+            {
+                ReadOnlySpan<byte> remaining = data[i..];
+                int end = remaining.IndexOfAny((byte)0x18, (byte)0x1A, (byte)0x1B);
+                if (end < 0) end = remaining.Length;
+                int high = remaining[..end].IndexOfAnyInRange((byte)0x80, byte.MaxValue);
+                if (high >= 0) end = high;
+                AppendApcPayload(remaining[..end]);
+                i += end - 1;
+                continue;
+            }
+
+            if (_state is ParserState.OscString or ParserState.DcsString &&
+                b >= 0x20 && !(_state == ParserState.DcsString && b == 0x7F))
+            {
+                ReadOnlySpan<byte> remaining = data[i..];
+                int count = remaining.IndexOfAnyInRange((byte)0, (byte)0x1F);
+                if (count < 0) count = remaining.Length;
+                if (_state == ParserState.DcsString)
+                {
+                    int delete = remaining[..count].IndexOf((byte)0x7F);
+                    if (delete >= 0) count = delete;
+                }
+                AppendControlStringPayload(remaining[..count]);
+                i += count - 1;
+                continue;
+            }
+
+            // Match Ghostty's print-slice fast path: keep contiguous printable
+            // ASCII out of the parser state switch and UTF-8 decoder.
+            if (_state == ParserState.Ground &&
+                _utf8Remaining == 0 &&
+                b is >= 0x20 and < 0x7F)
+            {
+                int end = i + 1;
+                while (end < data.Length && data[end] is >= 0x20 and < 0x7F)
+                {
+                    end++;
+                }
+
+                ProcessPrintableAscii(data[i..end]);
+                i = end - 1;
+                continue;
+            }
+
+            // Finish/reject a partial scalar before interpreting controls, including
+            // CAN/SUB. Ghostty emits U+FFFD for the interrupted scalar first.
+            if (_state == ParserState.Ground && _utf8Remaining > 0)
+            {
+                ProcessGround(b);
+                if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
+                continue;
+            }
+
+            if (_state == ParserState.ApcString && b is 0x90 or 0x9B or 0x9D)
+            {
+                ProcessApcString(b);
+                // Exiting APC can commit a Kitty command. Do not replay it;
+                // canonicalize the new C1 introduction into a ground-safe ESC.
+                ReadOnlySpan<byte> prefix = b switch
+                {
+                    0x90 => "\u001bP"u8,
+                    0x9B => "\u001b["u8,
+                    _ => "\u001b]"u8,
+                };
+                _continuation.Track(prefix, 0, ground: false);
+                continuationSegmentStart = i + 1;
+                continuationStart = -1;
+                continue;
+            }
 
             if (TryHandleAnywhereCancelControl(b))
             {
+                if (stopAtGround)
+                {
+                    consumed = i + 1;
+                    break;
+                }
+
                 continue;
+            }
+
+            if (_state is ParserState.Escape or ParserState.EscapeIntermediate or
+                ParserState.CsiEntry or ParserState.CsiParam or ParserState.CsiIntermediate or ParserState.CsiIgnore)
+            {
+                if (b == 0x1B)
+                {
+                    EnterCsiState(); // Clear stale parameters/intermediates, then start ESC.
+                    _state = ParserState.Escape;
+                    continuationStart = i;
+                    continue;
+                }
+                if (b == 0x7F) continue;
+                if (b is >= 0x80 and <= 0x9F)
+                {
+                    ProcessC1(b);
+                    if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
+                    continue;
+                }
+                if (b < 0x20)
+                {
+                    ProcessGround(b); // Immediate C0 effect; preserve the unfinished parser state.
+                    // Its effect is already captured. Retain the preceding
+                    // segment but omit this byte, without an unbounded index list.
+                    _continuation.Track(data[continuationSegmentStart..i],
+                        continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart,
+                        ground: false);
+                    continuationSegmentStart = i + 1;
+                    if (stopAtGround && IsParserGround) { consumed = i + 1; break; }
+                    continue;
+                }
             }
 
             switch (_state)
@@ -416,22 +645,44 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 case ParserState.CsiIntermediate:
                     ProcessCsiIntermediate(b);
                     break;
+                case ParserState.CsiIgnore:
+                    if (b is >= 0x40 and <= 0x7E) _state = ParserState.Ground;
+                    break;
                 case ParserState.OscString:
                     ProcessOscString(b);
-                    break;
-                case ParserState.OscEscape:
-                    ProcessOscEscape(b);
                     break;
                 case ParserState.DcsString:
                     ProcessDcsString(b);
                     break;
-                case ParserState.DcsEscape:
-                    ProcessDcsEscape(b);
+                case ParserState.DcsEntry:
+                case ParserState.DcsParam:
+                case ParserState.DcsIntermediate:
+                case ParserState.DcsIgnore:
+                    ProcessDcsHeader(b);
                     break;
+                case ParserState.ApcString:
+                    ProcessApcString(b);
+                    break;
+            }
+
+            if (stopAtGround && IsParserGround)
+            {
+                consumed = i + 1;
+                break;
             }
         }
 
-        RaiseModeChangedIfNeeded(before);
+        if (consumed == 0) consumed = data.Length;
+        _continuation.Track(data[continuationSegmentStart..consumed],
+            continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart, IsParserGround);
+    }
+
+    private void ProcessPrintableAscii(ReadOnlySpan<byte> data)
+    {
+        for (int index = 0; index < data.Length; index++)
+        {
+            PutChar(data[index]);
+        }
     }
 
     /// <inheritdoc />
@@ -439,83 +690,52 @@ public sealed class BasicVtProcessor : IVtProcessor,
         in TerminalPointerEvent pointerEvent,
         in TerminalPointerEncodingContext context,
         out byte[] sequence)
+        => _mouseEncoder.TryEncode(pointerEvent, context, MouseModeState, out sequence);
+
+    /// <inheritdoc />
+    public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
     {
-        sequence = [];
-        if (context.CellWidthPx <= 0 || context.CellHeightPx <= 0)
+        _screen.ThrowIfSnapshotMutationFailed();
+        _search.Populate(_publishedScreen, needle, destination);
+    }
+
+    /// <inheritdoc />
+    public TerminalSearchStatus PopulateSearchMatchesAsync(string needle, List<TerminalSearchMatch> destination)
+    {
+        _screen.ThrowIfSnapshotMutationFailed();
+        if (string.IsNullOrEmpty(needle))
         {
-            return false;
+            CancelSearch();
+            destination.Clear();
+            return TerminalSearchStatus.Complete;
         }
+        // Small screens finish inline without allocating a dedicated worker.
+        if (_publishedScreen.TotalRows <= 256)
+        {
+            _backgroundSearch?.Dispose();
+            _backgroundSearch = null;
+            _search.Populate(_publishedScreen, needle, destination);
+            return TerminalSearchStatus.Complete;
+        }
+        return (_backgroundSearch ??= new()).Populate(_publishedScreen, needle, destination);
+    }
 
-        double contentX = pointerEvent.X - context.PaddingLeftPx;
-        double contentY = pointerEvent.Y - context.PaddingTopPx;
-        int column = Math.Clamp((int)Math.Floor(contentX / context.CellWidthPx) + 1, 1, Math.Max(1, _screen.Columns));
-        int row = Math.Clamp((int)Math.Floor(contentY / context.CellHeightPx) + 1, 1, Math.Max(1, _screen.ViewportRows));
-        int pixelX = Math.Max(1, (int)Math.Floor(contentX) + 1);
-        int pixelY = Math.Max(1, (int)Math.Floor(contentY) + 1);
+    /// <inheritdoc />
+    public Exception? SearchError => _backgroundSearch?.Error;
 
-        return TerminalMouseProtocolEncoder.TryEncode(
-            pointerEvent,
-            MouseModeState,
-            column,
-            row,
-            pixelX,
-            pixelY,
-            out sequence);
+    /// <inheritdoc />
+    public void CancelSearch()
+    {
+        _backgroundSearch?.Dispose();
+        _backgroundSearch = null;
+        _search.Reset();
     }
 
     /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)
     {
-        TerminalSelectionRange normalized = selection.Normalize();
-        int startCol = normalized.StartColumn;
-        int startRow = normalized.StartRow;
-        int endCol = normalized.EndColumn;
-        int endRow = normalized.EndRow;
-
-        if (startRow > endRow || _screen.ViewportRows <= 0 || _screen.Columns <= 0)
-        {
-            return null;
-        }
-
-        StringBuilder builder = new();
-        for (int row = startRow; row <= endRow; row++)
-        {
-            if (row < 0 || row >= _screen.ViewportRows)
-            {
-                continue;
-            }
-
-            TerminalRow terminalRow = _screen.GetViewportRow(row);
-            if (!TryGetSelectionColumnRange(normalized, row, out int rowStart, out int rowEnd))
-            {
-                continue;
-            }
-
-            for (int col = rowStart; col <= rowEnd; col++)
-            {
-                ref TerminalCell cell = ref terminalRow[col];
-                if (cell.Width == 0)
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrEmpty(cell.Grapheme))
-                {
-                    builder.Append(cell.Grapheme);
-                }
-                else if (cell.Codepoint != 0)
-                {
-                    builder.Append(char.ConvertFromUtf32(cell.Codepoint));
-                }
-            }
-
-            if (row < endRow)
-            {
-                builder.AppendLine();
-            }
-        }
-
-        return builder.Length == 0 ? null : builder.ToString();
+        _screen.ThrowIfSnapshotMutationFailed();
+        return ManagedPlainTextFormatter.Format(_screen, new TerminalSnapshotExportOptions(Selection: selection));
     }
 
     /// <inheritdoc />
@@ -535,8 +755,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        sequence = TerminalPasteEncoder.Encode(text, bracketedPaste);
-        return sequence.Length > 0;
+        return _kittyClipboardProtocol.TryEncodePaste(
+            text,
+            bracketedPaste,
+            _extendedDecModesEnabled.Contains(5522),
+            out sequence);
     }
 
     /// <inheritdoc />
@@ -557,6 +780,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         in TerminalSnapshotExportOptions options,
         out string snapshot)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         if (!SupportsSnapshotFormat(format))
         {
             snapshot = string.Empty;
@@ -571,559 +795,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
             _ => string.Empty,
         };
 
-        return snapshot.Length > 0;
+        return format == TerminalSnapshotExportFormat.PlainText || snapshot.Length > 0;
     }
 
     private string ExportPlainSnapshot(in TerminalSnapshotExportOptions options)
-    {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
-        StringBuilder builder = new();
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
-            {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendRowPlainText(row, rowStart, rowEnd, options.TrimTrailingWhitespace, builder);
-
-                if (ShouldAppendSnapshotLineBreak(
-                    row,
-                    unwrapRows,
-                    viewportRow,
-                    normalized.EndRow))
-                {
-                    builder.AppendLine();
-                }
-            }
-
-            return builder.ToString();
-        }
-
-        int lastRowIndex = options.TrimTrailingWhitespace
-            ? GetSnapshotLastRowIndex(visual: false)
-            : _screen.TotalRows - 1;
-        if (lastRowIndex < 0)
-        {
-            return string.Empty;
-        }
-
-        for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-        {
-            TerminalRow row = _screen.GetRow(absoluteRow);
-            AppendRowPlainText(row, 0, row.Columns - 1, options.TrimTrailingWhitespace, builder);
-
-            if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-            {
-                builder.AppendLine();
-            }
-        }
-
-        return builder.ToString();
-    }
+        => ManagedPlainTextFormatter.Format(_screen, options);
 
     private string ExportStyledVtSnapshot(in TerminalSnapshotExportOptions options)
     {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
         StringBuilder builder = new();
-        builder.Append("\x1b[0m");
-
-        SnapshotCellStyleKey? currentStyle = null;
-        string? currentHyperlink = null;
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
-            {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                AppendStyledSnapshotRow(
-                    builder,
-                    _screen.GetRow(absoluteRow),
-                    rowStart,
-                    rowEnd,
-                    options,
-                    ref currentStyle,
-                    ref currentHyperlink);
-
-                if (ShouldAppendSnapshotLineBreak(
-                    _screen.GetRow(absoluteRow),
-                    unwrapRows,
-                    viewportRow,
-                    normalized.EndRow))
-                {
-                    builder.AppendLine();
-                }
-            }
-        }
-        else
-        {
-            int lastRowIndex = options.TrimTrailingWhitespace
-                ? GetSnapshotLastRowIndex(visual: true)
-                : _screen.TotalRows - 1;
-            if (lastRowIndex < 0)
-            {
-                return string.Empty;
-            }
-
-            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendStyledSnapshotRow(
-                    builder,
-                    row,
-                    0,
-                    row.Columns - 1,
-                    options,
-                    ref currentStyle,
-                    ref currentHyperlink);
-
-                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-                {
-                    builder.AppendLine();
-                }
-            }
-        }
-
-        CloseStyledHyperlink(builder, ref currentHyperlink);
-        builder.Append("\x1b[0m");
+        // Select the target screen before content and before restoring origin mode.
+        if (options.Extras.IncludeModes) AppendMode(builder, ansi: false, 1049, _inAltScreen);
+        ManagedRichTextFormatter.Append(_screen, builder, options, html: false);
         AppendStyledVtExtras(builder, options);
         return builder.ToString();
     }
 
     private string ExportHtmlSnapshot(in TerminalSnapshotExportOptions options)
     {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
         StringBuilder builder = new();
-        builder.Append("<!DOCTYPE html><html><body style=\"margin:0;\">");
-        builder.Append("<pre class=\"terminal-snapshot\" style=\"margin:0;white-space:pre;\">");
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            TerminalSelectionRange normalized = selection.Normalize();
-            int viewportTopAbsoluteRow = GetViewportTopAbsoluteRow();
-            bool unwrapRows = options.Unwrap && !normalized.Rectangle;
-            for (int viewportRow = normalized.StartRow; viewportRow <= normalized.EndRow; viewportRow++)
-            {
-                int absoluteRow = viewportTopAbsoluteRow + viewportRow;
-                if ((uint)absoluteRow >= (uint)_screen.TotalRows)
-                {
-                    continue;
-                }
-
-                if (!TryGetSelectionColumnRange(normalized, viewportRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendHtmlSnapshotRow(builder, row, rowStart, rowEnd, options);
-                if (ShouldAppendSnapshotLineBreak(row, unwrapRows, viewportRow, normalized.EndRow))
-                {
-                    builder.Append('\n');
-                }
-            }
-        }
-        else
-        {
-            int lastRowIndex = options.TrimTrailingWhitespace
-                ? GetSnapshotLastRowIndex(visual: true)
-                : _screen.TotalRows - 1;
-            if (lastRowIndex < 0)
-            {
-                return string.Empty;
-            }
-
-            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendHtmlSnapshotRow(builder, row, 0, row.Columns - 1, options);
-                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-                {
-                    builder.Append('\n');
-                }
-            }
-        }
-
-        builder.Append("</pre></body></html>");
+        ManagedRichTextFormatter.Append(_screen, builder, options, html: true);
         return builder.ToString();
     }
 
-    private static void AppendRowPlainText(
-        TerminalRow terminalRow,
-        int startColumn,
-        int endColumn,
-        bool trimTrailingWhitespace,
-        StringBuilder builder)
-    {
-        int originalLength = builder.Length;
-        int clampedStart = Math.Max(0, startColumn);
-        int clampedEnd = Math.Min(terminalRow.Columns - 1, endColumn);
-        if (clampedEnd < clampedStart)
-        {
-            return;
-        }
-
-        for (int col = clampedStart; col <= clampedEnd; col++)
-        {
-            ref TerminalCell cell = ref terminalRow[col];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(cell.Grapheme))
-            {
-                builder.Append(cell.Grapheme);
-            }
-            else if (cell.Codepoint != 0)
-            {
-                builder.Append(char.ConvertFromUtf32(cell.Codepoint));
-            }
-        }
-
-        if (!trimTrailingWhitespace)
-        {
-            return;
-        }
-
-        int end = builder.Length - 1;
-        while (end >= originalLength && char.IsWhiteSpace(builder[end]) && builder[end] is not '\r' and not '\n')
-        {
-            builder.Length--;
-            end--;
-        }
-    }
-
-    private bool TryGetSelectionColumnRange(
-        in TerminalSelectionRange selection,
-        int row,
-        out int rowStart,
-        out int rowEnd)
-    {
-        if (selection.Rectangle)
-        {
-            rowStart = Math.Min(selection.StartColumn, selection.EndColumn);
-            rowEnd = Math.Max(selection.StartColumn, selection.EndColumn);
-        }
-        else
-        {
-            rowStart = row == selection.StartRow ? selection.StartColumn : 0;
-            rowEnd = row == selection.EndRow ? selection.EndColumn : _screen.Columns - 1;
-        }
-
-        if (rowEnd < 0 || rowStart >= _screen.Columns)
-        {
-            return false;
-        }
-
-        rowStart = Math.Max(0, rowStart);
-        rowEnd = Math.Min(_screen.Columns - 1, rowEnd);
-        return rowEnd >= rowStart;
-    }
-
-    private int GetViewportTopAbsoluteRow()
-    {
-        return Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
-    }
-
-    private static bool ShouldAppendSnapshotLineBreak(
-        TerminalRow row,
-        bool unwrap,
-        int rowIndex,
-        int lastRowIndex)
-    {
-        return rowIndex < lastRowIndex && (!unwrap || !row.WrapsToNext);
-    }
-
-    private void AppendStyledSnapshotRow(
-        StringBuilder builder,
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        in TerminalSnapshotExportOptions options,
-        ref SnapshotCellStyleKey? currentStyle,
-        ref string? currentHyperlink)
-    {
-        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
-        if (exportEnd < startColumn)
-        {
-            return;
-        }
-
-        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
-        {
-            ref TerminalCell cell = ref row[col];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
-            if (text.Length == 0)
-            {
-                continue;
-            }
-
-            string? desiredHyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
-            if (!string.Equals(currentHyperlink, desiredHyperlink, StringComparison.Ordinal))
-            {
-                CloseStyledHyperlink(builder, ref currentHyperlink);
-                if (!string.IsNullOrEmpty(desiredHyperlink))
-                {
-                    builder.Append("\x1b]8;;").Append(desiredHyperlink).Append("\x1b\\");
-                    currentHyperlink = desiredHyperlink;
-                }
-            }
-
-            SnapshotCellStyleKey style = CreateSnapshotStyleKey(cell);
-            if (currentStyle is null || currentStyle.Value != style)
-            {
-                builder.Append(BuildStyledSgrSequence(cell));
-                currentStyle = style;
-            }
-
-            builder.Append(text);
-        }
-    }
-
-    private void AppendHtmlSnapshotRow(
-        StringBuilder builder,
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        in TerminalSnapshotExportOptions options)
-    {
-        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
-        if (exportEnd < startColumn)
-        {
-            return;
-        }
-
-        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
-        {
-            ref TerminalCell cell = ref row[col];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
-            if (text.Length == 0)
-            {
-                continue;
-            }
-
-            string encodedText = WebUtility.HtmlEncode(text);
-            string style = BuildHtmlCellStyle(cell);
-            string? hyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
-
-            if (!string.IsNullOrEmpty(hyperlink))
-            {
-                builder.Append("<a href=\"")
-                    .Append(WebUtility.HtmlEncode(hyperlink))
-                    .Append("\" style=\"color:inherit;text-decoration:inherit;\">");
-            }
-
-            if (style.Length > 0)
-            {
-                builder.Append("<span style=\"")
-                    .Append(style)
-                    .Append("\">");
-            }
-
-            builder.Append(encodedText);
-
-            if (style.Length > 0)
-            {
-                builder.Append("</span>");
-            }
-
-            if (!string.IsNullOrEmpty(hyperlink))
-            {
-                builder.Append("</a>");
-            }
-        }
-    }
-
-    private int GetSnapshotRowEndColumn(
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        bool trimTrailingWhitespace,
-        bool visual)
-    {
-        int clampedStart = Math.Max(0, startColumn);
-        int clampedEnd = Math.Min(row.Columns - 1, endColumn);
-        if (clampedEnd < clampedStart || !trimTrailingWhitespace)
-        {
-            return clampedEnd;
-        }
-
-        for (int col = clampedEnd; col >= clampedStart; col--)
-        {
-            TerminalCell cell = row[col];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            if (visual ? IsVisualSnapshotCell(cell) : IsPlainSnapshotCell(cell))
-            {
-                return col;
-            }
-        }
-
-        return clampedStart - 1;
-    }
-
-    private int GetSnapshotLastRowIndex(bool visual)
-    {
-        for (int rowIndex = _screen.TotalRows - 1; rowIndex >= 0; rowIndex--)
-        {
-            TerminalRow row = _screen.GetRow(rowIndex);
-            if (GetSnapshotRowEndColumn(row, 0, row.Columns - 1, trimTrailingWhitespace: true, visual) >= 0)
-            {
-                return rowIndex;
-            }
-        }
-
-        return -1;
-    }
-
-    private static bool IsPlainSnapshotCell(TerminalCell cell)
-    {
-        if (!cell.HasContent)
-        {
-            return false;
-        }
-
-        string text = GetSnapshotCellText(cell, preserveEmptyCells: false);
-        return !string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(text);
-    }
-
-    private bool IsVisualSnapshotCell(TerminalCell cell)
-    {
-        if (cell.HasContent || cell.HyperlinkId > 0)
-        {
-            return true;
-        }
-
-        if (cell.Attributes != CellAttributes.None ||
-            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
-            cell.HasUnderlineColor ||
-            cell.Decorations != CellDecorations.None)
-        {
-            return true;
-        }
-
-        return cell.Foreground != _screen.DefaultForeground ||
-               cell.Background != _screen.DefaultBackground ||
-               !cell.HasBackground;
-    }
-
-    private static string GetSnapshotCellText(TerminalCell cell, bool preserveEmptyCells)
-    {
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return cell.Grapheme;
-        }
-
-        if (cell.Codepoint != 0 && Rune.IsValid(cell.Codepoint))
-        {
-            return char.ConvertFromUtf32(cell.Codepoint);
-        }
-
-        return preserveEmptyCells ? " " : string.Empty;
-    }
-
-    private string? ResolveSnapshotHyperlink(TerminalCell cell, bool includeHyperlinks)
-    {
-        if (!includeHyperlinks || cell.HyperlinkId <= 0)
-        {
-            return null;
-        }
-
-        return _screen.TryGetHyperlinkUrl(cell.HyperlinkId, out string? url)
-            ? url
-            : null;
-    }
-
-    private string BuildStyledSgrSequence(TerminalCell cell)
-    {
-        List<int> parameters = [0];
-
-        if ((cell.Attributes & CellAttributes.Bold) != 0) parameters.Add(1);
-        if ((cell.Attributes & CellAttributes.Dim) != 0) parameters.Add(2);
-        if ((cell.Attributes & CellAttributes.Italic) != 0) parameters.Add(3);
-
-        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
-        if (underlineStyle == TerminalUnderlineStyle.Double)
-        {
-            parameters.Add(21);
-        }
-        else if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            parameters.Add(4);
-        }
-
-        if ((cell.Attributes & CellAttributes.Blink) != 0) parameters.Add(5);
-        if ((cell.Attributes & CellAttributes.Inverse) != 0) parameters.Add(7);
-        if ((cell.Attributes & CellAttributes.Hidden) != 0) parameters.Add(8);
-        if ((cell.Attributes & CellAttributes.Strikethrough) != 0) parameters.Add(9);
-        if ((cell.Decorations & CellDecorations.Overline) != 0) parameters.Add(53);
-
-        AppendRgbParameters(parameters, foreground: true, cell.Foreground);
-        AppendRgbParameters(parameters, foreground: false, cell.Background);
-
-        if (cell.HasUnderlineColor)
-        {
-            parameters.Add(58);
-            parameters.Add(2);
-            parameters.Add((int)((cell.UnderlineColor >> 16) & 0xFF));
-            parameters.Add((int)((cell.UnderlineColor >> 8) & 0xFF));
-            parameters.Add((int)(cell.UnderlineColor & 0xFF));
-        }
-
-        return $"\x1b[{string.Join(';', parameters)}m";
-    }
 
     private void AppendStyledVtExtras(StringBuilder builder, in TerminalSnapshotExportOptions options)
     {
@@ -1144,18 +838,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 .Append(';')
                 .Append(_scrollBottom + 1)
                 .Append('r');
+            if (HasHorizontalMargins)
+                builder.Append("\x1b[").Append(_scrollLeft + 1).Append(';').Append(RightMargin + 1).Append('s');
         }
 
         if (options.Extras.IncludeTabstops)
         {
             AppendTabstopSnapshot(builder);
-        }
-
-        if (options.Extras.IncludeCharsets)
-        {
-            builder.Append(_g0IsLineDrawing ? "\x1b(0" : "\x1b(B");
-            builder.Append(_g1IsLineDrawing ? "\x1b)0" : "\x1b)B");
-            builder.Append(_shiftOut ? "\x0E" : "\x0F");
         }
 
         if (options.Extras.IncludeKittyKeyboard)
@@ -1172,19 +861,70 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         if (options.Extras.IncludeCursor)
         {
-            builder.Append("\x1b[")
-                .Append(_cursorRow + 1)
-                .Append(';')
-                .Append(_cursorCol + 1)
-                .Append('H');
+            AppendCursorSnapshot(builder, options);
+        }
+
+        // A pending-wrap cursor is restored by reprinting its final cell. Restore
+        // the application's character set and pen after that synthetic print.
+        if (options.Extras.IncludeCharsets)
+        {
+            _charsets.AppendRestoreSequence(builder);
         }
 
         if (options.Extras.IncludeStyle)
         {
-            builder.Append("\x1b[")
-                .Append(BuildCurrentSgrState())
-                .Append('m');
+            TerminalCell pen = new()
+            {
+                ForegroundIdentity = GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg),
+                BackgroundIdentity = GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg),
+                UnderlineIdentity = _currentUnderlineIdentity,
+                HasUnderlineColor = _currentHasUnderlineColor,
+                Attributes = _currentAttrs,
+                UnderlineStyle = _currentUnderlineStyle,
+                Decorations = _currentDecorations,
+            };
+            ManagedSgrFormatter.Append(builder, pen);
         }
+
+        if (options.Extras.IncludeHyperlinks)
+        {
+            AppendStyledHyperlink(builder, _currentHyperlinkId);
+        }
+
+        if (options.Extras.IncludeProtection)
+        {
+            // Restore both the active pen and the last protection family: ISO
+            // protection affects ordinary erase even after EPA clears the pen.
+            builder.Append(ProtectionMode == CharacterProtectionMode.Iso ? "\x1bV" : "\x1b[1\"q");
+            if (!_currentProtected) builder.Append("\x1b[0\"q");
+        }
+    }
+
+    private void AppendCursorSnapshot(StringBuilder builder, in TerminalSnapshotExportOptions options)
+    {
+        int cursorColumn = _cursorCol;
+        TerminalRow row = _screen.GetRow(Math.Max(0, _screen.TotalRows - _screen.ViewportRows) + _cursorRow);
+        bool restoreWrap = _delayedWrap && cursorColumn == CursorRightLimit;
+        if (restoreWrap && cursorColumn > 0 && row.ReadOnlyCells[cursorColumn].Width == 0 && row.ReadOnlyCells[cursorColumn - 1].Width == 2)
+        {
+            cursorColumn--;
+        }
+
+        builder.Append("\x1b[")
+            .Append(_cursorRow - (options.Extras.IncludeModes && _originMode ? _scrollTop : 0) + 1)
+            .Append(';')
+            .Append(cursorColumn - (options.Extras.IncludeModes && _originMode ? _scrollLeft : 0) + 1)
+            .Append('H');
+
+        if (!restoreWrap)
+        {
+            return;
+        }
+
+        // CUP clears pending wrap; printing the complete edge cell restores it,
+        // including wide characters and graphemes, using normal parser behavior.
+        builder.Append("\x1b(B\x0F");
+        ManagedRichTextFormatter.AppendVtCell(_screen, builder, row.ReadOnlyCells[cursorColumn], options.Extras);
     }
 
     private void AppendPaletteSnapshot(StringBuilder builder)
@@ -1219,7 +959,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
             AppendMode(builder, ansi: false, 80, _sixelDisplayMode);
         }
 
-        AppendMode(builder, ansi: false, 1049, _inAltScreen);
         AppendMode(builder, ansi: false, 1004, FocusEventsEnabled);
         AppendMode(builder, ansi: false, 2004, _bracketedPaste);
         AppendMode(builder, ansi: false, 2031, _extendedDecModesEnabled.Contains(2031));
@@ -1280,157 +1019,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 .Append('G')
                 .Append("\x1bH");
         }
+
+        builder.Append("\x1b[H");
     }
 
-    private string BuildHtmlCellStyle(TerminalCell cell)
+
+    private void AppendStyledHyperlink(StringBuilder builder, int token)
     {
-        StringBuilder builder = new();
-
-        GetEffectiveHtmlColors(cell, out uint foreground, out uint background);
-        builder.Append("color:")
-            .Append(ToCssColor(foreground))
-            .Append(';');
-
-        if (cell.HasBackground || background != _screen.DefaultBackground || (cell.Attributes & CellAttributes.Inverse) != 0)
-        {
-            builder.Append("background-color:")
-                .Append(ToCssColor(background))
-                .Append(';');
-        }
-
-        if ((cell.Attributes & CellAttributes.Bold) != 0)
-        {
-            builder.Append("font-weight:bold;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Italic) != 0)
-        {
-            builder.Append("font-style:italic;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Dim) != 0)
-        {
-            builder.Append("opacity:0.7;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Hidden) != 0)
-        {
-            builder.Append("visibility:hidden;");
-        }
-
-        AppendHtmlTextDecorations(builder, cell);
-        return builder.ToString();
+        builder.Append("\x1b]8;");
+        if (_screen.TryGetHyperlink(token, out TerminalHyperlink? link) && link!.IsExplicit)
+            builder.Append("id=").Append(Encoding.UTF8.GetString(link.ExplicitId));
+        builder.Append(';');
+        if (_screen.TryGetHyperlinkUrl(token, out string? url)) builder.Append(url);
+        builder.Append("\x1b\\");
     }
 
-    private void AppendHtmlTextDecorations(StringBuilder builder, TerminalCell cell)
-    {
-        List<string> lines = [];
-        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
-        if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            lines.Add("underline");
-        }
-
-        if ((cell.Attributes & CellAttributes.Strikethrough) != 0)
-        {
-            lines.Add("line-through");
-        }
-
-        if ((cell.Decorations & CellDecorations.Overline) != 0)
-        {
-            lines.Add("overline");
-        }
-
-        if (lines.Count == 0)
-        {
-            return;
-        }
-
-        builder.Append("text-decoration-line:")
-            .Append(string.Join(' ', lines))
-            .Append(';');
-
-        if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            builder.Append("text-decoration-style:")
-                .Append(underlineStyle switch
-                {
-                    TerminalUnderlineStyle.Double => "double",
-                    TerminalUnderlineStyle.Curly => "wavy",
-                    TerminalUnderlineStyle.Dotted => "dotted",
-                    TerminalUnderlineStyle.Dashed => "dashed",
-                    _ => "solid",
-                })
-                .Append(';');
-        }
-
-        if (cell.HasUnderlineColor)
-        {
-            builder.Append("text-decoration-color:")
-                .Append(ToCssColor(cell.UnderlineColor))
-                .Append(';');
-        }
-    }
-
-    private void GetEffectiveHtmlColors(TerminalCell cell, out uint foreground, out uint background)
-    {
-        foreground = cell.Foreground;
-        background = cell.HasBackground ? cell.Background : _screen.DefaultBackground;
-
-        if ((cell.Attributes & CellAttributes.Inverse) != 0)
-        {
-            (foreground, background) = (background, foreground);
-        }
-    }
-
-    private static TerminalUnderlineStyle GetEffectiveUnderlineStyle(TerminalCell cell)
-    {
-        if (cell.UnderlineStyle != TerminalUnderlineStyle.None)
-        {
-            return cell.UnderlineStyle;
-        }
-
-        return (cell.Attributes & CellAttributes.Underline) != 0
-            ? TerminalUnderlineStyle.Single
-            : TerminalUnderlineStyle.None;
-    }
-
-    private static void CloseStyledHyperlink(StringBuilder builder, ref string? currentHyperlink)
-    {
-        if (string.IsNullOrEmpty(currentHyperlink))
-        {
-            return;
-        }
-
-        builder.Append("\x1b]8;;\x1b\\");
-        currentHyperlink = null;
-    }
-
-    private static void AppendRgbParameters(List<int> parameters, bool foreground, uint argb)
-    {
-        parameters.Add(foreground ? 38 : 48);
-        parameters.Add(2);
-        parameters.Add((int)((argb >> 16) & 0xFF));
-        parameters.Add((int)((argb >> 8) & 0xFF));
-        parameters.Add((int)(argb & 0xFF));
-    }
-
-    private static string ToCssColor(uint argb)
-    {
-        return string.Create(
-            7,
-            argb,
-            static (span, color) =>
-            {
-                span[0] = '#';
-                byte r = (byte)((color >> 16) & 0xFF);
-                byte g = (byte)((color >> 8) & 0xFF);
-                byte b = (byte)(color & 0xFF);
-                r.TryFormat(span[1..3], out _, "X2", CultureInfo.InvariantCulture);
-                g.TryFormat(span[3..5], out _, "X2", CultureInfo.InvariantCulture);
-                b.TryFormat(span[5..7], out _, "X2", CultureInfo.InvariantCulture);
-            });
-    }
 
     private static string ToOscRgb(uint argb)
     {
@@ -1454,28 +1057,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
             });
     }
 
-    private readonly record struct SnapshotCellStyleKey(
-        uint Foreground,
-        uint Background,
-        CellAttributes Attributes,
-        TerminalUnderlineStyle UnderlineStyle,
-        uint UnderlineColor,
-        bool HasUnderlineColor,
-        CellDecorations Decorations,
-        bool HasBackground);
-
-    private static SnapshotCellStyleKey CreateSnapshotStyleKey(TerminalCell cell)
-    {
-        return new SnapshotCellStyleKey(
-            cell.Foreground,
-            cell.Background,
-            cell.Attributes,
-            cell.UnderlineStyle,
-            cell.UnderlineColor,
-            cell.HasUnderlineColor,
-            cell.Decorations,
-            cell.HasBackground);
-    }
 
     private void EnterCsiState()
     {
@@ -1485,6 +1066,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _hasParam = false;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
+        _intermediateCount = 0;
+        _csiColonSeparators = 0;
     }
 
     private void EnterOscState()
@@ -1496,9 +1079,40 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void EnterDcsState()
     {
-        _state = ParserState.DcsString;
+        EnterCsiState(); // Parameter/intermediate storage is shared, never concurrent.
+        _state = ParserState.DcsEntry;
         _dcsBuffer.Clear();
+        _dcsBufferLimit = 0;
         _isDiscardingDcsPayload = false;
+    }
+
+    private void EnterApcState()
+    {
+        _state = ParserState.ApcString;
+        ResetApcCommand();
+    }
+
+    private void ResetApcCommand()
+    {
+        _apcBuffer.Clear();
+        _apcKittyRecognized = false;
+        _apcKittyParser = null;
+        _apcTruncated = false;
+        _apcGlyphRecognized = false;
+        _apcGlyphEnabled = false;
+    }
+
+    private void ProcessC1(byte value)
+    {
+        switch (value)
+        {
+            case 0x90: EnterDcsState(); break;
+            case 0x98: case 0x9E: case 0x9F: EnterApcState(); break;
+            case 0x9B: EnterCsiState(); break;
+            case 0x9D: EnterOscState(); break;
+            case 0x9C: _state = ParserState.Ground; break;
+            default: ProcessEscape((byte)(value - 0x40)); break;
+        }
     }
 
     #region Ground State
@@ -1508,18 +1122,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
         // Handle UTF-8 continuation bytes first
         if (_utf8Remaining > 0)
         {
-            if ((b & 0xC0) == 0x80) // Valid continuation byte
+            if (IsUtf8Continuation(b))
             {
                 _utf8Codepoint = (_utf8Codepoint << 6) | (b & 0x3F);
                 _utf8Remaining--;
+                _utf8NextMinimum = 0x80;
+                _utf8NextMaximum = 0xBF;
                 if (_utf8Remaining == 0)
-                    PutChar(_utf8Codepoint);
+                {
+                    // UTF-8 encoded C1 controls are ignored in ground state. This
+                    // matches Ghostty; raw high bytes in ground are UTF-8 input.
+                    if (_utf8Codepoint is < 0x80 or > 0x9F)
+                    {
+                        PutChar(_utf8Codepoint);
+                    }
+                }
             }
             else
             {
-                // Invalid continuation — reset and process this byte normally
+                // Replace the invalid prefix and retry this byte as UTF-8.
                 _utf8Remaining = 0;
-                ProcessGround(b);
+                PutChar(0xFFFD);
+                if (b >= 0x80) ProcessUtf8Lead(b);
+                else ProcessGround(b);
             }
             return;
         }
@@ -1530,41 +1155,25 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 _state = ParserState.Escape;
                 break;
 
-            case 0x9B: // C1 CSI
-                EnterCsiState();
-                break;
-
-            case 0x9D: // C1 OSC
-                EnterOscState();
-                break;
-
-            case 0x90: // C1 DCS
-                EnterDcsState();
-                break;
-
-            case 0x9C: // C1 ST
-                _state = ParserState.Ground;
-                break;
-
             case (byte)'\n': // LF
             case 0x0B:       // VT
             case 0x0C:       // FF
                 ResetDelayedWrap();
+                LineFeed(wrapForced: false);
                 if (_lineFeedNewLineMode)
                 {
-                    _cursorCol = 0;
+                    CarriageReturn();
                 }
-                LineFeed(wrapForced: false);
                 break;
 
             case (byte)'\r': // CR
                 ResetDelayedWrap();
-                _cursorCol = 0;
+                CarriageReturn();
                 break;
 
             case 0x08: // BS — Backspace
                 ResetDelayedWrap();
-                if (_cursorCol > 0) _cursorCol--;
+                _cursorCol = Math.Max(0, _cursorCol - 1);
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
@@ -1584,13 +1193,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 0x0E: // SO — Shift Out (activate G1)
-                _shiftOut = true;
-                _useLineDrawing = _g1IsLineDrawing;
+                _charsets.Invoke(1);
                 break;
 
             case 0x0F: // SI — Shift In (activate G0)
-                _shiftOut = false;
-                _useLineDrawing = _g0IsLineDrawing;
+                _charsets.Invoke(0);
                 break;
 
             default:
@@ -1600,36 +1207,54 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 }
                 else if (b < 0x80)
                 {
-                    // ASCII printable — check line-drawing mapping
-                    if (_useLineDrawing)
-                        PutChar(MapLineDrawing((char)b));
-                    else
-                        PutChar(b);
-                }
-                else if ((b & 0xE0) == 0xC0)
-                {
-                    _utf8Codepoint = b & 0x1F;
-                    _utf8Remaining = 1;
-                }
-                else if ((b & 0xF0) == 0xE0)
-                {
-                    _utf8Codepoint = b & 0x0F;
-                    _utf8Remaining = 2;
-                }
-                else if ((b & 0xF8) == 0xF0)
-                {
-                    _utf8Codepoint = b & 0x07;
-                    _utf8Remaining = 3;
+                    PutChar(b);
                 }
                 else
                 {
+                    ProcessUtf8Lead(b);
                 }
                 break;
         }
     }
 
+    private bool IsUtf8Continuation(byte value) => value >= _utf8NextMinimum && value <= _utf8NextMaximum;
+
+    private void ProcessUtf8Lead(byte value)
+    {
+        _utf8NextMinimum = 0x80;
+        _utf8NextMaximum = 0xBF;
+        if (value is >= 0xC2 and <= 0xDF)
+        {
+            _utf8Codepoint = value & 0x1F;
+            _utf8Remaining = 1;
+        }
+        else if (value is >= 0xE0 and <= 0xEF)
+        {
+            _utf8Codepoint = value & 0x0F;
+            _utf8Remaining = 2;
+            if (value == 0xE0) _utf8NextMinimum = 0xA0; // No overlong scalars.
+            if (value == 0xED) _utf8NextMaximum = 0x9F; // No UTF-16 surrogates.
+        }
+        else if (value is >= 0xF0 and <= 0xF4)
+        {
+            _utf8Codepoint = value & 7;
+            _utf8Remaining = 3;
+            if (value == 0xF0) _utf8NextMinimum = 0x90;
+            if (value == 0xF4) _utf8NextMaximum = 0x8F; // U+10FFFF upper bound.
+        }
+        else
+        {
+            _utf8Codepoint = 0;
+            PutChar(0xFFFD);
+        }
+    }
+
     private void PutChar(int codepoint)
     {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+        // Ghostty currently suppresses printable output to the unsupported
+        // status line; controls and parser state still advance normally.
+        if (_statusDisplay != 0) return;
         ClampCursor();
 
         if (!Rune.IsValid(codepoint))
@@ -1637,24 +1262,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        // If we're sitting at wrapped EOL, a combining/emoji continuation should
-        // still be allowed to merge into the previous cell before forcing a wrap.
-        bool shouldAttemptGraphemeAppend = ShouldAttemptGraphemeAppend(codepoint);
-        if (_delayedWrap &&
-            shouldAttemptGraphemeAppend &&
-            TryAppendToPreviousCellGrapheme(codepoint))
+        bool graphemeClusters = _extendedDecModesEnabled.Contains(2027);
+        // The byte-sized fast path never joins a grapheme in Ghostty's printer.
+        // Zero-width and cluster continuations must be considered before wrapping.
+        if (graphemeClusters && codepoint > 255 && _cursorCol > 0 &&
+            ShouldAttemptGraphemeAppend(codepoint) && TryAppendToPreviousCellGrapheme(codepoint, useBoundaries: true))
         {
             return;
+        }
+
+        int width = codepoint <= 255 ? 1 : TerminalCellWidthCalculator.GetCodepointWidth(codepoint);
+        if (width == 0)
+        {
+            if (!graphemeClusters) TryAppendToPreviousCellGrapheme(codepoint, useBoundaries: false);
+            return;
+        }
+
+        // Ghostty prints an empty narrow cell when a terminal cannot fit any
+        // wide glyph. Preserve normal delayed-wrap behavior for that cell.
+        if (width == 2 && _screen.Columns == 1)
+        {
+            codepoint = 0;
+            width = 1;
         }
 
         if (ConsumeDelayedWrapBeforePrint())
         {
             ClampCursor();
-        }
-
-        if (shouldAttemptGraphemeAppend && TryAppendToPreviousCellGrapheme(codepoint))
-        {
-            return;
         }
 
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
@@ -1664,21 +1298,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
         if (_cursorCol >= row.Columns) return;
         ClearPreservedCellsForMutation(row);
 
-        int width = TerminalCellWidthCalculator.GetCellWidth(codepoint);
-        width = width <= 1 ? 1 : 2;
-
-        if (width == 2 && _cursorCol == _screen.Columns - 1)
+        if (width == 2 && _cursorCol == CursorRightLimit)
         {
             if (_autoWrap)
             {
+                ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, 1);
+                ClearCellAndWideArtifacts(row, _cursorCol);
+                bool atScreenEdge = _cursorCol == _screen.Columns - 1;
+                WriteCellFromPen(row, _cursorCol, 0, atScreenEdge ? (byte)0 : (byte)1);
+                row[_cursorCol].IsWideSpacerHead = atScreenEdge;
+                row.IsDirty = true;
                 ResetDelayedWrap();
-                _cursorCol = 0;
-                LineFeed(wrapForced: true);
+                LineFeed(wrapForced: atScreenEdge, softWrap: true);
+                _cursorCol = _scrollLeft;
                 ClampCursor();
             }
             else
             {
-                width = 1;
+                return;
             }
 
             if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
@@ -1701,17 +1338,35 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, width);
+        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2 &&
+            !(_cursorCol == 0 && width == 2)) ClearPreviousWideSpacerHead();
         ClearCellAndWideArtifacts(row, _cursorCol);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
             ClearCellAndWideArtifacts(row, _cursorCol + 1);
         }
 
-        ref var cell = ref row[_cursorCol];
-        cell.Codepoint = codepoint;
+        WriteCellFromPen(row, _cursorCol, codepoint, (byte)width);
+        if (width == 2 && _cursorCol + 1 < row.Columns)
+        {
+            WriteCellFromPen(row, _cursorCol + 1, 0, 0);
+        }
+
+        row.IsDirty = true;
+        AdvanceCursorAfterGraphic(width);
+        _lastGraphicCodepoint = codepoint;
+    }
+
+    private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
+    {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+        cell.Codepoint = _charsets.MapPrintedCell(codepoint);
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
+        cell.ForegroundIdentity = GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg);
+        cell.BackgroundIdentity = GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg);
+        cell.UnderlineIdentity = _currentUnderlineIdentity;
         cell.Attributes = _currentAttrs;
         cell.UnderlineStyle = _currentUnderlineStyle;
         cell.UnderlineColor = _currentUnderlineColor;
@@ -1719,87 +1374,30 @@ public sealed class BasicVtProcessor : IVtProcessor,
         cell.Decorations = _currentDecorations;
         cell.HasBackground = true;
         cell.HyperlinkId = _currentHyperlinkId;
-        cell.Width = (byte)width;
-
-        if (width == 2 && _cursorCol + 1 < row.Columns)
-        {
-            ref TerminalCell spacer = ref row[_cursorCol + 1];
-            spacer.Codepoint = 0;
-            spacer.Grapheme = null;
-            spacer.Foreground = _currentFg;
-            spacer.Background = _currentBg;
-            spacer.Attributes = _currentAttrs;
-            spacer.UnderlineStyle = _currentUnderlineStyle;
-            spacer.UnderlineColor = _currentUnderlineColor;
-            spacer.HasUnderlineColor = _currentHasUnderlineColor;
-            spacer.Decorations = _currentDecorations;
-            spacer.HasBackground = true;
-            spacer.HyperlinkId = _currentHyperlinkId;
-            spacer.Width = 0;
-        }
-
-        row.IsDirty = true;
-
-        AdvanceCursorAfterGraphic(width);
-        _lastGraphicCodepoint = codepoint;
+        cell.Width = width;
+        cell.IsWideSpacerHead = false;
+        cell.IsProtected = _currentProtected;
+        cell.SemanticContent = CurrentSemanticPen.Content;
     }
 
-    private static bool ShouldAttemptGraphemeAppend(int codepoint)
+    private bool ShouldAttemptGraphemeAppend(int codepoint)
     {
-        if (!Rune.IsValid(codepoint))
-        {
-            return false;
-        }
-
-        if (codepoint == ZeroWidthJoinerCodepoint ||
-            codepoint == CombiningKeycapCodepoint ||
-            IsVariationSelector(codepoint) ||
-            IsEmojiModifier(codepoint) ||
-            IsRegionalIndicator(codepoint) ||
-            IsEmojiTag(codepoint) ||
-            IsDefaultEmojiPresentation(codepoint) ||
-            IsLegacyEmojiPresentation(codepoint))
+        if (!Rune.IsValid(codepoint)) return false;
+        Codepoint value = new((uint)codepoint);
+        if (value.GraphemeBreakClass is not (GraphemeBreakClass.Other or
+            GraphemeBreakClass.Control or GraphemeBreakClass.CR or GraphemeBreakClass.LF) ||
+            value.IndicConjunctBreakClass == IndicConjunctBreakClass.Consonant)
         {
             return true;
         }
 
-        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(codepoint);
-        return category is UnicodeCategory.NonSpacingMark or
-            UnicodeCategory.SpacingCombiningMark or
-            UnicodeCategory.EnclosingMark or
-            UnicodeCategory.Format;
+        // GB9b permits any printable scalar after a prepend. The previous base
+        // remains the first scalar when suffixes are appended to its cell.
+        return _lastGraphicCodepoint > 0 &&
+            new Codepoint((uint)_lastGraphicCodepoint).GraphemeBreakClass == GraphemeBreakClass.Prepend;
     }
 
-    private static bool IsVariationSelector(int codepoint)
-        => (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
-           (codepoint >= 0xE0100 && codepoint <= 0xE01EF);
-
-    private static bool IsEmojiModifier(int codepoint)
-        => codepoint >= 0x1F3FB && codepoint <= 0x1F3FF;
-
-    private static bool IsRegionalIndicator(int codepoint)
-        => codepoint >= 0x1F1E6 && codepoint <= 0x1F1FF;
-
-    private static bool IsEmojiTag(int codepoint)
-        => codepoint >= 0xE0020 && codepoint <= 0xE007F;
-
-    private static bool IsDefaultEmojiPresentation(int codepoint)
-        => codepoint >= 0x1F300 && codepoint <= 0x1FAFF;
-
-    private static bool IsLegacyEmojiPresentation(int codepoint)
-        => codepoint is 0x00A9 or 0x00AE or 0x203C or 0x2049 or 0x2122 or 0x2139 or 0x2328 or 0x23CF or 0x24C2 or
-               0x25B6 or 0x25C0 or 0x3030 or 0x303D or 0x3297 or 0x3299 ||
-           (codepoint >= 0x2194 && codepoint <= 0x21AA) ||
-           (codepoint >= 0x231A && codepoint <= 0x231B) ||
-           (codepoint >= 0x23E9 && codepoint <= 0x23F3) ||
-           (codepoint >= 0x23F8 && codepoint <= 0x23FA) ||
-           (codepoint >= 0x25AA && codepoint <= 0x25AB) ||
-           (codepoint >= 0x25FB && codepoint <= 0x25FE) ||
-           (codepoint >= 0x2600 && codepoint <= 0x27BF) ||
-           (codepoint >= 0x2934 && codepoint <= 0x2935) ||
-           (codepoint >= 0x2B05 && codepoint <= 0x2B55);
-
-    private bool TryAppendToPreviousCellGrapheme(int codepoint)
+    private bool TryAppendToPreviousCellGrapheme(int codepoint, bool useBoundaries)
     {
         if (!Rune.IsValid(codepoint))
         {
@@ -1807,12 +1405,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         int targetRowIndex = _cursorRow;
-        int targetColIndex = _delayedWrap ? _cursorCol : _cursorCol - 1;
-
-        if (targetColIndex < 0)
+        int targetColIndex = _autoWrap && _delayedWrap ? _cursorCol : _cursorCol - 1;
+        if (useBoundaries && !_autoWrap && _cursorCol == CursorRightLimit &&
+            _screen.GetViewportRow(_cursorRow).ReadOnlyCells[_cursorCol].HasContent)
         {
-            targetRowIndex--;
-            targetColIndex = _screen.Columns - 1;
+            targetColIndex = _cursorCol;
         }
 
         if (targetRowIndex < 0 || targetRowIndex >= _screen.ViewportRows)
@@ -1821,7 +1418,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         TerminalRow targetRow = _screen.GetViewportRow(targetRowIndex);
-        while (targetColIndex >= 0 && targetRow[targetColIndex].Width == 0)
+        while (targetColIndex >= 0 && targetRow.ReadOnlyCells[targetColIndex].Width == 0 &&
+            !targetRow.ReadOnlyCells[targetColIndex].IsWideSpacerHead)
         {
             targetColIndex--;
         }
@@ -1831,13 +1429,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        ref TerminalCell targetCell = ref targetRow[targetColIndex];
+        TerminalCell targetCell = targetRow.ReadOnlyCells[targetColIndex];
         if (!targetCell.HasContent)
         {
             return false;
         }
 
-        string currentText;
+        Span<char> singleCodepoint = stackalloc char[2];
+        scoped ReadOnlySpan<char> currentText;
         if (string.IsNullOrEmpty(targetCell.Grapheme))
         {
             if (!Rune.IsValid(targetCell.Codepoint))
@@ -1845,57 +1444,74 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 return false;
             }
 
-            currentText = char.ConvertFromUtf32(targetCell.Codepoint);
+            int length = new Rune(targetCell.Codepoint).EncodeToUtf16(singleCodepoint);
+            currentText = singleCodepoint[..length];
         }
         else
         {
             currentText = targetCell.Grapheme;
         }
 
-        string nextText = string.Concat(currentText, char.ConvertFromUtf32(codepoint));
-        if (!TerminalCellWidthCalculator.IsSingleGrapheme(nextText))
+        int oldWidth = targetCell.Width <= 0 ? 1 : targetCell.Width;
+        int newWidth = oldWidth;
+        if (useBoundaries)
         {
-            return false;
+            if (!TerminalCellWidthCalculator.TryGetAppendedGraphemeWidth(currentText, codepoint, oldWidth, out newWidth, out bool ignored)) return false;
+            if (ignored) return true;
+        }
+        else if (codepoint is 0xFE0E or 0xFE0F)
+        {
+            Codepoint first = new((uint)targetCell.Codepoint);
+            if (first.GraphemeBreakClass != GraphemeBreakClass.ExtendedPictographic || first.IsEmojiModifierBase) return true;
         }
 
-        int oldWidth = targetCell.Width <= 0 ? 1 : targetCell.Width;
-        int newWidth = TerminalCellWidthCalculator.GetCellWidth(nextText);
+        // Ghostty retains the base plus at most 64 suffix codepoints. Keep
+        // excess combining input attached (and ignored), rather than printing
+        // it into another cell or allowing an unbounded per-cell allocation.
+        int codepointCount = 0;
+        foreach (Rune _ in currentText.EnumerateRunes())
+        {
+            codepointCount++;
+        }
+        if (codepointCount >= TerminalGraphemeStorage.MaximumCodepoints)
+        {
+            return true;
+        }
+
         newWidth = newWidth <= 1 ? 1 : 2;
 
-        if (newWidth == 2 && targetColIndex >= targetRow.Columns - 1)
+        if (newWidth == 2 && targetColIndex >= CursorRightLimit)
         {
-            return false;
+            if (!_autoWrap || _screen.Columns < 2) return true;
+            WidenGraphemeAcrossWrap(targetRow, targetRowIndex, targetColIndex, in targetCell, codepoint);
+            return true;
         }
 
         ClearPreservedCellsForMutation(targetRow);
         ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, Math.Max(oldWidth, newWidth));
 
+        using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(targetRow);
+
         targetCell.Codepoint = targetCell.Codepoint != 0
             ? targetCell.Codepoint
             : codepoint;
-        targetCell.Grapheme = nextText;
+        Span<char> suffix = stackalloc char[2];
+        int suffixLength = new Rune(codepoint).EncodeToUtf16(suffix);
         targetCell.Width = (byte)newWidth;
 
-        if (newWidth == 2)
+        if (newWidth == 2 && oldWidth == 1)
         {
-            ref TerminalCell spacer = ref targetRow[targetColIndex + 1];
-            spacer.Codepoint = 0;
-            spacer.Grapheme = null;
-            spacer.Foreground = targetCell.Foreground;
-            spacer.Background = targetCell.Background;
-            spacer.Attributes = targetCell.Attributes;
-            spacer.UnderlineStyle = targetCell.UnderlineStyle;
-            spacer.UnderlineColor = targetCell.UnderlineColor;
-            spacer.HasUnderlineColor = targetCell.HasUnderlineColor;
-            spacer.Decorations = targetCell.Decorations;
-            spacer.HasBackground = targetCell.HasBackground;
-            spacer.HyperlinkId = targetCell.HyperlinkId;
-            spacer.Width = 0;
+            WriteCellFromPen(targetRow, targetColIndex + 1, 0, 0);
         }
 
         if (oldWidth == 2 && newWidth == 1 && targetColIndex + 1 < targetRow.Columns)
         {
-            targetRow[targetColIndex + 1] = TerminalCell.Empty(targetCell.Foreground, targetCell.Background);
+            targetRow[targetColIndex + 1].Width = 1;
+            if (targetRowIndex == _cursorRow)
+            {
+                _delayedWrap = false;
+                _cursorCol = Math.Min(targetColIndex + 1, CursorRightLimit);
+            }
         }
 
         if (!_delayedWrap && targetRowIndex == _cursorRow && targetColIndex + oldWidth == _cursorCol)
@@ -1903,6 +1519,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
             _cursorCol = targetColIndex + newWidth;
         }
 
+        // Ghostty writes a newly widened spacer before appending the suffix;
+        // that write can itself replace the page. Keep the old grapheme live
+        // until those edits complete, then use the coordinator's current page.
+        // Width/tail/cursor changes precede the fallible append in Ghostty.
+        // Keep those edits but leave the previous text intact if it is refused.
+        if (metadata.TryAppendGrapheme(targetColIndex))
+            targetCell.Grapheme = string.Concat(currentText, suffix[..suffixLength]);
+        targetRow[targetColIndex] = targetCell;
         targetRow.IsDirty = true;
         return true;
     }
@@ -1920,22 +1544,23 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        _cursorCol = 0;
-        LineFeed(wrapForced: true);
+        LineFeed(wrapForced: _cursorCol == _screen.Columns - 1, softWrap: true);
+        _cursorCol = _scrollLeft;
         return true;
     }
 
     private void AdvanceCursorAfterGraphic(int width)
     {
         int nextColumn = _cursorCol + Math.Max(1, width);
-        if (_autoWrap && nextColumn >= _screen.Columns)
+        int right = CursorRightLimit;
+        if (_autoWrap && nextColumn > right)
         {
-            _cursorCol = Math.Max(0, _screen.Columns - 1);
+            _cursorCol = right;
             _delayedWrap = true;
             return;
         }
 
-        _cursorCol = Math.Min(nextColumn, Math.Max(0, _screen.Columns - 1));
+        _cursorCol = Math.Min(nextColumn, right);
         _delayedWrap = false;
     }
 
@@ -1951,25 +1576,44 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        TerminalCell existing = row[column];
+        using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        TerminalCell existing = row.ReadOnlyCells[column];
         if (existing.Width == 0 && column > 0)
         {
-            ref TerminalCell left = ref row[column - 1];
+            TerminalCell left = row.ReadOnlyCells[column - 1];
             if (left.Width == 2)
             {
-                left = TerminalCell.Empty(_currentFg, _currentBg);
+                styles.Clear(column - 1, 1);
+                row[column - 1] = CreateErasedCell();
             }
         }
         else if (existing.Width == 2 && column + 1 < row.Columns)
         {
-            ref TerminalCell right = ref row[column + 1];
+            TerminalCell right = row.ReadOnlyCells[column + 1];
             if (right.Width == 0)
             {
-                right = TerminalCell.Empty(_currentFg, _currentBg);
+                styles.Clear(column + 1, 1);
+                row[column + 1] = CreateErasedCell();
             }
         }
 
-        row[column] = TerminalCell.Empty(_currentFg, _currentBg);
+        styles.Clear(column, 1);
+        row[column] = CreateErasedCell();
+    }
+
+    private void ClearPreviousWideSpacerHead()
+        => ClearWideSpacerHeadAt(_cursorRow - 1);
+
+    private void ClearWideSpacerHeadAt(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _screen.ViewportRows) return;
+        TerminalRow previous = _screen.GetViewportRow(rowIndex);
+        if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
+        using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(previous);
+        ref TerminalCell head = ref previous[previous.Columns - 1];
+        head.IsWideSpacerHead = false;
+        head.Width = 1;
+        previous.IsDirty = true;
     }
 
     private void ClampCursor()
@@ -1986,45 +1630,54 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void LineFeed(bool wrapForced)
+    private void LineFeed(bool wrapForced, bool softWrap = false)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
         {
-            _screen.GetViewportRow(_cursorRow).WrapsToNext = wrapForced;
+            if (wrapForced) _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
         }
 
-        if (_cursorRow == _scrollBottom)
+        if (_cursorRow == _scrollBottom && CursorInsideHorizontalMargins)
         {
             // At bottom of scroll region — scroll the region up
-            ScrollUpInRegion();
+            ScrollRegion(1, down: false, index: true);
         }
-        else if (_cursorRow < _screen.ViewportRows - 1)
+        else if (_cursorRow < _screen.ViewportRows - 1 && _cursorRow != _scrollBottom)
         {
             _cursorRow++;
         }
-        else
+        AdvanceSemanticLine(softWrap || wrapForced);
+        if (wrapForced)
         {
-            // Below scroll region — scroll the whole screen
-            ScrollUpInRegion();
+            TerminalRow row = _screen.GetViewportRow(_cursorRow);
+            row.IsWrapContinuation = true;
+            row.IsDirty = true;
         }
     }
 
     private void ReverseIndex()
     {
-        if (_cursorRow == _scrollTop)
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
+        if (_cursorRow == _scrollTop && CursorInsideHorizontalMargins)
         {
             // At top of scroll region — scroll region down
             ScrollDownInRegion();
         }
-        else if (_cursorRow > 0)
+        else
         {
-            _cursorRow--;
+            // Native RI preserves pending wrap when it scrolls, but the CUU
+            // fallback clears it even if the cursor is already on row zero.
+            ResetDelayedWrap();
+            if (_cursorRow > 0)
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - 1);
         }
     }
 
     private void TabForward()
     {
-        for (var c = _cursorCol + 1; c < _screen.Columns; c++)
+        if (_cursorCol >= RightMargin) return;
+        for (var c = _cursorCol + 1; c <= RightMargin; c++)
         {
             if (_tabStops.Contains(c))
             {
@@ -2032,61 +1685,175 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 return;
             }
         }
-        _cursorCol = _screen.Columns - 1;
+        _cursorCol = RightMargin;
     }
 
     #endregion
 
     #region Scroll Region Operations
 
-    private void ScrollUpInRegion()
+    private void ScrollUpInRegion(int count = 1) => ScrollRegion(count, down: false);
+
+    private void ScrollDownInRegion(int count = 1) => ScrollRegion(count, down: true);
+
+    private void ScrollRegion(int count, bool down, bool index = false)
     {
-        if (_scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1 && !_inAltScreen)
+        count = Math.Clamp(count, 1, _scrollBottom - _scrollTop + 1);
+        int oldColumn = _cursorCol, oldRow = _cursorRow;
+        bool oldWrap = _delayedWrap;
+        bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !_inAltScreen;
+        bool rotate = !down && !HasHorizontalMargins &&
+            (index || _inAltScreen && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
+        bool imageMargins = _scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins;
+        bool adjustImages = _kittyStore.PlacementCount > 0 && (imageMargins || down || rotate && !history);
+        ulong revision = _kittyStore.Revision;
+        if (adjustImages && imageMargins)
+            _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
+                (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
+                windowShift: !down && _scrollTop == 0 && !_inAltScreen && !HasHorizontalMargins,
+                left: _scrollLeft, right: RightMargin);
+        else if (adjustImages)
+            _kittyStore.BeginPinScroll(_screen, down ? 0 : -count, index && _screen.ViewportRows > 1);
+        try
         {
-            // Whole-screen scroll — push to scrollback
-            _screen.AddRow();
-            _screen.InvalidateViewport();
+            // SU/SD use a temporary cursor; page entry can grow metadata or
+            // degrade the pen/link even when the visible position is restored.
+            // Full-width IND instead rotates under its existing bottom cursor.
+            if (!index || HasHorizontalMargins)
+            {
+                _cursorCol = _scrollLeft;
+                _cursorRow = history || rotate ? _scrollBottom : _scrollTop;
+            }
+            RecordSnapshotCursorStyle();
+            if (HasHorizontalMargins)
+            {
+                ScrollRectangle(_scrollTop, _scrollBottom, count, down);
+                return;
+            }
+            if (history)
+            {
+                // Native cursorScrollAbove also creates history one row at a
+                // time. Do not turn this into a destructive in-place shift.
+                for (int i = 0; i < count; i++) ScrollIntoHistoryOneRow();
+            }
+            else if (rotate)
+            {
+                for (int i = 0; i < count; i++) RotateScrollRegionUpOneRow();
+            }
+            else ShiftFullWidthRows(_scrollTop, _scrollBottom, count, down);
         }
-        else
+        catch (OutOfMemoryException failure)
         {
-            // Scroll within region: shift rows up, insert blank at bottom of region
-            _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: -1);
-            for (var r = _scrollTop; r < _scrollBottom && r < _screen.ViewportRows - 1; r++)
+            _screen.RecordSnapshotMutationFailure(failure);
+            throw;
+        }
+        finally
+        {
+            try
             {
-                var src = _screen.GetViewportRow(r + 1);
-                var dst = _screen.GetViewportRow(r);
-                CopyRow(src, dst);
-                dst.IsDirty = true;
+                if (adjustImages) _kittyStore.EndMarginScroll(_screen);
             }
-            if (_scrollBottom < _screen.ViewportRows)
+            finally
             {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
+                _cursorCol = oldColumn;
+                _cursorRow = oldRow;
+                _delayedWrap = oldWrap;
+                // A fatal copy already latched its failure: do not allocate
+                // or mask that exception while restoring cursor coordinates.
+                try { RecordSnapshotCursorStyle(); }
+                catch (OutOfMemoryException failure)
+                {
+                    _screen.RecordSnapshotMutationFailure(failure);
+                    throw;
+                }
             }
-            _screen.InvalidateViewport();
+            if (adjustImages && !_screen.SnapshotMutationFailed && _kittyStore.Revision != revision) PublishKittyGraphics();
         }
     }
 
-    private void ScrollDownInRegion()
+    private void ScrollIntoHistoryOneRow()
     {
-        // Shift rows down within the scroll region, insert blank at top of region
-        _screen.ShiftRasterGraphicsInViewportRows(_scrollTop, _scrollBottom, rowDelta: 1);
-        for (var r = _scrollBottom; r > _scrollTop && r > 0; r--)
+        // A top-origin region creates history even with a bottom margin.
+        TerminalRow added = _screen.AddRow();
+        // Growth may cross/recycle a page. Migrate before painting its blank
+        // row, and before another iteration can leave this intermediate page.
+        RecordSnapshotCursorStyle();
+        if (_scrollBottom < _screen.ViewportRows - 1)
+            RotateHistorySuffixDownOneRow(added);
+        else if (_currentBgKind != SgrColorKind.Default)
+            ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
+        _screen.InvalidateViewport();
+    }
+
+    private void ShiftFullWidthRows(int top, int bottom, int count, bool down)
+    {
+        // Ghostty IL/DL traverse once, directly from count rows away. Repeated
+        // one-row copies can spuriously grow a page for discarded content, or
+        // even fault an operation which only needs to clear its entire region.
+        count = Math.Clamp(count, 1, bottom - top + 1);
+        _screen.ShiftAnchorsInViewportRows(top, bottom, down ? count : -count);
+        _screen.ShiftRasterGraphicsInViewportRows(top, bottom, down ? count : -count);
+        for (int index = 0; index <= bottom - top; index++)
         {
-            var src = _screen.GetViewportRow(r - 1);
-            var dst = _screen.GetViewportRow(r);
-            CopyRow(src, dst);
-            dst.IsDirty = true;
-        }
-        if (_scrollTop < _screen.ViewportRows)
-        {
-            _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg);
+            int destination = down ? bottom - index : top + index;
+            int source = destination + (down ? -count : count);
+            TerminalRow row = _screen.GetViewportRow(destination);
+            if (source >= top && source <= bottom) CopyRow(_screen.GetViewportRow(source), row);
+            else
+            {
+                // A preceding cross-page copy may have defaulted the cursor
+                // pen during growth. Erase using that accepted pen, not the
+                // stale background from the start of the command.
+                if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+                ClearRow(row, _currentFg, _currentBg, CurrentBackgroundIdentity);
+            }
+            row.IsDirty = true;
         }
         _screen.InvalidateViewport();
     }
 
-    private void CopyRow(TerminalRow src, TerminalRow dst)
+    private void CopyRow(TerminalRow src, TerminalRow dst, bool preserveWrap = false)
     {
-        dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        try { CopyRowCore(src, dst, preserveWrap); }
+        catch (OutOfMemoryException failure)
+        {
+            _screen.RecordSnapshotMutationFailure(failure);
+            throw;
+        }
+    }
+
+    private void CopyRowCore(TerminalRow src, TerminalRow dst, bool preserveWrap)
+    {
+        if (!preserveWrap) ClearPreservedCellsForMutation(src);
+        ClearPreservedCellsForMutation(dst);
+        using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(src);
+        using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(dst);
+        bool swap = destinationStyles.ShiftFrom(sourceStyles, 0, Math.Min(src.Columns, dst.Columns));
+        destinationStyles.Clear(Math.Min(src.Columns, dst.Columns), dst.PreservedColumns - Math.Min(src.Columns, dst.Columns));
+        if (!preserveWrap)
+        {
+            src.WrapsToNext = false;
+            src.IsWrapContinuation = false;
+            dst.WrapsToNext = false;
+            dst.IsWrapContinuation = false;
+        }
+        if (swap)
+        {
+            (src.WrapsToNext, dst.WrapsToNext) = (dst.WrapsToNext, src.WrapsToNext);
+            (src.IsWrapContinuation, dst.IsWrapContinuation) = (dst.IsWrapContinuation, src.IsWrapContinuation);
+            dst.SwapActiveStorage(src);
+        }
+        else dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        // PageList row rotation clones whole rows, including real-edge wide
+        // spacers and wrap metadata. IL/DL intentionally break those links.
+        if (preserveWrap) return;
+        dst.WrapsToNext = false;
+        dst.IsWrapContinuation = false;
+        if (dst.ReadOnlyCells[^1].IsWideSpacerHead)
+        {
+            dst[dst.Columns - 1].IsWideSpacerHead = false;
+            dst[dst.Columns - 1].Width = 1;
+        }
         NormalizeRowWideCells(dst);
     }
 
@@ -2096,6 +1863,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ProcessEscape(byte b)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
+        if (b is >= 0x20 and <= 0x2F)
+        {
+            _intermediateChar = (char)b;
+            _intermediateCount = 1;
+            _state = ParserState.EscapeIntermediate;
+            return;
+        }
+        if (b >= 0x80) return;
         switch (b)
         {
             case (byte)'[': // CSI
@@ -2110,19 +1886,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 EnterDcsState();
                 break;
 
-            case (byte)'(': // Designate G0 charset
-                _intermediateChar = '(';
-                _state = ParserState.EscapeIntermediate;
+            case (byte)'X': // SOS
+            case (byte)'^': // PM
+            case (byte)'_': // APC
+                EnterApcState();
                 break;
 
-            case (byte)')': // Designate G1 charset
-                _intermediateChar = ')';
-                _state = ParserState.EscapeIntermediate;
+
+            case (byte)'N': _charsets.Invoke(2, single: true); _state = ParserState.Ground; break;
+            case (byte)'O': _charsets.Invoke(3, single: true); _state = ParserState.Ground; break;
+            case (byte)'n': _charsets.Invoke(2); _state = ParserState.Ground; break;
+            case (byte)'o': _charsets.Invoke(3); _state = ParserState.Ground; break;
+            case (byte)'~': _charsets.Invoke(1, right: true); _state = ParserState.Ground; break;
+            case (byte)'}': _charsets.Invoke(2, right: true); _state = ParserState.Ground; break;
+            case (byte)'|': _charsets.Invoke(3, right: true); _state = ParserState.Ground; break;
+
+            case (byte)'V': // SPA — Start of guarded area
+                SetCharacterProtection(CharacterProtectionMode.Iso);
+                _state = ParserState.Ground;
                 break;
 
-            case (byte)'*': // Designate G2 charset
-            case (byte)'+': // Designate G3 charset
-                _state = ParserState.EscapeIntermediate;
+            case (byte)'W': // EPA — End of guarded area
+                SetCharacterProtection(CharacterProtectionMode.Off);
+                _state = ParserState.Ground;
                 break;
 
             case (byte)'7': // DECSC — Save cursor
@@ -2143,13 +1929,12 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             case (byte)'E': // NEL — Next line
                 ResetDelayedWrap();
-                _cursorCol = 0;
+                CarriageReturn();
                 LineFeed(wrapForced: false);
                 _state = ParserState.Ground;
                 break;
 
             case (byte)'M': // RI — Reverse index
-                ResetDelayedWrap();
                 ReverseIndex();
                 _state = ParserState.Ground;
                 break;
@@ -2159,8 +1944,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 _state = ParserState.Ground;
                 break;
 
+            case (byte)'Z': // DECID — Same report as primary device attributes.
+                ResponseCallback?.Invoke(GetPrimaryDeviceAttributesResponse());
+                _state = ParserState.Ground;
+                break;
+
             case (byte)'c': // RIS — Full reset
-                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearViewport);
+                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll);
+                ProgressReportCallback?.Invoke(new TerminalProgressReport(TerminalProgressState.Remove, null));
                 _state = ParserState.Ground;
                 break;
 
@@ -2185,21 +1976,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ProcessEscapeIntermediate(byte b)
     {
-        // Designate character set
-        if (_intermediateChar == '(')
-        {
-            // G0
-            _g0IsLineDrawing = (b == (byte)'0');
-            if (!_shiftOut)
-                _useLineDrawing = _g0IsLineDrawing;
-        }
-        else if (_intermediateChar == ')')
-        {
-            // G1
-            _g1IsLineDrawing = (b == (byte)'0');
-            if (_shiftOut)
-                _useLineDrawing = _g1IsLineDrawing;
-        }
+        if (b is >= 0x20 and <= 0x2F) { _intermediateCount = Math.Min(5, _intermediateCount + 1); return; }
+        if (b >= 0x80) return;
+        if (_intermediateCount > 1) { _state = ParserState.Ground; return; }
+        int slot = _intermediateChar switch { '(' => 0, ')' => 1, '*' => 2, '+' => 3, _ => -1 };
+        if (slot >= 0) _charsets.Designate(slot, b);
 
         _state = ParserState.Ground;
     }
@@ -2218,21 +1999,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
         else if (b == (byte)';')
         {
-            _params.Add(0);
+            AddCsiParameter(colon: false);
             _state = ParserState.CsiParam;
         }
-        else if (b == (byte)'?' || b == (byte)'>' || b == (byte)'!' || b == (byte)'=' || b == (byte)'<')
+        else if (b is >= 0x3C and <= 0x3F)
         {
             _csiPrivateMarker = (char)b;
             _state = ParserState.CsiParam;
         }
+        else if (b is >= 0x20 and <= 0x2F)
+        {
+            _intermediateChar = (char)b;
+            _intermediateCount = 1;
+            _state = ParserState.CsiIntermediate;
+        }
+        else if (b == ':') _state = ParserState.CsiIgnore;
         else if (b is >= 0x40 and <= 0x7E)
         {
             ExecuteCsi((char)b);
-        }
-        else
-        {
-            _state = ParserState.Ground;
         }
     }
 
@@ -2240,36 +2024,32 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         if (b is >= (byte)'0' and <= (byte)'9')
         {
-            _currentParam = _currentParam * 10 + (b - '0');
+            _currentParam = Math.Min(ushort.MaxValue, _currentParam * 10 + (b - '0'));
             _hasParam = true;
         }
-        else if (b == (byte)';')
+        else if (b is (byte)';' or (byte)':')
         {
-            _params.Add(_hasParam ? _currentParam : 0);
-            _currentParam = 0;
-            _hasParam = false;
+            AddCsiParameter(colon: b == ':');
         }
         else if (b is >= 0x20 and <= 0x2F)
         {
             if (_hasParam)
             {
-                _params.Add(_currentParam);
-                _currentParam = 0;
-                _hasParam = false;
+                AddCsiParameter(colon: false, final: true);
             }
+            if (_state == ParserState.CsiIgnore) return;
             _intermediateChar = (char)b;
+            _intermediateCount = 1;
             _state = ParserState.CsiIntermediate;
         }
         else if (b is >= 0x40 and <= 0x7E)
         {
             if (_hasParam)
-                _params.Add(_currentParam);
+                AddCsiParameter(colon: false, final: true);
+            if (_state == ParserState.CsiIgnore) { _state = ParserState.Ground; return; }
             ExecuteCsi((char)b);
         }
-        else
-        {
-            _state = ParserState.Ground;
-        }
+        else if (b is >= 0x3C and <= 0x3F) _state = ParserState.CsiIgnore;
     }
 
     private void ProcessCsiIntermediate(byte b)
@@ -2280,86 +2060,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
         else if (b is >= 0x20 and <= 0x2F)
         {
-            // More intermediates — ignore
+            _intermediateCount = Math.Min(5, _intermediateCount + 1);
         }
-        else
-        {
-            _state = ParserState.Ground;
-        }
+        else if (b is >= 0x30 and <= 0x3F) _state = ParserState.CsiIgnore;
     }
 
     private void ProcessOscString(byte b)
     {
         if (b == 0x07) // BEL terminator
         {
-            HandleOscString();
+            HandleOscString(bellTerminator: true);
             _state = ParserState.Ground;
             return;
         }
-
-        if (b == 0x9C) // 8-bit ST
-        {
-            HandleOscString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (b == 0x1B) // Potential ST (ESC \)
-        {
-            _state = ParserState.OscEscape;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        AppendOscByteOrDiscard(b);
-    }
-
-    private void ProcessOscEscape(byte b)
-    {
-        if (b == (byte)'\\')
-        {
-            HandleOscString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        // False alarm: preserve ESC as payload and continue OSC parsing.
-        AppendOscByteOrDiscard(0x1B);
 
         if (b == 0x1B)
         {
-            _state = ParserState.OscEscape;
+            HandleOscString(bellTerminator: false);
+            EnterCsiState(); // Clear metadata for the new ESC operation.
+            _state = ParserState.Escape;
             return;
         }
 
-        if (b == 0x07)
-        {
-            HandleOscString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (b == 0x9C)
-        {
-            HandleOscString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        AppendOscByteOrDiscard(b);
-        _state = ParserState.OscString;
+        // Ordinary C0 bytes are ignored inside OSC, not executed or retained.
+        if (b >= 0x20) AppendOscByteOrDiscard(b);
     }
 
-    private void HandleOscString()
+    private void HandleOscString(bool bellTerminator)
     {
         if (_isDiscardingOscPayload)
         {
@@ -2373,17 +2100,74 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        string oscPayload = Encoding.UTF8.GetString(_oscBuffer.ToArray());
+        ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("99;"u8))
+        {
+            HandleNotification(rawPayload[3..], bellTerminator);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("72;"u8))
+        {
+            (_dragDrop ??= new()).Handle(rawPayload[3..], bellTerminator, ResponseCallback);
+            if (!_dragDrop.IsDropRegistered) _dragDrop = null;
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("22;"u8))
+        {
+            if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("0;"u8) || rawPayload.StartsWith("2;"u8))
+        {
+            SetOscTitle(rawPayload[2..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("7;"u8))
+        {
+            SetOscWorkingDirectory(rawPayload[2..], shellIntegration: true);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("9;9;"u8))
+        {
+            // OSC 9 reserves a final NUL only for commands that need strings.
+            if (rawPayload.Length - 2 < 2048) SetOscWorkingDirectory(rawPayload[4..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("1337;"u8) && IsCurrentDirectoryCommand(rawPayload[5..]))
+        {
+            ReadOnlySpan<byte> directory = rawPayload[16..];
+            if (!directory.IsEmpty) SetOscWorkingDirectory(directory);
+            _oscBuffer.Clear();
+            return;
+        }
+        int colorSeparator = rawPayload.IndexOf((byte)';');
+        ReadOnlySpan<byte> colorSelector = colorSeparator < 0 ? rawPayload : rawPayload[..colorSeparator];
+        if (TryOscColorOperation(colorSelector, out int colorOperation))
+        {
+            string colors = colorSeparator < 0 ? string.Empty : Encoding.UTF8.GetString(rawPayload[(colorSeparator + 1)..]);
+            _oscBuffer.Clear();
+            if (colorOperation == 21) HandleKittyColors(colors.AsSpan(), bellTerminator);
+            else HandleOscColors(colorOperation, colors.AsSpan(), bellTerminator);
+            return;
+        }
+        if (rawPayload.StartsWith("8;"u8))
+        {
+            HandleOscHyperlink(rawPayload[2..]);
+            _oscBuffer.Clear();
+            return;
+        }
+        string oscPayload = Encoding.UTF8.GetString(rawPayload);
         _oscBuffer.Clear();
 
         int separator = oscPayload.IndexOf(';');
-        if (separator < 0)
-        {
-            return;
-        }
-
-        ReadOnlySpan<char> selector = oscPayload.AsSpan(0, separator);
-        string value = separator + 1 < oscPayload.Length
+        ReadOnlySpan<char> selector = separator < 0 ? oscPayload.AsSpan() : oscPayload.AsSpan(0, separator);
+        string value = separator >= 0 && separator + 1 < oscPayload.Length
             ? oscPayload[(separator + 1)..]
             : string.Empty;
 
@@ -2392,46 +2176,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        // Metadata selectors are canonical decimal strings, not numeric aliases.
+        // The supported raw-byte forms were already handled above; OSC 1 is icon-only.
+        if (selectorCode is 0 or 1 or 2 or 7 ||
+            (selectorCode == 9 && !selector.SequenceEqual("9")) ||
+            (selectorCode == 1337 && !selector.SequenceEqual("1337"))) return;
+
+        if (selectorCode == 133) HandleSemanticPrompt(value.AsSpan());
         _shellIntegrationParser.TryHandleOsc(selectorCode, value);
 
         switch (selectorCode)
         {
-            case 0:
-            case 1:
-            case 2:
-                TitleCallback?.Invoke(value);
-                break;
-
-            case 4:
-                HandleOscPalette(value);
-                break;
-
-            case 10:
-                HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 11:
-                HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 12:
-                HandleOscDynamicColor(selectorCode, value);
-                break;
-
-            case 8:
-                HandleOscHyperlink(value);
-                break;
-
-            case 7:
-                WorkingDirectoryCallback?.Invoke(value);
-                break;
-
             case 9:
                 HandleOsc9(value);
                 break;
 
             case 52:
                 HandleOscClipboard(value);
+                break;
+
+            case 5522:
+                _kittyClipboardProtocol.Handle(
+                    value,
+                    bellTerminator,
+                    ClipboardReadCallback,
+                    ClipboardWriteRequestCallback,
+                    ClipboardWriteCallback,
+                    ResponseCallback);
                 break;
 
             case 777:
@@ -2446,12 +2217,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void HandleOsc9(string value)
     {
-        if (value.StartsWith("9;", StringComparison.Ordinal))
-        {
-            WorkingDirectoryCallback?.Invoke(value[2..]);
-            return;
-        }
-
         if (TryParseOsc9Progress(value, out TerminalProgressReport? report) &&
             report is not null)
         {
@@ -2498,16 +2263,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         ReadOnlySpan<char> key = value.AsSpan(0, separator);
         ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
-        if (AsciiEqualsIgnoreCase(key, "CurrentDir"))
-        {
-            if (!payload.IsEmpty)
-            {
-                WorkingDirectoryCallback?.Invoke(payload.ToString());
-            }
-
-            return;
-        }
-
         if (AsciiEqualsIgnoreCase(key, "Copy") &&
             payload.Length > 1 &&
             payload[0] == ':' &&
@@ -2534,12 +2289,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
-        if (payload.SequenceEqual("?"))
-        {
-            return;
-        }
-
         TerminalClipboardLocation location;
         if (selector.IsEmpty || selector.SequenceEqual("c"))
         {
@@ -2558,7 +2307,53 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        ReadOnlySpan<char> payload = value.AsSpan(separator + 1);
+        if (payload.SequenceEqual("?"))
+        {
+            TryReadClipboard(location, selector);
+            return;
+        }
+
         TryWriteClipboard(location, payload, allowClear: true);
+    }
+
+    private void TryReadClipboard(TerminalClipboardLocation location, ReadOnlySpan<char> selector)
+    {
+        if (ClipboardReadCallback is null || ResponseCallback is null)
+        {
+            return;
+        }
+
+        TerminalClipboardReadReply reply;
+        try
+        {
+            reply = ClipboardReadCallback(
+                new TerminalClipboardRead(location, ["text/plain"]));
+        }
+        catch
+        {
+            return;
+        }
+
+        if (reply.Result != TerminalClipboardReadResult.Success)
+        {
+            return;
+        }
+
+        TerminalClipboardContent? content = reply.Contents.FirstOrDefault(
+            static value => value.MimeType.StartsWith("text/", StringComparison.OrdinalIgnoreCase));
+        if (content is null)
+        {
+            return;
+        }
+
+        string response = string.Concat(
+            "\u001b]52;",
+            selector.ToString(),
+            ";",
+            Convert.ToBase64String(content.Data),
+            "\u001b\\");
+        ResponseCallback(Encoding.ASCII.GetBytes(response));
     }
 
     private void TryWriteClipboard(
@@ -2570,7 +2365,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             if (allowClear)
             {
-                ClipboardWriteCallback?.Invoke(new TerminalClipboardWrite(location, []));
+                DispatchClipboardWrite(new TerminalClipboardWrite(location, []));
             }
 
             return;
@@ -2591,10 +2386,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        ClipboardWriteCallback?.Invoke(
+        DispatchClipboardWrite(
             new TerminalClipboardWrite(
                 location,
                 [new TerminalClipboardContent("text/plain", decoded)]));
+    }
+
+    private void DispatchClipboardWrite(TerminalClipboardWrite request)
+    {
+        if (ClipboardWriteRequestCallback is not null)
+        {
+            ClipboardWriteRequestCallback(request);
+            return;
+        }
+
+        ClipboardWriteCallback?.Invoke(request);
     }
 
     private static bool IsRecognizedConEmuOsc9(string value)
@@ -2784,175 +2590,153 @@ public sealed class BasicVtProcessor : IVtProcessor,
         return true;
     }
 
-    private void HandleOscHyperlink(string value)
+    private void HandleOscHyperlink(ReadOnlySpan<byte> value)
     {
-        int separator = value.IndexOf(';');
-        if (separator < 0)
+        int separator = value.IndexOf((byte)';');
+        if (separator < 0) return;
+        ReadOnlySpan<byte> uri = value[(separator + 1)..];
+        ReadOnlySpan<byte> options = value[..separator];
+        ReadOnlySpan<byte> id = default;
+        while (!options.IsEmpty)
         {
-            return;
+            int colon = options.IndexOf((byte)':');
+            ReadOnlySpan<byte> item = colon < 0 ? options : options[..colon];
+            int equals = item.IndexOf((byte)'=');
+            // Ghostty stops at a malformed option, and the last nonempty ID wins.
+            if (equals < 0) break;
+            if (item[..equals].SequenceEqual("id"u8) && equals + 1 < item.Length)
+                id = item[(equals + 1)..];
+            if (colon < 0) break;
+            options = options[(colon + 1)..];
         }
-
-        string uri = separator + 1 < value.Length
-            ? value[(separator + 1)..]
-            : string.Empty;
-        if (string.IsNullOrEmpty(uri))
+        if (uri.IsEmpty)
         {
-            _currentHyperlinkId = 0;
-            return;
-        }
-
-        _currentHyperlinkId = _screen.RegisterHyperlink(uri);
-    }
-
-    private void HandleOscPalette(string value)
-    {
-        string[] parts = value.Split(';', StringSplitOptions.TrimEntries);
-        if (parts.Length < 2)
-        {
-            return;
-        }
-
-        TerminalTheme nextTheme = _theme;
-        bool changed = false;
-        for (int i = 0; i + 1 < parts.Length; i += 2)
-        {
-            if (!int.TryParse(parts[i], out int colorIndex))
+            // An ID on a close is invalid and must not close the active link.
+            if (id.IsEmpty)
             {
-                continue;
+                _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
+                _currentHyperlinkId = 0;
             }
-
-            colorIndex = Math.Clamp(colorIndex, 0, 255);
-            string colorSpec = parts[i + 1];
-            if (colorSpec == "?")
-            {
-                uint color = PaletteColor(colorIndex);
-                string rgb = FormatRgbColor(color);
-                string response = $"\x1b]4;{colorIndex};{rgb}\x1b\\";
-                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-                continue;
-            }
-
-            if (!TryParseOscColorSpec(colorSpec, out uint parsedColor))
-            {
-                continue;
-            }
-
-            nextTheme = nextTheme.WithPaletteColor(colorIndex, parsedColor, explicitOverride: true);
-            changed = true;
-        }
-
-        if (changed)
-        {
-            ApplyTheme(nextTheme);
-        }
-    }
-
-    private void HandleOscDynamicColor(int selectorCode, string value)
-    {
-        if (value == "?")
-        {
-            uint queryColor = selectorCode switch
-            {
-                10 => _screen.DefaultForeground,
-                11 => _screen.DefaultBackground,
-                12 => _theme.CursorColor,
-                _ => _screen.DefaultForeground,
-            };
-            SendOscColorResponse(selectorCode.ToString(), queryColor);
             return;
         }
-
-        if (!TryParseOscColorSpec(value, out uint parsedColor))
-        {
-            return;
-        }
-
-        TerminalTheme nextTheme = selectorCode switch
-        {
-            10 => _theme.WithDefaultForeground(parsedColor),
-            11 => _theme.WithDefaultBackground(parsedColor),
-            12 => _theme.WithCursorColor(parsedColor),
-            _ => _theme,
-        };
-        ApplyTheme(nextTheme);
-    }
-
-    private void SendOscColorResponse(string selector, uint argbColor)
-    {
-        string rgb = FormatRgbColor(argbColor);
-        string response = $"\x1b]{selector};{rgb}\x1b\\";
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-    }
-
-    private string FormatRgbColor(uint argbColor)
-    {
-        int red = (int)((argbColor >> 16) & 0xFF);
-        int green = (int)((argbColor >> 8) & 0xFF);
-        int blue = (int)(argbColor & 0xFF);
-
-        return _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8
-            ? $"rgb:{red:x2}/{green:x2}/{blue:x2}"
-            : $"rgb:{red * 0x101:x4}/{green * 0x101:x4}/{blue * 0x101:x4}";
+        ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
+        _currentHyperlinkId = _screen.RegisterHyperlink(uri, id, counter);
+        _currentHyperlinkId = _screen.SnapshotHyperlinkChanged(_inAltScreen ? 1 : 0, _cursorRow,
+            CaptureSnapshotPen(), _currentHyperlinkId, ref counter, restart: true);
+        if (id.IsEmpty && _currentHyperlinkId != 0) counter = unchecked(counter + 1);
     }
 
     private void ProcessDcsString(byte b)
     {
         if (b == 0x1B)
         {
-            _state = ParserState.DcsEscape;
-            return;
-        }
-
-        if (b == 0x9C) // 8-bit ST
-        {
             HandleDcsString();
-            _state = ParserState.Ground;
+            EnterCsiState();
+            _state = ParserState.Escape;
             return;
         }
 
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        AppendDcsByteOrDiscard(b);
+        // All C0 bytes except CAN/SUB/ESC are payload; DEL alone is ignored.
+        if (b != 0x7F) AppendDcsByteOrDiscard(b);
     }
 
-    private void ProcessDcsEscape(byte b)
+    private void ProcessApcString(byte b)
     {
-        if (b == (byte)'\\')
-        {
-            HandleDcsString();
-            _state = ParserState.Ground;
-            return;
-        }
-
-        if (TryAbortBrokenControlStringOnControl(b))
-        {
-            return;
-        }
-
-        // False alarm: preserve ESC as payload and continue DCS parsing.
-        AppendDcsByteOrDiscard(0x1B);
-
         if (b == 0x1B)
         {
-            _state = ParserState.DcsEscape;
+            CompleteApc();
+            EnterCsiState();
+            _state = ParserState.Escape;
             return;
         }
 
-        if (b == 0x9C)
+        // C1 SOS/PM/APC stay in the same parser state without exit/entry actions.
+        if (b is 0x98 or 0x9E or 0x9F) return;
+        if (b is >= 0x80 and <= 0x9F)
         {
-            HandleDcsString();
-            _state = ParserState.Ground;
-            return;
+            CompleteApc(terminated: b == 0x9C);
+            ProcessC1(b);
         }
-
-        AppendDcsByteOrDiscard(b);
-        _state = ParserState.DcsString;
+        // A0-FF are ignored by Ghostty's APC table. All ordinary payload
+        // bytes, including C0 and DEL, are handled by the bulk feed path.
     }
 
-    private void HandleDcsString()
+    private void AppendApcPayload(ReadOnlySpan<byte> payload)
+    {
+        if (payload.IsEmpty) return;
+        if (!_apcKittyRecognized && _apcBuffer.Count == 0 && payload[0] == (byte)'G')
+        {
+            _apcKittyRecognized = true;
+            if (_kittyStore.Enabled) _apcKittyParser = new(_options.KittyGraphicsMaxApcBytes);
+            payload = payload[1..];
+        }
+        if (_apcKittyRecognized)
+        {
+            if (_apcKittyParser is not null && !_apcKittyParser.TryAppend(payload))
+                _apcKittyParser = null;
+            return;
+        }
+        ReadOnlySpan<byte> glyphIdentifier = "25a1;"u8;
+        // Identify only the small prefix byte-by-byte, then retain bulk payload
+        // scanning. Unknown '2...' commands keep the existing 4 KiB capture cap.
+        while (_apcBuffer.Count < glyphIdentifier.Length && !payload.IsEmpty &&
+            CollectionsMarshal.AsSpan(_apcBuffer).SequenceEqual(glyphIdentifier[.._apcBuffer.Count]) &&
+            payload[0] == glyphIdentifier[_apcBuffer.Count])
+        {
+            _apcBuffer.Add(payload[0]);
+            payload = payload[1..];
+            if (_apcBuffer.Count == glyphIdentifier.Length)
+            {
+                _apcGlyphRecognized = true;
+                _apcGlyphEnabled = _glyphProtocolEnabled;
+            }
+        }
+        if (payload.IsEmpty) return;
+        int limit = _apcGlyphRecognized
+            ? (_apcGlyphEnabled ? 1024 * 1024 + 5 : 5)
+            : MaxUnknownSequenceBytes;
+        int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
+        if (count > 0)
+        {
+            int offset = _apcBuffer.Count;
+            _apcBuffer.EnsureCapacity(offset + count);
+            CollectionsMarshal.SetCount(_apcBuffer, offset + count);
+            payload[..count].CopyTo(CollectionsMarshal.AsSpan(_apcBuffer)[offset..]);
+        }
+        if (count < payload.Length) _apcTruncated = true;
+    }
+
+    private void CompleteApc(bool terminated = true)
+    {
+        try
+        {
+            if (_apcKittyRecognized)
+            {
+                if (_apcKittyParser is not null && _apcKittyParser.TryComplete(out ManagedKittyGraphicsCommand? command))
+                    ProcessKittyCommand(command);
+                return;
+            }
+            if (_apcGlyphRecognized)
+            {
+                if (_apcGlyphEnabled && !_apcTruncated &&
+                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
+                    _screen.NotifyGlyphGlossaryChanged();
+                return;
+            }
+            if (terminated) UnknownSequenceCallback?.Invoke(
+                new TerminalUnknownSequence(
+                    TerminalUnknownSequenceType.Apc,
+                    _apcBuffer.ToArray(),
+                    _apcTruncated));
+        }
+        finally
+        {
+            ResetApcCommand();
+            _state = ParserState.Ground;
+        }
+    }
+
+    private void HandleDcsString(bool aborted = false)
     {
         if (_isDiscardingDcsPayload)
         {
@@ -2971,7 +2755,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         if (_sixelGraphicsEnabled && IsSixelDcsPayload(payloadBytes))
         {
-            HandleSixelDcsPayload(payloadBytes);
+            // Optional Sixel follows xterm's unsuccessful-unhook policy.
+            if (!aborted) HandleSixelDcsPayload(payloadBytes);
             return;
         }
 
@@ -2982,6 +2767,29 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             string request = payload.Length > 2 ? payload[2..] : string.Empty;
             HandleDecRequestStatusString(request);
+            return;
+        }
+
+        // DCS + q Pt ST — XTGETTCAP query. One reply is emitted per supported key.
+        if (payload.StartsWith("+q", StringComparison.Ordinal))
+        {
+            ReadOnlySpan<char> keys = payload.AsSpan(2);
+            while (!keys.IsEmpty)
+            {
+                int separator = keys.IndexOf(';');
+                ReadOnlySpan<char> key = separator < 0 ? keys : keys[..separator];
+                if (GhosttyXtgettcap.TryCreateResponse(key, _options.TerminfoName, out byte[] response))
+                {
+                    ResponseCallback?.Invoke(response);
+                }
+
+                if (separator < 0)
+                {
+                    break;
+                }
+
+                keys = keys[(separator + 1)..];
+            }
         }
     }
 
@@ -3074,6 +2882,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         int cellWidthPx,
         int cellHeightPx)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         int columnAdvance = DivideRoundUp(finalCursorX, cellWidthPx);
         int rowAdvance = Math.Max(0, finalCursorY / cellHeightPx);
         int nextColumn = _cursorCol + columnAdvance;
@@ -3098,14 +2907,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private int GetEffectiveCellWidthPx()
     {
         return _screen.Columns > 0 && _widthPx > 0
-            ? Math.Max(1, _widthPx / _screen.Columns)
+            ? (int)Math.Clamp(_widthPx / (uint)_screen.Columns, 1U, int.MaxValue)
             : 1;
     }
 
     private int GetEffectiveCellHeightPx()
     {
         return _screen.ViewportRows > 0 && _heightPx > 0
-            ? Math.Max(1, _heightPx / _screen.ViewportRows)
+            ? (int)Math.Clamp(_heightPx / (uint)_screen.ViewportRows, 1U, int.MaxValue)
             : 1;
     }
 
@@ -3146,10 +2955,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        int maxDcsBytes = _sixelGraphicsEnabled
-            ? Math.Max(MaxDcsBufferBytes, _options.SixelDecoderOptions.MaxInputBytes)
-            : MaxDcsBufferBytes;
-        if (_dcsBuffer.Count >= maxDcsBytes)
+        if (_dcsBuffer.Count >= _dcsBufferLimit)
         {
             _dcsBuffer.Clear();
             _isDiscardingDcsPayload = true;
@@ -3166,7 +2972,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        if (_oscBuffer.Count >= MaxOscBufferBytes)
+        if (_oscBuffer.Count >= GetOscBufferLimit([]))
         {
             _oscBuffer.Clear();
             _isDiscardingOscPayload = true;
@@ -3176,6 +2982,53 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _oscBuffer.Add(b);
     }
 
+    private void AppendControlStringPayload(ReadOnlySpan<byte> payload)
+    {
+        // Span's vectorized control-byte search and one bulk copy mirror
+        // Ghostty's OSC scanner while preserving control dispatch at boundaries.
+        bool osc = _state == ParserState.OscString;
+        if (osc ? _isDiscardingOscPayload : _isDiscardingDcsPayload)
+        {
+            return;
+        }
+        List<byte> buffer = osc ? _oscBuffer : _dcsBuffer;
+        int limit = osc
+            ? GetOscBufferLimit(payload)
+            : _dcsBufferLimit;
+        if (payload.Length > limit - buffer.Count)
+        {
+            buffer.Clear();
+            if (osc) _isDiscardingOscPayload = true;
+            else _isDiscardingDcsPayload = true;
+            return;
+        }
+        int offset = buffer.Count;
+        CollectionsMarshal.SetCount(buffer, offset + payload.Length);
+        payload.CopyTo(CollectionsMarshal.AsSpan(buffer)[offset..]);
+    }
+
+    private int GetOscBufferLimit(ReadOnlySpan<byte> incoming)
+    {
+        // Native metadata/color OSC captures are fixed-size (2048 payload bytes), not
+        // allocating like clipboard strings. Recognize prefixes split anywhere
+        // across bytewise or bulk input before retaining a large incoming span.
+        ReadOnlySpan<byte> retained = CollectionsMarshal.AsSpan(_oscBuffer);
+        Span<byte> prefix = stackalloc byte[5];
+        int retainedLength = Math.Min(prefix.Length, retained.Length);
+        retained[..retainedLength].CopyTo(prefix);
+        int added = Math.Min(prefix.Length - retainedLength, incoming.Length);
+        incoming[..added].CopyTo(prefix[retainedLength..]);
+        ReadOnlySpan<byte> combined = prefix[..(retainedLength + added)];
+        int separator = combined.IndexOf((byte)';');
+        if (separator < 0) return MaxOscBufferBytes;
+        ReadOnlySpan<byte> selector = combined[..separator];
+        // Title/PWD parsers reserve one byte of their fixed capture for NUL.
+        if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8) || selector.SequenceEqual("22"u8))
+            return 2047 + separator + 1;
+        if (selector.SequenceEqual("9"u8)) return 2048 + separator + 1;
+        return TryOscColorOperation(selector, out _) ? 2048 + separator + 1 : MaxOscBufferBytes;
+    }
+
     private bool TryHandleAnywhereCancelControl(byte b)
     {
         if (b is not 0x18 and not 0x1A)
@@ -3183,57 +3036,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
+        // Ghostty dispatches a valid OSC on every exit, including CAN/SUB.
+        if (_state == ParserState.OscString) HandleOscString(bellTerminator: false);
+        // Unknown APCs are suppressed on abort, but parsed Kitty commands still
+        // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
+        if (_state == ParserState.ApcString) CompleteApc(terminated: false);
+        if (_state == ParserState.DcsString) HandleDcsString(aborted: true);
         AbortActiveControlString();
         return true;
-    }
-
-    private bool TryAbortBrokenControlStringOnControl(byte b)
-    {
-        if (_state is not ParserState.OscString and
-            not ParserState.OscEscape and
-            not ParserState.DcsString and
-            not ParserState.DcsEscape)
-        {
-            return false;
-        }
-
-        if (_state is ParserState.DcsString or ParserState.DcsEscape &&
-            IsIgnorableSixelControl(b) &&
-            IsCurrentDcsSixelPayload())
-        {
-            return false;
-        }
-
-        if (!IsBrokenStringTerminatorControl(b))
-        {
-            return false;
-        }
-
-        // Recover from malformed OSC/DCS strings in binary streams so shell
-        // prompt control bytes can return the parser to ground.
-        AbortActiveControlString();
-        ProcessGround(b);
-        return true;
-    }
-
-    private bool IsCurrentDcsSixelPayload()
-    {
-        int index = 0;
-        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x30 and <= 0x3F)
-        {
-            index++;
-        }
-
-        bool hasIntermediate = false;
-        while (index < _dcsBuffer.Count && _dcsBuffer[index] is >= 0x20 and <= 0x2F)
-        {
-            hasIntermediate = true;
-            index++;
-        }
-
-        return index < _dcsBuffer.Count &&
-            _dcsBuffer[index] == (byte)'q' &&
-            !hasIntermediate;
     }
 
     private void AbortActiveControlString()
@@ -3243,34 +3053,16 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _hasParam = false;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
+        _intermediateCount = 0;
+        _csiColonSeparators = 0;
         _utf8Codepoint = 0;
         _utf8Remaining = 0;
         _oscBuffer.Clear();
         _dcsBuffer.Clear();
+        ResetApcCommand();
         _isDiscardingOscPayload = false;
         _isDiscardingDcsPayload = false;
         _state = ParserState.Ground;
-    }
-
-    private static bool IsBrokenStringTerminatorControl(byte b)
-    {
-        return b is 0x08 or // BS
-            0x09 or // HT
-            0x0A or // LF
-            0x0B or // VT
-            0x0C or // FF
-            0x0D or // CR
-            0x0E or // SO
-            0x0F;   // SI
-    }
-
-    private static bool IsIgnorableSixelControl(byte b)
-    {
-        return b is 0x09 or // HT
-            0x0A or // LF
-            0x0B or // VT
-            0x0C or // FF
-            0x0D;   // CR
     }
 
     private void HandleDecRequestStatusString(string request)
@@ -3279,7 +3071,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             "m" => $"{BuildCurrentSgrState()}m",
             "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
-            " q" => $"{_cursorStyle} q",
+            "s" when _extendedDecModesEnabled.Contains(69) => $"{_scrollLeft + 1};{RightMargin + 1}s",
+            " q" => $"{CursorStyleReport} q",
             _ => null,
         };
 
@@ -3303,20 +3096,20 @@ public sealed class BasicVtProcessor : IVtProcessor,
         if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add("1");
         if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add("2");
         if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add("3");
-        if (_currentUnderlineStyle == TerminalUnderlineStyle.Double)
+        if (_currentUnderlineStyle > TerminalUnderlineStyle.Single)
         {
-            parameters.Add("4:2");
+            parameters.Add($"4:{(int)_currentUnderlineStyle}");
         }
         else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
                  (_currentAttrs & CellAttributes.Underline) != 0)
         {
             parameters.Add("4");
         }
+        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
         if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add("5");
         if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add("7");
         if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add("8");
         if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add("9");
-        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
 
         AppendSgrColor(
             parameters,
@@ -3364,17 +3157,45 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ExecuteCsi(char finalByte)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _state = ParserState.Ground;
+        if (_intermediateCount > 1) return;
+        if (_csiColonSeparators != 0 && finalByte != 'm') return;
+        if (_csiPrivateMarker != '\0' && _intermediateChar != '\0' &&
+            !(_csiPrivateMarker == '?' && _intermediateChar == '$' && finalByte == 'p')) return;
 
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
 
+        if (_csiPrivateMarker == '\0' && _intermediateChar == '$' && finalByte == '}')
+        {
+            if (_params.Count == 1 && p0 is 0 or 1) _statusDisplay = (byte)p0;
+            return;
+        }
+
         // DEC private mode families: CSI ? ...
         if (_csiPrivateMarker == '?')
         {
+            if (finalByte is 's' or 'r')
+            {
+                SaveOrRestoreDecModes(restore: finalByte == 'r');
+                return;
+            }
+            if (finalByte is 'J' or 'K' && _params.Count <= 1)
+            {
+                if (finalByte == 'J') EraseInDisplay(p0, selective: true);
+                else EraseInLine(p0, selective: true);
+                return;
+            }
             if (_intermediateChar == '$' && finalByte == 'p')
             {
                 HandleDecModeQuery();
+                return;
+            }
+
+            if (finalByte == 'n')
+            {
+                HandleDecDeviceStatusQuery();
                 return;
             }
 
@@ -3394,7 +3215,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         // CSI ! p — Soft terminal reset (DECSTR)
-        if (_csiPrivateMarker == '!' && finalByte == 'p')
+        if (_csiPrivateMarker == '\0' && _intermediateChar == '!' && finalByte == 'p')
         {
             SoftReset();
             return;
@@ -3411,6 +3232,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
             else if (finalByte == 'u')
             {
                 HandleKittyKeyboardPush();
+            }
+            else if (finalByte == 's' && _params.Count <= 1 && p0 is 0 or 1)
+            {
+                MouseShiftCaptureOverride = p0 == 1;
+            }
+            else if (finalByte is 'm' or 'n')
+            {
+                SetModifyKeyFormat(finalByte);
             }
             return;
         }
@@ -3443,7 +3272,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         // CSI <space> q — Set cursor style (DECSCUSR)
         if (_intermediateChar == ' ' && finalByte == 'q')
         {
-            SetCursorStyle(Math.Max(0, p0));
+            if (_params.Count <= 1) SetCursorStyle(p0);
             return;
         }
 
@@ -3454,20 +3283,28 @@ public sealed class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (_intermediateChar == '"' && finalByte == 'q' && _params.Count <= 1)
+        {
+            if (p0 is 0 or 2) SetCharacterProtection(CharacterProtectionMode.Off);
+            else if (p0 == 1) SetCharacterProtection(CharacterProtectionMode.Dec);
+            return;
+        }
+        if (_intermediateChar != '\0') return;
+
         ResetDelayedWrapForCsi(finalByte);
 
         switch (finalByte)
         {
             case 'A': // CUU — Cursor Up
-                _cursorRow = Math.Max(_scrollTop, _cursorRow - Math.Max(1, p0));
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - Math.Max(1, p0));
                 break;
 
             case 'B': // CUD — Cursor Down
-                _cursorRow = Math.Min(_scrollBottom, _cursorRow + Math.Max(1, p0));
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'C': // CUF — Cursor Forward
-                _cursorCol = Math.Min(_screen.Columns - 1, _cursorCol + Math.Max(1, p0));
+                _cursorCol = Math.Min(CursorRightLimit, _cursorCol + Math.Max(1, p0));
                 break;
 
             case 'D': // CUB — Cursor Back
@@ -3475,17 +3312,17 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'E': // CNL — Cursor Next Line
-                _cursorCol = 0;
-                _cursorRow = Math.Min(_scrollBottom, _cursorRow + Math.Max(1, p0));
+                CarriageReturn();
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'F': // CPL — Cursor Previous Line
-                _cursorCol = 0;
-                _cursorRow = Math.Max(_scrollTop, _cursorRow - Math.Max(1, p0));
+                CarriageReturn();
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - Math.Max(1, p0));
                 break;
 
             case 'G': // CHA — Cursor Horizontal Absolute
-                _cursorCol = Math.Clamp(Math.Max(1, p0) - 1, 0, _screen.Columns - 1);
+                _cursorCol = Math.Clamp(Math.Max(1, p0) - 1 + (_originMode ? _scrollLeft : 0), 0, _originMode ? RightMargin : _screen.Columns - 1);
                 break;
 
             case 'H': // CUP — Cursor Position
@@ -3497,6 +3334,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 {
                     row += _scrollTop;
                     row = Math.Clamp(row, _scrollTop, _scrollBottom);
+                    col = Math.Clamp(col + _scrollLeft, _scrollLeft, RightMargin);
                 }
                 else
                 {
@@ -3532,15 +3370,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'd': // VPA — Vertical line Position Absolute
-                _cursorRow = Math.Clamp(Math.Max(1, p0) - 1, 0, _screen.ViewportRows - 1);
+                _cursorRow = Math.Clamp(Math.Max(1, p0) - 1 + (_originMode ? _scrollTop : 0), 0, _originMode ? _scrollBottom : _screen.ViewportRows - 1);
                 break;
 
             case 'e': // VPR — Vertical Position Relative
-                _cursorRow = Math.Min(_screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
+                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'a': // HPR — Horizontal Position Relative
-                _cursorCol = Math.Min(_screen.Columns - 1, _cursorCol + Math.Max(1, p0));
+                _cursorCol = Math.Min(CursorRightLimit, _cursorCol + Math.Max(1, p0));
                 break;
 
             case 'm': // SGR — Select Graphic Rendition
@@ -3557,21 +3395,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 {
                     _scrollTop = top;
                     _scrollBottom = bottom;
+                    HomeCursor();
                 }
-                // After setting margins, cursor moves to home
-                _cursorCol = 0;
-                _cursorRow = _originMode ? _scrollTop : 0;
                 break;
             }
 
             case 's': // SCP — Save Cursor Position (ANSI.SYS)
-                _savedCursorCol = _cursorCol;
-                _savedCursorRow = _cursorRow;
+                if (_params.Count > 2) break;
+                if (_extendedDecModesEnabled.Contains(69))
+                {
+                    SetHorizontalMargins();
+                    break;
+                }
+                if (_params.Count != 0) break; // Explicit parameters mean DECSLRM, disabled without mode 69.
+                SaveCursor();
                 break;
 
             case 'u': // RCP — Restore Cursor Position (ANSI.SYS)
-                _cursorCol = _savedCursorCol;
-                _cursorRow = _savedCursorRow;
+                RestoreCursor();
                 break;
 
             case '@': // ICH — Insert Characters
@@ -3579,13 +3420,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'S': // SU — Scroll Up
-                for (var i = 0; i < Math.Max(1, p0); i++)
-                    ScrollUpInRegion();
+                ScrollUpInRegion(Math.Max(1, p0));
                 break;
 
             case 'T': // SD — Scroll Down
-                for (var i = 0; i < Math.Max(1, p0); i++)
-                    ScrollDownInRegion();
+                ScrollDownInRegion(Math.Max(1, p0));
                 break;
 
             case 'g': // TBC — Tab Clear
@@ -3604,7 +3443,9 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 else if (p0 == 6)
                 {
                     // CPR — Cursor Position Report (1-based)
-                    var cpr = $"\x1b[{_cursorRow + 1};{_cursorCol + 1}R";
+                    int reportRow = Math.Max(0, _cursorRow - (_originMode ? _scrollTop : 0));
+                    int reportColumn = Math.Max(0, _cursorCol - (_originMode ? _scrollLeft : 0));
+                    var cpr = $"\x1b[{reportRow + 1};{reportColumn + 1}R";
                     ResponseCallback?.Invoke(System.Text.Encoding.ASCII.GetBytes(cpr));
                 }
                 break;
@@ -3647,7 +3488,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             case 'b': // REP — Repeat preceding graphic character
             {
-                if (_lastGraphicCodepoint == 0)
+                if (_lastGraphicCodepoint < 0)
                 {
                     break;
                 }
@@ -3663,10 +3504,12 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 'Z': // CBT — Cursor Backward Tabulation
             {
                 var count = Math.Max(1, p0);
+                int left = _originMode ? _scrollLeft : 0;
                 for (var n = 0; n < count; n++)
                 {
+                    if (_cursorCol <= left) break;
                     var found = false;
-                    for (var c = _cursorCol - 1; c >= 0; c--)
+                    for (var c = _cursorCol - 1; c >= left; c--)
                     {
                         if (_tabStops.Contains(c))
                         {
@@ -3675,7 +3518,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                             break;
                         }
                     }
-                    if (!found) _cursorCol = 0;
+                    if (!found) _cursorCol = left;
                 }
                 break;
             }
@@ -3704,15 +3547,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 'G': // CHA
             case 'H': // CUP
             case 'f': // HVP
-            case 'J': // ED
-            case 'K': // EL
-            case 'L': // IL
-            case 'M': // DL
-            case 'P': // DCH
             case 'X': // ECH
             case '@': // ICH
-            case 'S': // SU
-            case 'T': // SD
             case 'Z': // CBT
             case 'I': // CHT
             case 'd': // VPA
@@ -3731,24 +3567,14 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             case 14: // CSI 14 t — text area size in pixels
             {
-                string response = $"\x1b[4;{Math.Max(0, _heightPx)};{Math.Max(0, _widthPx)}t";
+                string response = $"\x1b[4;{(long)_reportCellHeightPx * _screen.ViewportRows};{(long)_reportCellWidthPx * _screen.Columns}t";
                 ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
                 break;
             }
 
             case 16: // CSI 16 t — cell size in pixels
             {
-                int cellWidth = _screen.Columns > 0 && _widthPx > 0
-                    ? _widthPx / _screen.Columns
-                    : 8;
-                int cellHeight = _screen.ViewportRows > 0 && _heightPx > 0
-                    ? _heightPx / _screen.ViewportRows
-                    : 16;
-
-                if (cellWidth <= 0) cellWidth = 8;
-                if (cellHeight <= 0) cellHeight = 16;
-
-                string response = $"\x1b[6;{cellHeight};{cellWidth}t";
+                string response = $"\x1b[6;{_reportCellHeightPx};{_reportCellWidthPx}t";
                 ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
                 break;
             }
@@ -3761,41 +3587,78 @@ public sealed class BasicVtProcessor : IVtProcessor,
             }
 
             case 21: // CSI 21 t — report window title
-                ResponseCallback?.Invoke("\x1b]l\x1b\\"u8.ToArray());
+                ReportTitle();
                 break;
         }
     }
 
-    private void HandleDecModeQuery()
+    private void HandleDecDeviceStatusQuery()
     {
         if (_params.Count == 0)
         {
-            EmitDecModeQueryResponse(mode: 0, status: 0);
             return;
         }
 
-        for (int i = 0; i < _params.Count; i++)
+        switch (_params[0])
         {
-            int mode = _params[i];
-            int status = GetDecPrivateModeReportStatus(mode);
-            EmitDecModeQueryResponse(mode, status);
+            case 996: // Report current color scheme.
+                EmitColorSchemeReport();
+                break;
+            case 998: // Report terminal visibility. The C embedding is potentially visible.
+                EmitVisibilityReport();
+                break;
         }
+    }
+
+    private void EmitColorSchemeReport()
+    {
+        uint background = _theme.DefaultBackground;
+        int red = (int)((background >> 16) & 0xFF);
+        int green = (int)((background >> 8) & 0xFF);
+        int blue = (int)(background & 0xFF);
+        int luminance = ((red * 299) + (green * 587) + (blue * 114)) / 1000;
+        ResponseCallback?.Invoke(luminance >= 128
+            ? "\x1b[?997;2n"u8.ToArray()
+            : "\x1b[?997;1n"u8.ToArray());
+    }
+
+    private void EmitVisibilityReport()
+    {
+        ResponseCallback?.Invoke("\x1b[?999;1n"u8.ToArray());
+    }
+
+    private void EmitInBandSizeReport()
+    {
+        if (CreateInBandSizeReport() is { } response) ResponseCallback?.Invoke(response);
+    }
+
+    private byte[]? CreateInBandSizeReport()
+    {
+        if (ResponseCallback is null || !_extendedDecModesEnabled.Contains(2048) ||
+            _screen.Columns <= 0 ||
+            _screen.ViewportRows <= 0)
+        {
+            return null;
+        }
+
+        long reportWidth = (long)_screen.Columns * _reportCellWidthPx;
+        long reportHeight = (long)_screen.ViewportRows * _reportCellHeightPx;
+        string response = $"\x1b[48;{_screen.ViewportRows};{_screen.Columns};{reportHeight};{reportWidth}t";
+        return Encoding.ASCII.GetBytes(response);
+    }
+
+    private void HandleDecModeQuery()
+    {
+        if (_params.Count != 1) return;
+        int mode = _params[0];
+        EmitDecModeQueryResponse(mode, GetDecPrivateModeReportStatus(mode));
     }
 
     private void HandleAnsiModeQuery()
     {
-        if (_params.Count == 0)
-        {
-            EmitAnsiModeQueryResponse(mode: 0, status: 0);
-            return;
-        }
-
-        for (int i = 0; i < _params.Count; i++)
-        {
-            int mode = _params[i];
-            int status = GetAnsiModeReportStatus(mode);
-            EmitAnsiModeQueryResponse(mode, status);
-        }
+        if (_params.Count != 1) return;
+        int mode = _params[0];
+        EmitAnsiModeQueryResponse(mode, GetAnsiModeReportStatus(mode));
     }
 
     private int GetAnsiModeReportStatus(int mode)
@@ -3819,6 +3682,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private int GetDecPrivateModeReportStatus(int mode)
     {
+        if (mode == 117) // DECECM is recognized but permanently reset.
+        {
+            return 4;
+        }
+
         if (mode == 80)
         {
             return _sixelGraphicsEnabled
@@ -3834,10 +3702,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
             25 => _cursorVisible ? 1 : 2,
             66 => _applicationKeypad ? 1 : 2,
             67 => _backarrowKeyMode ? 1 : 2,
-            47 => _inAltScreen ? 1 : 2,
-            1047 => _inAltScreen ? 1 : 2,
+            47 => (_alternateScreenModeBits & 1) != 0 ? 1 : 2,
+            1047 => (_alternateScreenModeBits & 2) != 0 ? 1 : 2,
             1048 => _saveCursorMode ? 1 : 2,
-            1049 => _inAltScreen ? 1 : 2,
+            1049 => (_alternateScreenModeBits & 4) != 0 ? 1 : 2,
             2004 => _bracketedPaste ? 1 : 2,
             9001 => _win32InputMode ? 1 : 2,
             _ => 0,
@@ -3872,82 +3740,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         string response = $"\x1b[?{KittyKeyboardFlags}u";
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-    }
-
-    private void HandleKittyKeyboardSet()
-    {
-        int flags = _params.Count > 0 ? _params[0] : 0;
-        int operation = _params.Count > 1 ? _params[1] : 1;
-        flags = NormalizeKittyKeyboardFlags(flags);
-
-        switch (operation)
-        {
-            case 2: // OR
-                SetKittyKeyboardFlags(KittyKeyboardFlags | flags);
-                break;
-            case 3: // AND NOT
-                SetKittyKeyboardFlags(KittyKeyboardFlags & ~flags);
-                break;
-            case 1:
-            default: // SET
-                SetKittyKeyboardFlags(flags);
-                break;
-        }
-    }
-
-    private void HandleKittyKeyboardPush()
-    {
-        List<int> stack = GetActiveKittyKeyboardStack();
-        if (stack.Count >= KittyKeyboardMaxStackDepth)
-        {
-            stack.RemoveAt(0);
-        }
-
-        stack.Add(KittyKeyboardFlags);
-        int flags = _params.Count > 0 ? _params[0] : 0;
-        SetKittyKeyboardFlags(flags);
-    }
-
-    private void HandleKittyKeyboardPop()
-    {
-        int count = _params.Count > 0 ? Math.Max(1, _params[0]) : 1;
-        List<int> stack = GetActiveKittyKeyboardStack();
-
-        for (int i = 0; i < count; i++)
-        {
-            if (stack.Count == 0)
-            {
-                break;
-            }
-
-            int topIndex = stack.Count - 1;
-            int flags = stack[topIndex];
-            stack.RemoveAt(topIndex);
-            SetKittyKeyboardFlags(flags);
-        }
-    }
-
-    private List<int> GetActiveKittyKeyboardStack()
-    {
-        return _inAltScreen ? _kittyKeyboardStackAlt : _kittyKeyboardStackMain;
-    }
-
-    private void SetKittyKeyboardFlags(int flags)
-    {
-        int normalized = NormalizeKittyKeyboardFlags(flags);
-        if (_inAltScreen)
-        {
-            _kittyKeyboardFlagsAlt = normalized;
-        }
-        else
-        {
-            _kittyKeyboardFlagsMain = normalized;
-        }
-    }
-
-    private static int NormalizeKittyKeyboardFlags(int flags)
-    {
-        return Math.Max(0, flags) & KittyKeyboardFlagMask;
     }
 
     private static bool IsExtendedDecModeSupported(int mode)
@@ -3992,58 +3784,10 @@ public sealed class BasicVtProcessor : IVtProcessor,
         return true;
     }
 
-    private TerminalMouseTrackingMode GetMouseTrackingMode()
-    {
-        if (_extendedDecModesEnabled.Contains(1003))
-        {
-            return TerminalMouseTrackingMode.AnyMotion;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1002))
-        {
-            return TerminalMouseTrackingMode.ButtonMotion;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1000))
-        {
-            return TerminalMouseTrackingMode.PressRelease;
-        }
-
-        if (_extendedDecModesEnabled.Contains(9))
-        {
-            return TerminalMouseTrackingMode.X10Press;
-        }
-
-        return TerminalMouseTrackingMode.None;
-    }
-
-    private TerminalMouseEncoding GetMouseEncodingMode()
-    {
-        if (_extendedDecModesEnabled.Contains(1016))
-        {
-            return TerminalMouseEncoding.SgrPixels;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1006))
-        {
-            return TerminalMouseEncoding.Sgr;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1015))
-        {
-            return TerminalMouseEncoding.Urxvt;
-        }
-
-        if (_extendedDecModesEnabled.Contains(1005))
-        {
-            return TerminalMouseEncoding.Utf8;
-        }
-
-        return TerminalMouseEncoding.Default;
-    }
-
     private void ResetExtendedDecModesToDefaults()
     {
+        _mouseEncoder.Reset();
+        _mouseModeState = default;
         _extendedDecModesEnabled.Clear();
         for (int i = 0; i < ExtendedDecModesEnabledByDefault.Length; i++)
         {
@@ -4073,37 +3817,13 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void SetCursorStyle(int styleParameter)
-    {
-        _cursorStyle = styleParameter switch
-        {
-            <= 0 => 1,
-            > 6 => 6,
-            _ => styleParameter,
-        };
-    }
-
-    private static TerminalCursorStyle MapCursorStyle(int styleParameter)
-    {
-        return styleParameter switch
-        {
-            3 or 4 => TerminalCursorStyle.Underline,
-            5 or 6 => TerminalCursorStyle.Bar,
-            _ => TerminalCursorStyle.Block,
-        };
-    }
-
-    private static bool IsCursorStyleBlinking(int styleParameter)
-    {
-        return styleParameter is 1 or 3 or 5;
-    }
-
     #endregion
 
     #region DEC Private Modes
 
     private void HandleDecMode(int mode, bool set)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         switch (mode)
         {
             case 1: // DECCKM — Application cursor keys
@@ -4113,8 +3833,12 @@ public sealed class BasicVtProcessor : IVtProcessor,
             case 6: // DECOM — Origin mode
                 ResetDelayedWrap();
                 _originMode = set;
-                _cursorCol = 0;
-                _cursorRow = _originMode ? _scrollTop : 0;
+                HomeCursor();
+                break;
+
+            case 69: // DECLRMM — disabling restores full-width margins
+                SetExtendedDecMode(mode, set);
+                if (!set) ResetHorizontalMargins();
                 break;
 
             case 7: // DECAWM — Auto-wrap mode
@@ -4145,47 +3869,79 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 47: // Use alternate screen buffer (no clear)
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 1 : _alternateScreenModeBits & ~1);
                 if (set && !_inAltScreen)
                     SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
                     SwitchToMainScreen();
                 break;
 
-            case 3: // 132-column mode
+            case 3: // DECCOLM is ignored (including its mode value) unless DEC 40 permits it.
+                SetColumnMode(set);
+                break;
+
             case 4: // Smooth scroll
             case 5: // Reverse video
             case 8: // Auto-repeat
-            case 9: // X10 mouse tracking
             case 12: // Cursor blinking
             case 40: // Allow 80/132 mode
             case 45: // Reverse wraparound
-            case 69: // Left/right margin mode
-            case 1000: // Mouse tracking normal
-            case 1002: // Mouse button-event tracking
-            case 1003: // Mouse any-event tracking
             case 1004: // Focus event reporting
-            case 1005: // Mouse UTF-8 encoding
-            case 1006: // Mouse SGR encoding
             case 1007: // Alternate scroll mode
-            case 1015: // Mouse urxvt encoding
-            case 1016: // Mouse pixel mode
             case 1035: // Ignore keypad with numlock
             case 1036: // Meta sends escape prefix
             case 1039: // Alt sends escape
             case 1045: // Reverse wrap extended
-            case 2026: // Synchronized output
             case 2027: // Grapheme cluster mode
             case 2031: // Report color scheme mode
+                SetExtendedDecMode(mode, set);
+                break;
+
+            case 9:
+            case 1000:
+            case 1002:
+            case 1003:
+            case 1005:
+            case 1006:
+            case 1015:
+            case 1016:
+                SetExtendedDecMode(mode, set);
+                _mouseModeState = TerminalMouseModeTransitions.Apply(_mouseModeState, mode, set);
+                break;
+
+            case 2026: // Synchronized output
+                SetExtendedDecMode(mode, set);
+                if (set) BeginRenderHold();
+                else EndRenderHold();
+                break;
+
+            case 2033: // Report terminal visibility mode
+                SetExtendedDecMode(mode, set);
+                if (set)
+                {
+                    EmitVisibilityReport();
+                }
+                break;
+
             case 2048: // In-band size reports
+                SetExtendedDecMode(mode, set);
+                if (set)
+                {
+                    EmitInBandSizeReport();
+                }
+                break;
+
+            case 5522: // Kitty clipboard paste events
                 SetExtendedDecMode(mode, set);
                 break;
 
             case 1047: // Use alternate screen buffer
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 2 : _alternateScreenModeBits & ~2);
                 if (set && !_inAltScreen)
-                    SwitchToAltScreen(clearAlt: true);
+                    SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
                 {
-                    ClearScreen();
+                    EraseInDisplay(2);
                     SwitchToMainScreen();
                 }
                 break;
@@ -4204,6 +3960,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1049: // Save cursor + switch to alt screen + clear
+                _alternateScreenModeBits = (byte)(set ? _alternateScreenModeBits | 4 : _alternateScreenModeBits & ~4);
                 if (set)
                 {
                     SaveCursor();
@@ -4211,7 +3968,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 }
                 else
                 {
-                    SwitchToMainScreen();
+                    SwitchToMainScreen(copyCursor: false);
                     RestoreCursor();
                 }
                 break;
@@ -4232,7 +3989,12 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void SwitchToAltScreen(bool clearAlt)
     {
-        if (_inAltScreen) return;
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
+        if (_inAltScreen)
+        {
+            if (clearAlt) EraseInDisplay(2);
+            return;
+        }
 
         if (_screen.ScrollOffset != 0)
         {
@@ -4242,23 +4004,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _savedMainCursorCol = _cursorCol;
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
+        CaptureDepartingSnapshotCursor();
+        _primaryCharsets = _charsets;
+        _currentHyperlinkId = 0;
         _inAltScreen = true;
-        _screen.SwitchToAlternateBuffer(clearAlt);
+        _screen.SwitchToAlternateBuffer(clear: false);
+        _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
+        AdvanceKittyAnimations();
+        PublishKittyGraphics();
         if (clearAlt)
         {
-            ResetDelayedWrap();
-            _cursorCol = 0;
-            _cursorRow = 0;
+            ClearAlternateBeforeCursorCopy();
+            // Ghostty clears the destination before copying the entering cursor.
+            _delayedWrap = _savedMainDelayedWrap;
         }
 
-        // Reset scroll region
-        _scrollTop = 0;
-        _scrollBottom = _screen.ViewportRows - 1;
+        CopyEnteringScreenCursor(1, destinationWasCleared: clearAlt);
+
+        // Scrolling margins are terminal-wide and survive screen switches.
     }
 
-    private void SwitchToMainScreen()
+    private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copyCursor = true)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (!_inAltScreen) return;
+        CaptureDepartingSnapshotCursor();
+        _alternateEraseBackground = CurrentBackgroundIdentity;
+        (_savedAlternateCursorCol, _savedAlternateCursorRow, _savedAlternateDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
 
         if (_screen.ScrollOffset != 0)
         {
@@ -4266,61 +4038,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         _screen.SwitchToPrimaryBuffer();
+        _alternateCharsets = _charsets;
+        _currentHyperlinkId = 0;
+        _kittyStore = _primaryKittyStore;
+        AdvanceKittyAnimations();
+        PublishKittyGraphics();
 
-        _cursorCol = _savedMainCursorCol;
-        _cursorRow = _savedMainCursorRow;
-        _delayedWrap = _savedMainDelayedWrap;
+        if (restoreRestartPosition || !copyCursor)
+        {
+            _cursorCol = _savedMainCursorCol;
+            _cursorRow = _savedMainCursorRow;
+            _delayedWrap = _savedMainDelayedWrap;
+        }
         _inAltScreen = false;
+        if (!copyCursor)
+        {
+            // 1049 returns to the dormant primary cursor before DECRC. Unlike
+            // 47/1047 it must not transiently allocate the alternate pen on the
+            // primary screen or restore the saved style at the alternate row.
+            TerminalCell pen = GhosttySnapshotLivePage.DecodeStyle(_snapshotPrimaryPen, _theme);
+            InstallSnapshotPen(in pen);
+            _currentProtected = _snapshotPrimaryProtected;
+        }
+        else CopyEnteringScreenCursor(0);
 
-        // Reset scroll region
-        _scrollTop = 0;
-        _scrollBottom = _screen.ViewportRows - 1;
+        // Scrolling margins are terminal-wide and survive screen switches.
 
         _screen.InvalidateAll();
-    }
-
-    #endregion
-
-    #region Cursor Save/Restore
-
-    private void SaveCursor()
-    {
-        _savedCursorCol = _cursorCol;
-        _savedCursorRow = _cursorRow;
-        _savedFg = _currentFg;
-        _savedBg = _currentBg;
-        _savedFgKind = _currentFgKind;
-        _savedBgKind = _currentBgKind;
-        _savedFgPaletteIndex = _currentFgPaletteIndex;
-        _savedBgPaletteIndex = _currentBgPaletteIndex;
-        _savedAttrs = _currentAttrs;
-        _savedUnderlineStyle = _currentUnderlineStyle;
-        _savedUnderlineColor = _currentUnderlineColor;
-        _savedHasUnderlineColor = _currentHasUnderlineColor;
-        _savedDecorations = _currentDecorations;
-        _savedHyperlinkId = _currentHyperlinkId;
-        _savedUseLineDrawing = _useLineDrawing;
-        _savedDelayedWrap = _delayedWrap;
-    }
-
-    private void RestoreCursor()
-    {
-        _cursorCol = _savedCursorCol;
-        _cursorRow = _savedCursorRow;
-        _delayedWrap = _savedDelayedWrap;
-        _currentFg = _savedFg;
-        _currentBg = _savedBg;
-        _currentFgKind = _savedFgKind;
-        _currentBgKind = _savedBgKind;
-        _currentFgPaletteIndex = _savedFgPaletteIndex;
-        _currentBgPaletteIndex = _savedBgPaletteIndex;
-        _currentAttrs = _savedAttrs;
-        _currentUnderlineStyle = _savedUnderlineStyle;
-        _currentUnderlineColor = _savedUnderlineColor;
-        _currentHasUnderlineColor = _savedHasUnderlineColor;
-        _currentDecorations = _savedDecorations;
-        _currentHyperlinkId = _savedHyperlinkId;
-        _useLineDrawing = _savedUseLineDrawing;
     }
 
     #endregion
@@ -4329,15 +4073,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ProcessSgr()
     {
+        bool trackStyles = _screen.TracksSnapshotMetadata;
         if (_params.Count == 0)
         {
+            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             ResetAttributes();
+            if (trackStyles) RecordSnapshotPenChange(previous);
             return;
         }
 
         for (var i = 0; i < _params.Count; i++)
         {
+            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             var p = _params[i];
+            if (ProcessSgrParameterGroup(ref i))
+            {
+                if (trackStyles) RecordSnapshotPenChange(previous);
+                continue;
+            }
 
             switch (p)
             {
@@ -4402,70 +4155,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
                     SetBackgroundPalette(p - 92);
                     break;
 
-                // 256-color and truecolor
-                case 38:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            SetForegroundPalette(_params[i + 2]);
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentFg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
-                                         ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
-                            _currentFgKind = SgrColorKind.Rgb;
-                            i += 4;
-                        }
-                    }
-                    break;
-
-                case 48:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            SetBackgroundPalette(_params[i + 2]);
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentBg = 0xFF000000 | ((uint)_params[i + 2] << 16) |
-                                         ((uint)_params[i + 3] << 8) | (uint)_params[i + 4];
-                            _currentBgKind = SgrColorKind.Rgb;
-                            i += 4;
-                        }
-                    }
-                    break;
-
-                case 58:
-                    if (i + 1 < _params.Count)
-                    {
-                        if (_params[i + 1] == 5 && i + 2 < _params.Count)
-                        {
-                            _currentUnderlineColor = PaletteColor(_params[i + 2]);
-                            _currentHasUnderlineColor = true;
-                            i += 2;
-                        }
-                        else if (_params[i + 1] == 2 && i + 4 < _params.Count)
-                        {
-                            _currentUnderlineColor = 0xFF000000 |
-                                                     ((uint)_params[i + 2] << 16) |
-                                                     ((uint)_params[i + 3] << 8) |
-                                                     (uint)_params[i + 4];
-                            _currentHasUnderlineColor = true;
-                            i += 4;
-                        }
-                    }
-                    break;
 
                 case 59:
                     _currentUnderlineColor = 0;
+                    _currentUnderlineIdentity = default;
                     _currentHasUnderlineColor = false;
                     break;
             }
+            if (trackStyles) RecordSnapshotPenChange(previous);
         }
+    }
+
+    private void RecordSnapshotPenChange(GhosttySnapshotStyle previous)
+    {
+        GhosttySnapshotStyle current = CaptureSnapshotPen();
+        if (previous != current) ChangeSnapshotStyle(_inAltScreen ? 1 : 0, _cursorRow, previous, current, restorePreviousOnFailure: true);
     }
 
     private void ResetAttributes()
@@ -4477,6 +4181,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _currentAttrs = CellAttributes.None;
         _currentUnderlineStyle = TerminalUnderlineStyle.None;
         _currentUnderlineColor = 0;
+        _currentUnderlineIdentity = default;
         _currentHasUnderlineColor = false;
         _currentDecorations = CellDecorations.None;
     }
@@ -4487,6 +4192,23 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _currentFg = PaletteColor(paletteIndex);
         _currentFgKind = SgrColorKind.Palette;
         _currentFgPaletteIndex = paletteIndex;
+    }
+
+    private static TerminalColorIdentity GetColorIdentity(SgrColorKind kind, int paletteIndex, uint rgb)
+        => kind switch
+        {
+            SgrColorKind.Palette => TerminalColorIdentity.Palette((byte)paletteIndex),
+            SgrColorKind.Rgb => TerminalColorIdentity.Rgb(rgb),
+            _ => default,
+        };
+
+    private TerminalColorIdentity CurrentBackgroundIdentity
+        => GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg);
+
+    private TerminalCell CreateErasedCell()
+    {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+        return TerminalCell.Empty(_currentFg, _currentBg, CurrentBackgroundIdentity);
     }
 
     private void SetBackgroundPalette(int paletteIndex)
@@ -4504,7 +4226,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
     private void ClearScreen()
     {
         for (var r = 0; r < _screen.ViewportRows; r++)
-            _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+            ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
         ResetDelayedWrap();
         _cursorCol = 0;
         _cursorRow = 0;
@@ -4512,16 +4234,24 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateAll();
     }
 
-    private void EraseInDisplay(int mode)
+    private void EraseInDisplay(int mode, bool selective = false)
     {
         ClampCursor();
+        // ED3 erases only history and must retain pending wrap. Put this at
+        // the operation boundary so mode-switch clears behave like CSI ED.
+        if (mode is >= 0 and <= 2 or 22) ResetDelayedWrap();
+        if ((selective || ProtectionMode == CharacterProtectionMode.Iso) && mode is >= 0 and <= 2)
+        {
+            EraseProtectedDisplay(mode);
+            return;
+        }
 
         switch (mode)
         {
             case 0: // From cursor to end
                 EraseInLine(0);
                 for (var r = _cursorRow + 1; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow + 1 < _screen.ViewportRows)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4533,8 +4263,11 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1: // From start to cursor
+                // Ghostty erases the cursor row first, including both halves
+                // of a wide glyph, before retiring metadata in earlier rows.
+                EraseInLine(1);
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow > 0)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4543,79 +4276,104 @@ public sealed class BasicVtProcessor : IVtProcessor,
                         0,
                         _screen.Columns - 1);
                 }
-                if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
-                {
-                    var rowToCursor = _screen.GetViewportRow(_cursorRow);
-                    ClearPreservedCellsForMutation(rowToCursor);
-                    for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                        rowToCursor[c] = TerminalCell.Empty(_currentFg, _currentBg);
-                    NormalizeRowWideCells(rowToCursor);
-                    rowToCursor.IsDirty = true;
-                }
                 break;
 
             case 2: // Entire display
-                if (ScrollOnEraseInDisplay && !_inAltScreen)
+                if (ShouldScrollOnEraseDisplay())
                 {
-                    _screen.MoveViewportToScrollbackAndClear();
+                    ScrollClearDisplay();
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 }
                 else
                 {
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg);
+                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                     _screen.ClearRasterGraphics();
                 }
                 break;
 
             case 3: // Scrollback only
-                _screen.ClearScrollback();
+                bool restoreImagePins = _kittyStore.PlacementCount > 0 && _kittyStore.BeginHistoryErase(_screen);
+                try { _screen.EraseActiveHistory(); }
+                finally { if (restoreImagePins) _kittyStore.EndMarginScroll(_screen); }
                 break;
 
             case 22: // Kitty extension: move viewport into scrollback and clear display
-                _screen.MoveViewportToScrollbackAndClear();
-                _cursorCol = 0;
-                _cursorRow = 0;
-                ResetDelayedWrap();
+                ScrollClearDisplay();
                 break;
         }
 
+        if (mode is 2 or 22)
+        {
+            _kittyStore.ClearScreen(_screen, (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
+            AdvanceKittyAnimations();
+            PublishKittyGraphics();
+        }
         _screen.InvalidateAll();
     }
 
-    private void EraseInLine(int mode)
+    private bool ShouldScrollOnEraseDisplay() => !_inAltScreen && (ScrollOnEraseInDisplay ||
+        _screen.GetViewportRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None);
+
+    private void ScrollClearDisplay()
     {
+        int movedRows = _screen.MoveViewportToScrollbackAndClearCore(clearActiveRows: false);
+        // Screen.cursorReload retains a pin still in the active area. Only a
+        // pin that moved into history is relocated to the active top-left.
+        if (_cursorRow < movedRows)
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
+        else _cursorRow -= movedRows;
+        RecordSnapshotCursorStyle();
+        ResetDelayedWrap();
+    }
+
+    private void EraseInLine(int mode, bool selective = false)
+    {
+        if (mode is < 0 or > 2) return;
+        ResetDelayedWrap();
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (selective || ProtectionMode == CharacterProtectionMode.Iso)
+        {
+            EraseProtectedLine(mode);
+            return;
+        }
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
+        (int start, int end) = GetLineEraseRange(row, mode);
         switch (mode)
         {
             case 0: // From cursor to end of line
-                for (var c = Math.Max(0, _cursorCol); c < _screen.Columns; c++)
-                    row[c] = TerminalCell.Empty(_currentFg, _currentBg);
-                row.WrapsToNext = false;
+                ResetCursorRowSoftWrap(row);
+                EraseCells(row, start, end - start);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
-                    _cursorCol,
+                    start,
                     _screen.Columns - 1);
                 break;
 
             case 1: // From start to cursor
-                for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                    row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+                EraseCells(row, start, end - start);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
                     0,
-                    _cursorCol);
+                    end - 1);
                 break;
 
             case 2: // Entire line
-                row.Clear(_currentFg, _currentBg);
+                TerminalSemanticPrompt prompt = row.SemanticPrompt;
+                bool continuation = row.IsWrapContinuation;
+                ResetCursorRowSoftWrap(row);
+                ClearRow(row, _currentFg, _currentBg, CurrentBackgroundIdentity);
+                row.SemanticPrompt = prompt;
+                row.IsWrapContinuation = continuation;
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -4624,77 +4382,71 @@ public sealed class BasicVtProcessor : IVtProcessor,
                 break;
         }
 
-        NormalizeRowWideCells(row);
         row.IsDirty = true;
     }
 
-    private void InsertLines(int count)
+    private void InsertLines(int count) => ShiftLines(count, insert: true);
+
+    private void DeleteLines(int count) => ShiftLines(count, insert: false);
+
+    private void ShiftLines(int count, bool insert)
     {
         ClampCursor();
-        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
-
-        for (var n = 0; n < count; n++)
+        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom || !CursorInsideHorizontalMargins) return;
+        count = Math.Clamp(count, 1, _scrollBottom - _cursorRow + 1);
+        bool restoreImages = _kittyStore.PlacementCount > 0;
+        if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0);
+        try
         {
-            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: 1);
-            // Shift rows down from cursor to scroll bottom
-            for (var r = _scrollBottom; r > _cursorRow; r--)
+            if (HasHorizontalMargins)
             {
-                if (r < _screen.ViewportRows && r - 1 >= 0)
-                    CopyRow(_screen.GetViewportRow(r - 1), _screen.GetViewportRow(r));
+                ScrollRectangle(_cursorRow, _scrollBottom, count, insert);
+                return;
             }
-            // Clear the line at cursor
-            if (_cursorRow < _screen.ViewportRows)
-            {
-                _screen.GetViewportRow(_cursorRow).Clear(_currentFg, _currentBg);
-                _screen.ClearRasterGraphicsInViewportRectangle(
-                    _cursorRow,
-                    _cursorRow,
-                    0,
-                    _screen.Columns - 1);
-            }
+            ShiftFullWidthRows(_cursorRow, _scrollBottom, count, insert);
+            _screen.ClearRasterGraphicsInViewportRectangle(
+                insert ? _cursorRow : _scrollBottom - count + 1,
+                insert ? _cursorRow + count - 1 : _scrollBottom,
+                0, _screen.Columns - 1);
         }
-        _screen.InvalidateAll();
-    }
-
-    private void DeleteLines(int count)
-    {
-        ClampCursor();
-        if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom) return;
-
-        for (var n = 0; n < count; n++)
+        finally
         {
-            _screen.ShiftRasterGraphicsInViewportRows(_cursorRow, _scrollBottom, rowDelta: -1);
-            // Shift rows up from cursor to scroll bottom
-            for (var r = _cursorRow; r < _scrollBottom; r++)
-            {
-                if (r >= 0 && r + 1 < _screen.ViewportRows)
-                    CopyRow(_screen.GetViewportRow(r + 1), _screen.GetViewportRow(r));
-            }
-            // Clear the bottom row of the scroll region
-            if (_scrollBottom < _screen.ViewportRows)
-            {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg);
-                _screen.ClearRasterGraphicsInViewportRectangle(
-                    _scrollBottom,
-                    _scrollBottom,
-                    0,
-                    _screen.Columns - 1);
-            }
+            if (restoreImages) _kittyStore.EndMarginScroll(_screen);
+            _cursorCol = _scrollLeft;
+            // Like Ghostty, an out-of-margin no-op keeps its pending wrap.
+            // Only an effective IL/DL returns to the left margin and clears it.
+            ResetDelayedWrap();
         }
-        _screen.InvalidateAll();
     }
 
     private void InsertCharacters(int count)
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (!CursorInsideHorizontalMargins) return;
+        count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        for (var c = _screen.Columns - 1; c >= _cursorCol + count; c--)
-            row[c] = row[c - count];
-        for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        // Ghostty clears split pairs before swapping. Repairing afterward can
+        // join an old head to an unrelated tail and retain dead metadata.
+        if (_cursorCol > 0 && row.ReadOnlyCells[_cursorCol].Width == 0 &&
+            !row.ReadOnlyCells[_cursorCol].IsWideSpacerHead)
+            EraseCells(row, _cursorCol - 1, 2);
+        SplitCharacterEditBoundary(row, RightMargin + 1);
+        int shifted = RightMargin - _cursorCol + 1 - count;
+        if (shifted > 0 && row.ReadOnlyCells[_cursorCol + shifted - 1].Width == 2)
+            EraseCells(row, _cursorCol + shifted - 1, 2);
+        using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
+        {
+            for (var c = RightMargin; c >= _cursorCol + count; c--)
+            {
+                styles.Swap(c, c - count);
+                row[c] = row[c - count];
+            }
+            styles.Clear(_cursorCol, count);
+            row.Cells.Slice(_cursorCol, count).Fill(CreateErasedCell());
+        }
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4708,13 +4460,27 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (!CursorInsideHorizontalMargins) return;
+        count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        for (var c = _cursorCol; c + count < _screen.Columns; c++)
-            row[c] = row[c + count];
-        for (var c = Math.Max(_cursorCol, _screen.Columns - count); c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        SplitCharacterEditBoundary(row, _cursorCol);
+        SplitCharacterEditBoundary(row, _cursorCol + count);
+        SplitCharacterEditBoundary(row, RightMargin + 1);
+        using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
+        {
+            for (var c = _cursorCol; c + count <= RightMargin; c++)
+            {
+                styles.Swap(c, c + count);
+                row[c] = row[c + count];
+            }
+            int start = Math.Max(_cursorCol, RightMargin + 1 - count);
+            styles.Clear(start, RightMargin + 1 - start);
+            row.Cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
+        }
+        ResetCursorRowSoftWrap(row);
+        ResetDelayedWrap();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4728,11 +4494,21 @@ public sealed class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
+        if (ProtectionMode == CharacterProtectionMode.Iso)
+        {
+            EraseProtectedCharacters(count);
+            return;
+        }
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
-            row[c] = TerminalCell.Empty(_currentFg, _currentBg);
+        int end = Math.Min(row.Columns, _cursorCol + count);
+        if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
+        SplitCharacterEditBoundary(row, _cursorCol);
+        SplitCharacterEditBoundary(row, end);
+        ResetCursorRowSoftWrap(row);
+        ResetDelayedWrap();
+        EraseCells(row, _cursorCol, end - _cursorCol);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4748,52 +4524,55 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
         if (row.PreservedColumns > row.Columns)
         {
+            using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+            styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
             row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
         }
     }
 
-    private static void NormalizeRowWideCells(TerminalRow row)
+    private void NormalizeRowWideCells(TerminalRow row)
     {
         for (int col = 0; col < row.Columns; col++)
         {
-            ref TerminalCell cell = ref row[col];
+            // Inspection must not detach a COW row after an ownership swap.
+            // Acquire a writable reference only for an actual repair.
+            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
             if (cell.Width == 2)
             {
                 if (col + 1 >= row.Columns)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                     continue;
                 }
 
-                ref TerminalCell trailing = ref row[col + 1];
+                ref readonly TerminalCell trailing = ref row.ReadOnlyCells[col + 1];
                 if (trailing.Width != 0 || trailing.HasContent)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                     continue;
                 }
 
-                trailing.Codepoint = 0;
-                trailing.Grapheme = null;
-                trailing.Foreground = cell.Foreground;
-                trailing.Background = cell.Background;
-                trailing.Attributes = cell.Attributes;
-                trailing.UnderlineStyle = cell.UnderlineStyle;
-                trailing.UnderlineColor = cell.UnderlineColor;
-                trailing.HasUnderlineColor = cell.HasUnderlineColor;
-                trailing.Decorations = cell.Decorations;
-                trailing.HasBackground = cell.HasBackground;
-                trailing.HyperlinkId = cell.HyperlinkId;
-                trailing.Width = 0;
+                // A late width selector prints the tail using the current
+                // pen. Keep its independent style, link and protection.
+                if (trailing.Codepoint != 0 || trailing.Grapheme is not null || trailing.IsWideSpacerHead)
+                {
+                    ref TerminalCell repaired = ref row[col + 1];
+                    repaired.Codepoint = 0;
+                    repaired.Grapheme = null;
+                    repaired.Width = 0;
+                    repaired.IsWideSpacerHead = false;
+                }
                 col++;
                 continue;
             }
 
             if (cell.Width == 0)
             {
-                bool hasWideLeader = col > 0 && row[col - 1].Width == 2;
+                if (cell.IsWideSpacerHead && col == row.Columns - 1 && row.WrapsToNext) continue;
+                bool hasWideLeader = col > 0 && row.ReadOnlyCells[col - 1].Width == 2;
                 if (!hasWideLeader)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                 }
 
                 continue;
@@ -4801,7 +4580,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
             if (cell.Width != 1)
             {
-                cell.Width = 1;
+                row[col].Width = 1;
             }
         }
     }
@@ -4812,6 +4591,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void SoftReset()
     {
+        EndRenderHold();
+        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
         _cursorVisible = true;
         _originMode = false;
         _autoWrap = true;
@@ -4825,75 +4606,28 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
         _sixelDisplayMode = false;
+        ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
-        _cursorStyle = 1;
         ResetDelayedWrap();
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
-        _useLineDrawing = false;
-        _g0IsLineDrawing = false;
-        _g1IsLineDrawing = false;
-        _shiftOut = false;
-        _lastGraphicCodepoint = 0;
+        ResetHorizontalMargins();
+        _charsets = new();
+        _lastGraphicCodepoint = -1;
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
-        _savedUnderlineStyle = TerminalUnderlineStyle.None;
-        _savedUnderlineColor = 0;
-        _savedHasUnderlineColor = false;
-        _savedDecorations = CellDecorations.None;
-        _savedHyperlinkId = 0;
+        ResetApcCommand();
         _currentHyperlinkId = 0;
-        _kittyKeyboardFlagsMain = 0;
-        _kittyKeyboardFlagsAlt = 0;
-        _kittyKeyboardStackMain.Clear();
-        _kittyKeyboardStackAlt.Clear();
+        _kittyKeyboardMain = default;
+        _kittyKeyboardAlt = default;
         ResetAttributes();
         InitTabStops();
+        ApplyConfiguredModeDefaults();
+        SetCursorStyle(0);
     }
-
-    #endregion
-
-    #region DEC Line Drawing Character Set
-
-    /// <summary>
-    /// Maps ASCII characters to DEC Special Graphics set codepoints.
-    /// Used for drawing borders and lines in TUI applications.
-    /// </summary>
-    private static int MapLineDrawing(char ch) => ch switch
-    {
-        'j' => 0x2518, // ┘ Bottom-right corner
-        'k' => 0x2510, // ┐ Top-right corner
-        'l' => 0x250C, // ┌ Top-left corner
-        'm' => 0x2514, // └ Bottom-left corner
-        'n' => 0x253C, // ┼ Crossing lines
-        'q' => 0x2500, // ─ Horizontal line
-        't' => 0x251C, // ├ Left tee
-        'u' => 0x2524, // ┤ Right tee
-        'v' => 0x2534, // ┴ Bottom tee
-        'w' => 0x252C, // ┬ Top tee
-        'x' => 0x2502, // │ Vertical line
-        'a' => 0x2592, // ▒ Checkerboard
-        'f' => 0x00B0, // ° Degree symbol
-        'g' => 0x00B1, // ± Plus/minus
-        'h' => 0x2592, // ▒ Board of squares (NL)
-        'o' => 0x23BA, // ⎺ Scan line 1
-        'p' => 0x23BB, // ⎻ Scan line 3
-        'r' => 0x23BC, // ⎼ Scan line 7
-        's' => 0x23BD, // ⎽ Scan line 9
-        '`' => 0x25C6, // ◆ Diamond
-        '~' => 0x00B7, // · Bullet (middle dot)
-        '_' => 0x0020, // (blank)
-        '0' => 0x2588, // █ Solid block
-        'y' => 0x2264, // ≤ Less-than-or-equal
-        'z' => 0x2265, // ≥ Greater-than-or-equal
-        '{' => 0x03C0, // π Pi
-        '|' => 0x2260, // ≠ Not equal
-        '}' => 0x00A3, // £ Pound sign
-        _ => ch,
-    };
 
     #endregion
 
@@ -4905,35 +4639,6 @@ public sealed class BasicVtProcessor : IVtProcessor,
         return _theme.Palette[index];
     }
 
-    private static bool TryParseOscColorSpec(string value, out uint color)
-    {
-        color = 0;
-        string token = value.Trim();
-        if (token.Length == 0)
-        {
-            return false;
-        }
-
-        if (token.StartsWith('#'))
-        {
-            return TerminalThemeParser.TryParseColor(token, out color);
-        }
-
-        if (token.StartsWith("rgb:", StringComparison.OrdinalIgnoreCase))
-        {
-            return TerminalThemeParser.TryParseColor(token, out color);
-        }
-
-        if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
-            uint.TryParse(token.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint packed))
-        {
-            color = (packed & 0x00FFFFFFu) | 0xFF000000u;
-            return true;
-        }
-
-        return false;
-    }
-
     #endregion
 
     /// <summary>
@@ -4941,12 +4646,16 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void Reset()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ResetInternal(raiseModeChanged: true, SessionScreenResetMode.ClearViewport);
     }
 
     /// <inheritdoc />
     public void PrepareForNewSession(bool preserveScrollback)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
+        ClearSessionNotifications();
+        _dragDrop = null;
         ResetInternal(
             raiseModeChanged: true,
             preserveScrollback
@@ -4957,12 +4666,15 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void ClearScrollback()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         _screen.ClearScrollback();
     }
 
     /// <inheritdoc />
     public void ClearVisibleHistory()
     {
+        _screen.ThrowIfSnapshotMutationFailed();
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
             return;
@@ -4975,7 +4687,16 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
+        using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
+        _notifications?.ResetParser();
+        _dragDrop?.ResetParser();
         TerminalModeState before = ModeState;
+        EndRenderHold();
+        _primaryKittyStore.Clear(_screen);
+        _alternateKittyStore?.Clear(_screen);
+        _kittyStore = _primaryKittyStore;
+        _animationNextTickDelay = null;
+        _screen.ClearKittyGraphics();
         bool restorePrimaryAfterAlternateRestart =
             screenResetMode == SessionScreenResetMode.PreserveScrollback &&
             (_inAltScreen || _screen.AlternateBufferActive);
@@ -4986,7 +4707,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
         {
             if (_inAltScreen)
             {
-                SwitchToMainScreen();
+                SwitchToMainScreen(restoreRestartPosition: true);
                 restoredPrimaryCursorCol = _cursorCol;
                 restoredPrimaryCursorRow = _cursorRow;
             }
@@ -5013,15 +4734,38 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _cursorRow = 0;
         ResetDelayedWrap();
         _state = ParserState.Ground;
+        _utf8Codepoint = 0;
+        _utf8Remaining = 0;
+        _continuation.Reset();
+        _statusDisplay = 0;
+        _title.Set([]);
+        _workingDirectory.Set([]);
+        MouseShiftCaptureOverride = null;
+        ModifyOtherKeys2 = false;
+        PasswordInput = false;
         _params.Clear();
+        _currentParam = 0;
+        _hasParam = false;
+        _csiColonSeparators = 0;
+        _intermediateCount = 0;
         _csiPrivateMarker = '\0';
         _intermediateChar = '\0';
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
         _dcsBuffer.Clear();
         _isDiscardingDcsPayload = false;
+        ResetApcCommand();
+        _kittyClipboardProtocol.Reset();
+        _screen.ClearRegisteredGlyphs();
+        _currentProtected = false;
+        _primaryProtectionMode = _alternateProtectionMode = CharacterProtectionMode.Off;
+        _primarySemanticPen = _alternateSemanticPen = default;
+        _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter = 0;
+        _primaryPromptPolicy = _alternatePromptPolicy = default;
+        _promptRedraw = TerminalPromptRedraw.All;
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
+        ResetHorizontalMargins();
         _inAltScreen = false;
         _autoWrap = true;
         _cursorVisible = true;
@@ -5036,32 +4780,35 @@ public sealed class BasicVtProcessor : IVtProcessor,
         _sendReceiveMode = true;
         ResetExtendedDecModesToDefaults();
         _sixelDisplayMode = false;
+        ResetSavedAndScreenModes();
         _insertMode = false;
         _lineFeedNewLineMode = false;
-        _cursorStyle = 1;
-        _useLineDrawing = false;
-        _g0IsLineDrawing = false;
-        _g1IsLineDrawing = false;
-        _shiftOut = false;
-        _lastGraphicCodepoint = 0;
-        _savedUnderlineStyle = TerminalUnderlineStyle.None;
-        _savedUnderlineColor = 0;
-        _savedHasUnderlineColor = false;
-        _savedDecorations = CellDecorations.None;
-        _savedHyperlinkId = 0;
+        _primaryCursorStyle = _alternateCursorStyle = TerminalCursorStyle.Block;
+        _charsets = _primaryCharsets = _alternateCharsets = new();
+        _lastGraphicCodepoint = -1;
+        _primarySavedCursor = _alternateSavedCursor = null;
+        _snapshotPrimaryPen = _snapshotAlternatePen = default;
+        _snapshotPrimaryProtected = _snapshotAlternateProtected = false;
+        _snapshotPrimaryHyperlink = _snapshotAlternateHyperlink = 0;
+        _alternateEraseBackground = default;
+        _savedAlternateCursorCol = _savedAlternateCursorRow = 0;
+        _savedAlternateDelayedWrap = false;
         _currentHyperlinkId = 0;
-        _kittyKeyboardFlagsMain = 0;
-        _kittyKeyboardFlagsAlt = 0;
-        _kittyKeyboardStackMain.Clear();
-        _kittyKeyboardStackAlt.Clear();
+        _kittyKeyboardMain = default;
+        _kittyKeyboardAlt = default;
         ResetAttributes();
         InitTabStops();
+        ApplyConfiguredModeDefaults();
+
+        // Ghostty fullReset selects the configured cursor after modes.reset;
+        // this policy takes precedence over the restored default mode bank.
+        SetCursorStyle(0);
 
         switch (screenResetMode)
         {
             case SessionScreenResetMode.ClearViewport:
                 for (var r = 0; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+                    ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
                 _screen.ClearRasterGraphics();
                 break;
 
@@ -5094,32 +4841,33 @@ public sealed class BasicVtProcessor : IVtProcessor,
     /// <summary>
     /// Notify the processor that the screen has been resized.
     /// Updates the scroll region to match the new dimensions.
+    /// Processor-owned updates are transactional; a preceding host-owned screen resize is not undone on failure.
     /// </summary>
     public void NotifyResize(int columns, int rows)
-    {
-        ApplyResizeState(columns, rows);
-    }
+        => ResizeScreenCore(columns, rows, _widthPx, _heightPx, !_inAltScreen,
+            Span<TerminalGridPosition>.Empty, false, reportSize: false, notifyOnly: true);
 
     /// <summary>
     /// Notify the processor that the screen has been resized with pixel dimensions.
     /// Pixel dimensions are used to answer CSI 14t/16t size reports.
+    /// Size responses are delivered after committing processor state; response callback failures do not undo it.
     /// </summary>
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
-    {
-        _widthPx = Math.Max(0, widthPx);
-        _heightPx = Math.Max(0, heightPx);
-        NotifyResize(columns, rows);
-    }
+        => ResizeScreenCore(columns, rows, (uint)Math.Max(0, widthPx), (uint)Math.Max(0, heightPx), !_inAltScreen,
+            Span<TerminalGridPosition>.Empty, false, reportSize: true, notifyOnly: true);
 
     /// <summary>
     /// Resizes the associated screen buffer and remaps the managed cursor through any row reflow.
+    /// Both buffers and processor state are committed together. Before publication, failure preserves the
+    /// original state; response callbacks run after commit. Reacquire row references after successful resize.
+    /// Reflow is enabled by default, subject to the current buffer and autowrap policy.
     /// </summary>
     public void ResizeScreen(
         int columns,
         int rows,
         int widthPx,
         int heightPx,
-        bool reflowOnResize,
+        bool reflowOnResize = true,
         bool preserveViewportTopOnRowsIncrease = false)
     {
         ResizeScreen(
@@ -5134,6 +4882,8 @@ public sealed class BasicVtProcessor : IVtProcessor,
 
     /// <summary>
     /// Resizes the associated screen buffer and remaps the managed cursor plus absolute grid anchors through row reflow.
+    /// The supplied positions change only on commit. Failure before publication preserves both buffers and
+    /// processor state; response callbacks run after commit. Reacquire rows after successful publication.
     /// </summary>
     public void ResizeScreen(
         int columns,
@@ -5143,69 +4893,197 @@ public sealed class BasicVtProcessor : IVtProcessor,
         bool reflowOnResize,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
-    {
-        _widthPx = Math.Max(0, widthPx);
-        _heightPx = Math.Max(0, heightPx);
+        => ResizeScreenCore(columns, rows, (uint)Math.Max(0, widthPx), (uint)Math.Max(0, heightPx), reflowOnResize,
+            trackedAbsolutePositions, preserveViewportTopOnRowsIncrease, reportSize: true);
 
+    private void ResizeScreenCore(int columns, int rows, uint widthPx, uint heightPx,
+        bool reflowOnResize, Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease, bool reportSize, bool notifyOnly = false)
+    {
+        _screen.ThrowIfSnapshotMutationFailed();
+        ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
+        ApplySnapshotCursorStyleDrops();
+        // Ghostty Screen.resize guarantees unchanged state on failure. Stage
+        // both buffers, even during a synchronized-output hold, and publish only
+        // after cursor metadata, graphics and the size response are prepared.
+        ResizeRollbackState rollback = new(this);
+        Span<TerminalGridPosition> positions = trackedAbsolutePositions.Length <= 32
+            ? stackalloc TerminalGridPosition[trackedAbsolutePositions.Length]
+            : new TerminalGridPosition[trackedAbsolutePositions.Length];
+        trackedAbsolutePositions.CopyTo(positions);
+        byte[]? response;
+        try
+        {
+            _screen = _screen.CreateStateCopy();
+            _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
+            _kittyStore = _kittyStore.CreateStateCopy();
+            // Width changes reset tab stops. Reserve the replacement once;
+            // keep custom stops and their existing set on height-only resizes.
+            if (_tabStopColumns != columns && (notifyOnly || columns != _screen.Columns || rows != _screen.ViewportRows))
+                _tabStops = new((Math.Max(columns, _screen.Columns) - 1) / 8 + 1);
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Staged);
+            if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
+            _widthPx = widthPx;
+            _heightPx = heightPx;
+
+            int oldColumns = _screen.Columns;
+            int oldRows = _screen.ViewportRows;
+            // NotifyResize normally follows a host-owned screen resize. During
+            // an output hold only the published screen was resized by that host;
+            // the live held state must be resized before replacing it.
+            bool resizeBuffers = !notifyOnly || _renderHold is not null;
+            if (resizeBuffers && (columns != oldColumns || rows != oldRows))
+            {
+                // Ghostty resizes primary first, even when alternate is visible.
+                if (_inAltScreen)
+                    ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+                _currentHyperlinkId = ResizeActiveScreenBuffer(columns, rows, reflowOnResize, positions, preserveViewportTopOnRowsIncrease);
+                if (!_inAltScreen)
+                    ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+                ApplyResizeState(columns, rows);
+            }
+            else if (notifyOnly) ApplyResizeState(columns, rows);
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Layout);
+            _renderHold = null;
+            AdvanceKittyAnimations();
+            PublishKittyGraphics();
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Graphics);
+            response = reportSize ? CreateInBandSizeReport() : null;
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Ready);
+        }
+        catch
+        {
+            rollback.Restore(this);
+            throw;
+        }
+
+        // No allocation or host callback between these ownership transfers.
+        _publishedScreen.AdoptStateFrom(_screen);
+        _screen = _publishedScreen;
+        if (_inAltScreen) _alternateKittyStore = _kittyStore;
+        else _primaryKittyStore = _kittyStore;
+        SetExtendedDecMode(2026, false);
+        _mouseEncoder.ResetMotion();
+        positions.CopyTo(trackedAbsolutePositions);
+        // Observer exceptions do not undo an already committed resize. The
+        // callback may have sent bytes or re-entered the terminal before throwing.
+        if (response is not null) ResponseCallback?.Invoke(response);
+    }
+
+    private int ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
+        Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease,
+        GhosttySnapshotStyle? snapshotPen = null, int? snapshotHyperlink = null)
+    {
+        GhosttySnapshotStyle resizePen = _screen.TracksSnapshotMetadata ? snapshotPen ?? CaptureSnapshotPen() : default;
+        int key = _inAltScreen ? 1 : 0;
+        int resizeHyperlink = _screen.SnapshotCursorHyperlinkToken(key, snapshotHyperlink ?? _currentHyperlinkId);
+        ref uint hyperlinkCounter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
         bool alternateScreen = _inAltScreen;
-        int previousCursorCol = _cursorCol;
-        int previousCursorRow = _cursorRow;
+        bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
+        bool discardHiddenCells = columns < _screen.Columns &&
+            (alternateScreen || (!reflowOnResize || !_autoWrap) && !preserveViewportTopOnRowsIncrease);
         bool previousDelayedWrap = _delayedWrap;
-        int resizeCursorCol = _delayedWrap ? _screen.Columns : _cursorCol;
-        int alternateViewportTop = alternateScreen
-            ? Math.Max(0, _screen.TotalRows - _screen.ViewportRows)
-            : 0;
+        // Ghostty pins the actual cell, including a pending-wrap cursor.
+        // Pending wrap survives independently; it is not an end-column pin.
+        int resizeCursorCol = _cursorCol;
         int restoreScrollOffset = alternateScreen ? 0 : _screen.ScrollOffset;
         if (_screen.ScrollOffset != 0)
         {
             _screen.ScrollOffset = 0;
         }
 
+        TerminalScreenAnchor? savedCursorAnchor = null;
+        TerminalScreenAnchor? activeTopAnchor = null;
+        GhosttySnapshotPageTracker.CursorResizeLease? cursorLease = null;
         TerminalGridPosition mappedCursor;
         try
         {
-            mappedCursor = _screen.Resize(
-                columns,
-                rows,
-                reflowOnResize && !alternateScreen,
-                alternateScreen ? null : new TerminalGridPosition(resizeCursorCol, _cursorRow),
-                trackedAbsolutePositions,
-                preserveViewportTopOnRowsIncrease && !alternateScreen);
+            try
+            {
+                savedCursorAnchor = TrackSavedCursorForResize();
+                if (!alternateScreen && !_options.ResizePullScrollback && !preserveViewportTopOnRowsIncrease)
+                    activeTopAnchor = _screen.CreateAnchor(_screen.TotalRows - _screen.ViewportRows, 0);
+                // Allocate pins before detaching the cursor. Both allocators
+                // retain temporary references while row operations see no pen.
+                cursorLease = _screen.BeginSnapshotCursorResize(key, _cursorRow, resizePen, ref resizeHyperlink, ref hyperlinkCounter);
+                mappedCursor = _screen.Resize(
+                    columns,
+                    rows,
+                    reflowOnResize && _autoWrap && !alternateScreen,
+                    new TerminalGridPosition(resizeCursorCol, _cursorRow),
+                    trackedAbsolutePositions,
+                    preserveViewportTopOnRowsIncrease && !alternateScreen,
+                    preserveVtCursorOnResize: _options.ResizePullScrollback &&
+                        !alternateScreen && !preserveViewportTopOnRowsIncrease);
+
+                if (discardHiddenCells) _screen.DiscardHiddenCells();
+                if (activeTopAnchor is not null && _screen.TryResolveAnchor(activeTopAnchor, out TerminalGridPosition activeTop))
+                {
+                    int previousTop = _screen.TotalRows - _screen.ViewportRows;
+                    _screen.PadBottomViewportToPreserveTop(activeTop.Row);
+                    int mappedRow = mappedCursor.Row - (_screen.TotalRows - _screen.ViewportRows - previousTop);
+                    mappedCursor = mappedRow < 0 ? new(0, 0) : mappedCursor with { Row = mappedRow };
+                }
+
+                if (savedCursorAnchor is not null) RemapSavedCursorAfterResize(savedCursorAnchor);
+                ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateRows : ManagedResizeCheckpoint.PrimaryRows);
+            }
+            finally
+            {
+                if (savedCursorAnchor is not null) _screen.ReleaseAnchor(savedCursorAnchor);
+                if (activeTopAnchor is not null) _screen.ReleaseAnchor(activeTopAnchor);
+                if (!alternateScreen && restoreScrollOffset != 0) _screen.ScrollOffset = restoreScrollOffset;
+            }
+
+            SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
+            _cursorRow = Math.Clamp(mappedCursor.Row, 0, rows - 1);
+            _cursorCol = Math.Clamp(_cursorCol, 0, columns - 1);
+            if (gridSizeChanged)
+            {
+                // Redraw concerns the live cursor, not a scrolled viewport.
+                int scrollOffset = _screen.ScrollOffset;
+                _screen.ScrollOffset = 0;
+                try { ClearPromptForRedraw(); }
+                finally { _screen.ScrollOffset = scrollOffset; }
+            }
+
+            // Style first, then hyperlink, then release temporary references
+            // only in the allocator which survived. Implicit links receive a
+            // fresh identity even on height-only/reserved-width resizes.
+            int hyperlink = cursorLease is not null ? cursorLease.Complete(_cursorRow, ref hyperlinkCounter)
+                : _screen.RestoreSnapshotResizeCursor(key, _cursorRow, resizePen, resizeHyperlink, ref hyperlinkCounter);
+            if (!_screen.SnapshotCursorStyleIsCurrent(key, _cursorRow, resizePen))
+            {
+                // The inactive-buffer resize borrows cursor coordinates, not
+                // the active processor pen. Update only its dormant register.
+                if (snapshotPen.HasValue)
+                {
+                    if (key == 0) _snapshotPrimaryPen = default;
+                    else _snapshotAlternatePen = default;
+                }
+                else ResetAttributes();
+            }
+            // Inactive resize temporarily borrows _inAltScreen/coordinates,
+            // not the active pen. Its accepted pen was assigned above.
+            _screen.AcknowledgeSnapshotCursorStyle(key);
+            ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateCursor : ManagedResizeCheckpoint.PrimaryCursor);
+            return hyperlink;
         }
         finally
         {
-            if (!alternateScreen && restoreScrollOffset != 0)
-            {
-                _screen.ScrollOffset = restoreScrollOffset;
-            }
+            cursorLease?.Dispose();
         }
-
-        if (alternateScreen)
-        {
-            _screen.PadBottomViewportToPreserveTop(alternateViewportTop);
-            _cursorCol = previousCursorCol;
-            _cursorRow = previousCursorRow;
-            _delayedWrap = previousDelayedWrap;
-        }
-        else
-        {
-            SetCursorFromMappedResize(columns, mappedCursor, previousDelayedWrap);
-            _cursorRow = mappedCursor.Row;
-        }
-
-        ApplyResizeState(columns, rows);
     }
 
     private void ApplyResizeState(int columns, int rows)
     {
         int safeColumns = Math.Max(1, columns);
         int safeRows = Math.Max(1, rows);
+        ResetHorizontalMargins();
 
         _scrollBottom = safeRows - 1;
-        if (_scrollTop >= safeRows)
-        {
-            _scrollTop = 0;
-        }
+        _scrollTop = 0;
 
         if (_cursorRow >= safeRows)
         {
@@ -5229,7 +5107,7 @@ public sealed class BasicVtProcessor : IVtProcessor,
             _cursorCol = 0;
         }
 
-        InitTabStops();
+        if (_tabStopColumns != safeColumns) InitTabStops();
     }
 
     private void SetCursorFromMappedResize(int columns, TerminalGridPosition mappedCursor, bool restoreDelayedWrapAtEnd)
@@ -5243,76 +5121,143 @@ public sealed class BasicVtProcessor : IVtProcessor,
         }
 
         _cursorCol = Math.Clamp(mappedCursor.Column, 0, safeColumns - 1);
-        _delayedWrap = false;
+        _delayedWrap = restoreDelayedWrapAtEnd;
     }
 
     /// <inheritdoc />
     public void ApplyTheme(TerminalTheme theme)
     {
+        _screen.ThrowIfSnapshotMutationFailed();
         ArgumentNullException.ThrowIfNull(theme);
 
-        TerminalTheme previousTheme = _theme;
-        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
+        _colors.Configure(theme);
+        ApplyEffectiveTheme(_colors.GetEffectiveTheme());
+    }
+
+    private void ApplyEffectiveTheme(TerminalTheme theme)
+    {
 
         _theme = theme;
         _screen.ApplyTheme(theme, invalidateRows: true);
 
-        _currentFg = RemapColor(_currentFg, colorRemap);
-        _currentBg = RemapColor(_currentBg, colorRemap);
-        _savedFg = RemapColor(_savedFg, colorRemap);
-        _savedBg = RemapColor(_savedBg, colorRemap);
+        _currentFg = ResolveColorIdentity(GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg), theme.DefaultForeground);
+        _currentBg = ResolveColorIdentity(GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg), theme.DefaultBackground);
+        if (_currentHasUnderlineColor) _currentUnderlineColor = ResolveColorIdentity(_currentUnderlineIdentity, _currentFg);
     }
 
-    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
-    {
-        Dictionary<uint, uint> remap = new(capacity: 258);
-        HashSet<uint> ambiguousSources = new();
-
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
-
-        for (int i = 0; i < 256; i++)
+    private uint ResolveColorIdentity(TerminalColorIdentity identity, uint defaultColor)
+        => identity.Kind switch
         {
-            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
-        }
-
-        return remap;
-    }
-
-    private static void AddColorRemap(
-        IDictionary<uint, uint> remap,
-        ISet<uint> ambiguousSources,
-        uint source,
-        uint target)
-    {
-        if (source == target || ambiguousSources.Contains(source))
-        {
-            return;
-        }
-
-        if (!remap.TryGetValue(source, out uint existing))
-        {
-            remap[source] = target;
-            return;
-        }
-
-        if (existing != target)
-        {
-            remap.Remove(source);
-            ambiguousSources.Add(source);
-        }
-    }
-
-    private static uint RemapColor(uint color, IReadOnlyDictionary<uint, uint> remap)
-    {
-        return remap.TryGetValue(color, out uint mapped) ? mapped : color;
-    }
+            TerminalColorKind.Palette => PaletteColor((int)identity.Value),
+            TerminalColorKind.Rgb => 0xFF000000u | identity.Value,
+            _ => defaultColor,
+        };
 
     /// <inheritdoc />
     public void Dispose()
     {
-        // No unmanaged resources to release.
+        ResetApcCommand();
+        ClearSessionNotifications();
+        _notificationHost = null;
+        _dragDrop = null;
+        _backgroundSearch?.Dispose();
+        _search.Reset();
+        EndRenderHold();
     }
+
+    /// <inheritdoc />
+    public TimeSpan? NextTimedRefreshDelay
+    {
+        get
+        {
+            if (_screen.SnapshotMutationFailed) return null;
+            TimeSpan? delay = _renderHold is { } hold
+                ? ClampRefreshDelay(TimeSpan.FromSeconds(1) - _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
+                : null;
+            if (_renderHold is null && _animationNextTickDelay is TimeSpan next)
+            {
+                TimeSpan animation = ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp));
+                if (delay is null || animation < delay) delay = animation;
+            }
+            if (_backgroundSearch is { NeedsRefresh: true })
+            {
+                TimeSpan search = TimeSpan.FromMilliseconds(24);
+                if (delay is null || search < delay) delay = search;
+            }
+            if (_notifications?.NextRefreshDelay is TimeSpan notification && (delay is null || notification < delay))
+                delay = notification;
+            return delay;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool RefreshTimedState()
+    {
+        if (_screen.SnapshotMutationFailed) return false;
+        _notifications?.Refresh();
+        bool changed = _backgroundSearch?.TakeChanged() ?? false;
+        if (_renderHold is { } hold &&
+            _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))
+        {
+            TerminalModeState before = ModeState;
+            SetExtendedDecMode(2026, false);
+            EndRenderHold();
+            RaiseModeChangedIfNeeded(before);
+            changed = true;
+        }
+        if (_animationNextTickDelay is TimeSpan delay &&
+            _options.TimeProvider.GetElapsedTime(_animationTickTimestamp) >= delay)
+        {
+            if (AdvanceKittyAnimations())
+            {
+                PublishKittyGraphics();
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private static TimeSpan ClampRefreshDelay(TimeSpan delay)
+        => delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
+
+    private void BeginRenderHold()
+    {
+        if (_renderHold is not null) return;
+        // DECSET 2026 publishes the completed input prefix, including its
+        // animation tick, before isolating the rest of this same write.
+        if (AdvanceKittyAnimations(commitInputPrefix: true)) PublishKittyGraphics();
+        // Publish the completed prefix of the current input chunk immediately,
+        // then continue parsing into an isolated state. Queries and host effects
+        // remain responsive while readers/renderers retain the completed frame.
+        _screen = _publishedScreen.CreateStateCopy();
+        _renderHold = new(
+            _options.TimeProvider.GetTimestamp(),
+            _cursorCol, _cursorRow, _cursorVisible, ActiveCursorStyle, _extendedDecModesEnabled.Contains(12), _inAltScreen);
+    }
+
+    private bool EndRenderHold()
+    {
+        if (_renderHold is null) return false;
+        // A failed private mutation is never published by timeout or Dispose.
+        // Retain its faulted owner so this processor cannot resume accidentally.
+        if (_screen.SnapshotMutationFailed) return false;
+        // Host admission policy can change while the terminal frame is frozen.
+        _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
+        _publishedScreen.AdoptStateFrom(_screen);
+        _screen = _publishedScreen;
+        _renderHold = null;
+        if (AdvanceKittyAnimations()) PublishKittyGraphics();
+        return true;
+    }
+
+    private readonly record struct RenderHoldState(
+        long StartedTimestamp,
+        int CursorColumn,
+        int CursorRow,
+        bool CursorVisible,
+        TerminalCursorStyle CursorStyle,
+        bool CursorBlinking,
+        bool AlternateScreen);
 
     private void RaiseModeChangedIfNeeded(TerminalModeState before)
     {

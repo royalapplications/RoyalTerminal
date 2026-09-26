@@ -9,6 +9,8 @@ namespace RoyalTerminal.Avalonia.Services;
 
 internal class DefaultTerminalKeyboardInputNormalizer : ITerminalKeyboardInputNormalizer
 {
+    public virtual void ResetInputState() { }
+
     public virtual TerminalKeyboardInputAction HandleKeyDown(KeyEventArgs e, in TerminalModeState modeState)
     {
         _ = e;

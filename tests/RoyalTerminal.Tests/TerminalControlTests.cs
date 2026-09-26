@@ -2445,16 +2445,17 @@ public class TerminalControlTests
         Assert.True(ContainsScreenText(control, "070-END"));
     }
 
-    [AvaloniaFact]
-    public void Control_HorizontalResizeShrinkWithoutReflow_HidesAndRestoresBufferedContent()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public void Control_HorizontalResizeWithoutReflow_DiscardsTruncatedContent(VtProcessorPreference preference)
     {
-        TerminalControl control = new()
-        {
-            Columns = 80,
-            Rows = 24,
-            ReflowOnResize = false,
-            VtProcessorPreference = VtProcessorPreference.Managed,
-        };
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), preference);
+        control.Columns = 80;
+        control.Rows = 24;
+        control.ReflowOnResize = false;
 
         string line = "COLUMN-000-010-020-030-040-050-060-070-END";
         control.WriteOutput(Encoding.UTF8.GetBytes(line));
@@ -2469,7 +2470,7 @@ public class TerminalControlTests
         control.Columns = 80;
 
         Assert.Equal(80, control.Screen.Columns);
-        Assert.True(ContainsScreenText(control, "070-END"));
+        Assert.False(ContainsScreenText(control, "070-END"));
     }
 
     [AvaloniaFact]
@@ -2830,17 +2831,20 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public void Control_ManagedResize_ShrinkFromNonScrollableViewportStaysAtLiveBottom()
+    public void Control_ManagedResize_WithHistoryPull_ShrinkFromNonScrollableViewportStaysAtLiveBottom()
     {
-        TerminalControl control = new()
-        {
-            Columns = 40,
-            Rows = 20,
-            AutoScroll = true,
-            ReflowOnResize = true,
-            VtProcessorPreference = VtProcessorPreference.Managed,
-        };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory(new BasicVtProcessorOptions { ResizePullScrollback = true }),
+            VtProcessorPreference.Managed);
+        control.Columns = 40;
+        control.Rows = 20;
+        control.AutoScroll = true;
+        control.ReflowOnResize = true;
 
+        // Setup size changes can retain blank history. Establish the intended
+        // non-scrollable starting state explicitly; growing below a non-bottom
+        // cursor now follows Ghostty and does not pull that history into view.
+        control.WriteOutput("\u001b[3J"u8.ToArray());
         control.WriteOutput(Encoding.UTF8.GetBytes(
             "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
 
@@ -3733,15 +3737,18 @@ public class TerminalControlTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Control_ManagedTransportOutput_ParsesOffUiThread_WhileDataReceivedRemainsOnUiThread()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Control_TransportOutput_ParsesOnDedicatedThread_WhileDataReceivedRemainsOnUiThread(
+        VtProcessorPreference preference)
     {
         FakeTransport transport = new();
         ThreadTrackingVtProcessorFactory factory = new();
         TerminalControl control = CreateControlWithTransport(
             transport,
             factory,
-            VtProcessorPreference.Managed);
+            preference);
 
         int uiThreadId = Environment.CurrentManagedThreadId;
         int? dataReceivedThreadId = null;
@@ -3766,7 +3773,195 @@ public class TerminalControlTests
 
             Assert.True(eventRaised, "Expected DataReceived to be raised for managed transport output.");
             Assert.NotEqual(uiThreadId, factory.LastProcessor!.LastProcessThreadId);
+            Assert.False(factory.LastProcessor.LastProcessUsedThreadPool);
             Assert.Equal(uiThreadId, dataReceivedThreadId);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_Flush_ReportsParserFailure_AndStopStillDisposesWorker()
+    {
+        FakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new()
+        {
+            ProcessException = new InvalidOperationException("test parser failure"),
+        };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("fail"u8.ToArray()));
+
+            InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
+                control.FlushPendingTransportOutput);
+            Assert.Equal("test parser failure", failure.Message);
+            Assert.Throws<InvalidOperationException>(control.StopPty);
+            Assert.False(control.HasActiveSession);
+
+            // Stop must dispose the failed worker even when its barrier reports a failure.
+            control.FlushPendingTransportOutput();
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_TimedRefresh_AdvancesWithoutNewOutput_OnUiThreadUnderStateLock()
+    {
+        FakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new() { EnableTimedRefresh = true };
+        TerminalControl control = CreateControlWithTransport(
+            transport,
+            factory,
+            VtProcessorPreference.Managed);
+        int uiThreadId = Environment.CurrentManagedThreadId;
+
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("frame"u8.ToArray()));
+            Assert.True(await WaitUntilAsync(
+                () => factory.LastProcessor!.TimedRefreshCount == 1,
+                TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(uiThreadId, factory.LastProcessor!.TimedRefreshThreadId);
+            Assert.True(factory.LastProcessor.TimedRefreshHeldStateLock);
+            await Task.Delay(30);
+            HeadlessTerminalTestCleanup.RunDispatcherJobs();
+            Assert.Equal(1, factory.LastProcessor.TimedRefreshCount);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Control_TransportShutdownFailureStillJoinsWorkerAndAllowsRestart(bool failDispose)
+    {
+        InvalidOperationException failure = new("transport shutdown failed");
+        FakeTransport transport = new()
+        {
+            StopException = failDispose ? null : failure,
+            DisposeException = failDispose ? failure : null,
+        };
+        TerminalControl control = CreateControlWithTransport(transport, new DefaultVtProcessorFactory(), VtProcessorPreference.Managed);
+        StringBuilder received = new();
+        control.DataReceived += (_, args) => received.Append(Encoding.UTF8.GetString(args.Data.Span));
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseData("before"u8.ToArray()));
+            control.FlushPendingTransportOutput();
+            Assert.Same(failure, Assert.Throws<InvalidOperationException>(control.StopPty));
+            Assert.False(control.HasActiveSession);
+            // A disposed worker cannot be left installed: Flush would throw.
+            control.FlushPendingTransportOutput();
+            transport.StopException = null;
+            transport.DisposeException = null;
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            await Task.Run(() => transport.RaiseRemovedData("stale"u8.ToArray()));
+            await Task.Run(() => transport.RaiseData("after"u8.ToArray()));
+            control.FlushPendingTransportOutput();
+            Assert.True(control.HasActiveSession);
+            Assert.DoesNotContain("stale", received.ToString(), StringComparison.Ordinal);
+            Assert.Contains("after", received.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            transport.StopException = null;
+            transport.DisposeException = null;
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_LeasedOutput_ReturnsStorageAfterParsing_AndPreservesEventPayload()
+    {
+        LeasedFakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        byte[] storage = "borrowed output"u8.ToArray();
+        ClearingOutputOwner owner = new(storage);
+        ReadOnlyMemory<byte> retained = default;
+        control.DataReceived += (_, args) => retained = args.Data;
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(transport.OutputLeaseCallback);
+            transport.OutputLeaseCallback!(new TerminalOutputLease(storage, owner, 1));
+            control.FlushPendingTransportOutput();
+
+            Assert.Equal(1, owner.ReleaseCount);
+            Assert.True(storage.AsSpan().IndexOfAnyExcept((byte)'z') < 0);
+            Assert.Equal("borrowed output", Encoding.UTF8.GetString(retained.Span));
+            Assert.True(factory.LastProcessor!.HasRecordedThread);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_LeasedOutput_ParserFailureReturnsStorage()
+    {
+        LeasedFakeTransport transport = new();
+        ThreadTrackingVtProcessorFactory factory = new()
+        {
+            ProcessException = new InvalidOperationException("parse failed"),
+        };
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        ClearingOutputOwner owner = new("bad"u8.ToArray());
+        try
+        {
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            transport.OutputLeaseCallback!(new TerminalOutputLease(owner.Storage, owner, 1));
+            Assert.Throws<InvalidOperationException>(control.FlushPendingTransportOutput);
+            Assert.Equal(1, owner.ReleaseCount);
+        }
+        finally
+        {
+            await HeadlessTerminalTestCleanup.CleanupControlAsync(control);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Control_UnixPty_NaturalExit_AllowsNextSession()
+    {
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
+        TerminalControl control = new() { VtProcessorPreference = VtProcessorPreference.Managed };
+        int exits = 0;
+        StringBuilder output = new();
+        control.ProcessExited += (_, _) => exits++;
+        control.DataReceived += (_, args) => output.Append(Encoding.UTF8.GetString(args.Data.Span));
+        try
+        {
+            foreach (string word in new[] { "first", "second" })
+            {
+                int previousExits = exits;
+                await control.StartSessionAsync(new PtyTransportOptions(
+                    Command: new TerminalCommandSpec("/bin/sh", ["-c", $"printf {word}"]),
+                    WorkingDirectory: null, Environment: null,
+                    Dimensions: new TerminalSessionDimensions(80, 24, 0, 0)));
+                Assert.True(await WaitUntilAsync(() => exits == previousExits + 1, TimeSpan.FromSeconds(5)));
+                Assert.False(control.HasActiveSession);
+            }
+
+            Assert.Contains("first", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("second", output.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -4683,15 +4878,19 @@ public class TerminalControlTests
 
         Assert.NotNull(control.Renderer);
         SkiaTerminalRenderer renderer = control.Renderer!;
-
-        control.WriteOutput("\x1b[6 q"u8);
-        Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
-
-        control.WriteOutput("\x1b[3 q"u8);
-        Assert.Equal(CursorStyle.Underline, renderer.CursorStyle);
-
-        control.WriteOutput("\x1b[1 q"u8);
-        Assert.Equal(CursorStyle.Block, renderer.CursorStyle);
+        Window window = new() { Content = control };
+        window.Show();
+        try
+        {
+            control.Focus();
+            control.WriteOutput("\x1b[6 q"u8);
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            control.WriteOutput("\x1b[3 q"u8);
+            Assert.Equal(CursorStyle.Underline, renderer.CursorStyle);
+            control.WriteOutput("\x1b[1 q"u8);
+            Assert.Equal(CursorStyle.Block, renderer.CursorStyle);
+        }
+        finally { window.Close(); }
     }
 
     [AvaloniaFact]
@@ -4711,6 +4910,74 @@ public class TerminalControlTests
         control.BackgroundOpacityEnabled = false;
         Assert.False(control.BackgroundOpacityEnabled);
         Assert.False(control.Renderer.BackgroundOpacityEnabled);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public void Control_GlyphCoverageTracksFontChangesAndProcessorReplacement(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), preference);
+        control.WriteOutput("ready"u8);
+        ITerminalGlyphCoverageSink sink = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        ITerminalGlyphCoverageSource original = control.Renderer!.GlyphCoverageSource;
+        Assert.Same(original, sink.GlyphCoverageSource);
+        Assert.True(original.HasSystemGlyph('A'));
+        control.FontFamilyName = "monospace";
+        Assert.NotSame(original, sink.GlyphCoverageSource);
+        Assert.Same(control.Renderer.GlyphCoverageSource, sink.GlyphCoverageSource);
+        control.FontSource = TerminalFontSource.File;
+        control.FontFilePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", "NotoEmoji-Regular.ttf");
+        Assert.Same(control.Renderer.GlyphCoverageSource, sink.GlyphCoverageSource);
+        Assert.True(sink.GlyphCoverageSource!.HasSystemGlyph(0x1F600));
+        control.VtProcessorPreference = preference == VtProcessorPreference.Managed && GhosttyVtProcessor.IsAvailable()
+            ? VtProcessorPreference.Native : VtProcessorPreference.Managed;
+        ITerminalGlyphCoverageSink replacement = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        Assert.Same(control.Renderer.GlyphCoverageSource, replacement.GlyphCoverageSource);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public void Control_SearchLifecycle_WrappedMatchCountsOnceAndUsesAsciiFolding(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            preference);
+        control.Columns = 4;
+        control.Rows = 5;
+        ArrangeControlToGrid(control, columns: 4, rows: 5);
+        control.WriteOutput("xxABCDEF\r\nabcdef"u8);
+        control.StartSearch("abcdef");
+        Assert.Equal(2, control.SearchTotal);
+        Assert.Equal(1, control.SearchSelected);
+        Assert.True(control.SelectNextSearchMatch());
+        Assert.Equal(0, control.SearchSelected);
+        SkiaTerminalRenderer renderer = control.Renderer!;
+        renderer.SearchSelectedHighlightColor = SKColors.Red;
+        renderer.SearchHighlightColor = SKColors.Lime;
+        renderer.CursorVisible = false;
+        using SKBitmap bitmap = new((int)Math.Ceiling(4 * renderer.CellWidth), (int)Math.Ceiling(5 * renderer.CellHeight));
+        using SKCanvas canvas = new(bitmap);
+        renderer.RenderFull(canvas, control.Screen!);
+        AssertCellContainsColor(2, 0, SKColors.Red);
+        AssertCellContainsColor(0, 1, SKColors.Red);
+        AssertCellContainsColor(0, 2, SKColors.Lime);
+        AssertCellContainsColor(0, 3, SKColors.Lime);
+        control.EndSearch();
+        Assert.Equal(0, control.SearchTotal);
+
+        void AssertCellContainsColor(int column, int row, SKColor expected)
+        {
+            for (int y = (int)(row * renderer.CellHeight); y < (int)((row + 1) * renderer.CellHeight); y++)
+            for (int x = (int)(column * renderer.CellWidth); x < (int)((column + 1) * renderer.CellWidth); x++)
+                if (bitmap.GetPixel(x, y) == expected) return;
+            Assert.Fail($"Cell ({column}, {row}) did not contain {expected}.");
+        }
     }
 
     [AvaloniaFact]
@@ -4807,6 +5074,49 @@ public class TerminalControlTests
         Assert.True(control.SelectPreviousSearchMatch());
         Assert.Equal(2, control.SearchSelected);
         Assert.Equal(2, control.SearchSelectedDisplayIndex);
+    }
+
+    [AvaloniaFact]
+    public void Control_AsyncSearchRetainsSelectedMatchWhenHistoryResultsArrive()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [new TerminalSearchMatch(18, 0, 5)]) { SearchStatus = TerminalSearchStatus.Pending };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new SingleProcessorFactory(processor), VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
+        control.StartSearch("needle");
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+        processor.SetSearchResults([new(1, 0, 5), new(8, 0, 5), new(18, 0, 5)]);
+        processor.SearchStatus = TerminalSearchStatus.Complete;
+        control.WriteOutput("refresh"u8);
+        Assert.Equal(3, control.SearchTotal);
+        Assert.Equal(2, control.SearchSelected);
+        control.StartSearch(null);
+        Assert.Equal(1, processor.SearchCancellationCount);
+        Assert.Null(control.SearchNeedle);
+        Assert.Equal(0, control.SearchTotal);
+    }
+
+    [AvaloniaFact]
+    public void Control_AsyncSearchFailureUsesSynchronousCapability()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [new TerminalSearchMatch(18, 0, 5)]) { SearchStatus = TerminalSearchStatus.Failed };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new SingleProcessorFactory(processor), VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
+        control.StartSearch("needle");
+        Assert.Equal(1, control.SearchTotal);
+        Assert.True(processor.SynchronousSearchCount > 0);
+        control.EndSearch();
+        Assert.Equal(1, processor.SearchCancellationCount);
     }
 
     [AvaloniaFact]
@@ -5326,14 +5636,22 @@ public class TerminalControlTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Control_AltDragSelection_SetsRectangularSelection()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Control_AltDragSelection_SetsRectangularSelection(VtProcessorPreference preference)
     {
-        TerminalControl control = new()
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable())
         {
-            Width = 640,
-            Height = 400,
-        };
+            return;
+        }
+
+        TerminalControl control = CreateControlWithTransport(
+            new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]),
+            preference);
+        control.Width = 640;
+        control.Height = 400;
         Window window = new()
         {
             Width = 640,
@@ -5360,7 +5678,9 @@ public class TerminalControlTests
             (int endColumn, int endRow) = renderer.SelectionEnd.GetValueOrDefault();
             Assert.Equal(1, startColumn);
             Assert.Equal(3, endColumn);
-            Assert.Equal(1, endRow - startRow);
+            // The pointer spans the centers of physical rows zero through two.
+            // Resize padding must not displace or clamp that three-row range.
+            Assert.Equal(2, endRow - startRow);
             Assert.True(startRow >= 0);
             Assert.True(renderer.SelectionIsRectangle);
         }
@@ -6553,7 +6873,7 @@ public class TerminalControlTests
     }
 
     private static TerminalControl CreateControlWithTransport(
-        FakeTransport transport,
+        ITerminalTransport transport,
         IVtProcessorFactory vtProcessorFactory,
         VtProcessorPreference preference,
         ITerminalScrollService? scrollService = null,
@@ -7733,10 +8053,30 @@ public class TerminalControlTests
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
+        ITerminalAsyncSearchSource,
         ITerminalScreenSnapshotSource,
         ITerminalResizeReflowPolicySink
     {
         private readonly List<TerminalSearchMatch> _matches = [.. matches];
+        public TerminalSearchStatus SearchStatus { get; set; } = TerminalSearchStatus.Complete;
+        public int SearchCancellationCount { get; private set; }
+        public int SynchronousSearchCount { get; private set; }
+        public Exception? SearchError => SearchStatus == TerminalSearchStatus.Failed ? new InvalidOperationException("Search failed") : null;
+
+        public void SetSearchResults(IReadOnlyList<TerminalSearchMatch> results)
+        {
+            _matches.Clear();
+            _matches.AddRange(results);
+        }
+
+        public TerminalSearchStatus PopulateSearchMatchesAsync(string needle, List<TerminalSearchMatch> destination)
+        {
+            destination.Clear();
+            if (SearchStatus != TerminalSearchStatus.Failed) destination.AddRange(_matches);
+            return SearchStatus;
+        }
+
+        public void CancelSearch() => SearchCancellationCount++;
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -7888,6 +8228,7 @@ public class TerminalControlTests
 
         public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
         {
+            SynchronousSearchCount++;
             _ = needle;
             destination.Clear();
             destination.AddRange(_matches);
@@ -7934,20 +8275,46 @@ public class TerminalControlTests
     private sealed class ThreadTrackingVtProcessorFactory : IVtProcessorFactory
     {
         public ThreadTrackingVtProcessor? LastProcessor { get; private set; }
+        public Exception? ProcessException { get; init; }
+        public bool EnableTimedRefresh { get; init; }
 
         public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
         {
             _ = screen;
             _ = preference;
-            ThreadTrackingVtProcessor processor = new();
+            ThreadTrackingVtProcessor processor = new()
+            {
+                ProcessException = ProcessException,
+                EnableTimedRefresh = EnableTimedRefresh,
+                StateSyncRoot = screen.SyncRoot,
+            };
             LastProcessor = processor;
             return processor;
         }
     }
 
-    private sealed class ThreadTrackingVtProcessor : IVtProcessor
+    private sealed class ThreadTrackingVtProcessor : IVtProcessor, ITerminalTimedRefreshSource
     {
         private int _lastProcessThreadId = -1;
+        public Exception? ProcessException { get; init; }
+        public bool LastProcessUsedThreadPool { get; private set; }
+        public bool EnableTimedRefresh { get; init; }
+        public object StateSyncRoot { get; init; } = new();
+        public int TimedRefreshCount { get; private set; }
+        public int TimedRefreshThreadId { get; private set; }
+        public bool TimedRefreshHeldStateLock { get; private set; }
+        private bool _refreshPending;
+
+        public TimeSpan? NextTimedRefreshDelay => _refreshPending ? TimeSpan.FromMilliseconds(1) : null;
+
+        public bool RefreshTimedState()
+        {
+            TimedRefreshCount++;
+            TimedRefreshThreadId = Environment.CurrentManagedThreadId;
+            TimedRefreshHeldStateLock = Monitor.IsEntered(StateSyncRoot);
+            _refreshPending = false;
+            return true;
+        }
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -7982,7 +8349,13 @@ public class TerminalControlTests
         public void Process(ReadOnlySpan<byte> data)
         {
             _ = data;
+            _refreshPending |= EnableTimedRefresh;
+            LastProcessUsedThreadPool = Thread.CurrentThread.IsThreadPoolThread;
             Volatile.Write(ref _lastProcessThreadId, Environment.CurrentManagedThreadId);
+            if (ProcessException is not null)
+            {
+                throw ProcessException;
+            }
         }
 
         public void NotifyResize(int columns, int rows)
@@ -8433,6 +8806,34 @@ public class TerminalControlTests
         }
     }
 
+    private sealed class ClearingOutputOwner(byte[] storage) : ITerminalOutputLeaseOwner
+    {
+        public byte[] Storage { get; } = storage;
+        public int ReleaseCount { get; private set; }
+        public void Release(long generation)
+        {
+            ReleaseCount++;
+            Storage.AsSpan().Fill((byte)'z');
+        }
+    }
+
+    private sealed class LeasedFakeTransport : ITerminalTransport, ITerminalOutputLeaseSource
+    {
+        public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
+        public event Action<byte[], int>? DataReceived { add { } remove { } }
+        public event Action<int>? ProcessExited { add { } remove { } }
+        public bool IsRunning { get; private set; }
+        public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+        {
+            IsRunning = true;
+            return ValueTask.CompletedTask;
+        }
+        public void SendInput(ReadOnlySpan<byte> utf8) { }
+        public void Resize(TerminalSessionDimensions dimensions) { }
+        public ValueTask StopAsync() { IsRunning = false; return ValueTask.CompletedTask; }
+        public void Dispose() => IsRunning = false;
+    }
+
     private sealed class FakeTransport : ITerminalTransport
     {
         private Action<byte[], int>? _dataReceived;
@@ -8470,6 +8871,8 @@ public class TerminalControlTests
 
         public bool IsRunning { get; private set; }
         public bool StopCalled { get; private set; }
+        public Exception? StopException { get; set; }
+        public Exception? DisposeException { get; set; }
         public bool EchoInput { get; init; } = true;
         public Action? Starting { get; init; }
         public byte[]? OutputOnStart { get; init; }
@@ -8510,6 +8913,7 @@ public class TerminalControlTests
             StopCalled = true;
             IsRunning = false;
             _processExited?.Invoke(0);
+            if (StopException is not null) throw StopException;
             return ValueTask.CompletedTask;
         }
 
@@ -8542,6 +8946,7 @@ public class TerminalControlTests
         public void Dispose()
         {
             IsRunning = false;
+            if (DisposeException is not null) throw DisposeException;
         }
     }
 }

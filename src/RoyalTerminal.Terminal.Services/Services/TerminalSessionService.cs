@@ -11,11 +11,14 @@ namespace RoyalTerminal.Terminal.Services;
 /// <summary>
 /// Default terminal session manager for endpoint-attached and standalone PTY modes.
 /// </summary>
-public sealed class TerminalSessionService : ITerminalSessionService
+public sealed class TerminalSessionService : ITerminalSessionService, ITerminalOutputLeaseSource
 {
     private IVtProcessor? _activeVtProcessor;
     private ITerminalModeSource? _endpointModeSource;
     private VtProcessorModeSource? _transportModeSource;
+
+    /// <inheritdoc />
+    public Action<TerminalOutputLease>? OutputLeaseCallback { get; set; }
 
     /// <inheritdoc />
     public event EventHandler<TerminalSessionInputEventArgs>? InputSent;
@@ -250,7 +253,14 @@ public sealed class TerminalSessionService : ITerminalSessionService
         _activeVtProcessor = vtProcessor;
         ReplaceTransportModeSource(vtProcessor);
 
-        transport.DataReceived += onTransportDataReceived;
+        if (transport is ITerminalOutputLeaseSource leaseSource && OutputLeaseCallback is not null)
+        {
+            leaseSource.OutputLeaseCallback = OutputLeaseCallback;
+        }
+        else
+        {
+            transport.DataReceived += onTransportDataReceived;
+        }
         transport.ProcessExited += onTransportProcessExited;
 
         try
@@ -316,6 +326,10 @@ public sealed class TerminalSessionService : ITerminalSessionService
 
         transport.DataReceived -= onTransportDataReceived;
         transport.ProcessExited -= onTransportProcessExited;
+        if (transport is ITerminalOutputLeaseSource leaseSource)
+        {
+            leaseSource.OutputLeaseCallback = null;
+        }
 
         try
         {
@@ -323,10 +337,16 @@ public sealed class TerminalSessionService : ITerminalSessionService
         }
         finally
         {
-            transport.Dispose();
-            Transport = null;
-            Pty = null;
-            ReplaceTransportModeSource(null);
+            try
+            {
+                transport.Dispose();
+            }
+            finally
+            {
+                Transport = null;
+                Pty = null;
+                ReplaceTransportModeSource(null);
+            }
         }
     }
 
@@ -403,7 +423,9 @@ public sealed class TerminalSessionService : ITerminalSessionService
 
     private sealed class VtProcessorModeSource : ITerminalModeSource,
         IKittyKeyboardStateSource,
+        ITerminalModifyOtherKeysStateSource,
         ITerminalKeySequenceEncoderSource,
+        ITerminalKeyEncodingPolicy,
         ITerminalMouseReportingStateSource,
         IDisposable
     {
@@ -422,6 +444,8 @@ public sealed class TerminalSessionService : ITerminalSessionService
             ? kitty.KittyKeyboardFlags
             : 0;
 
+        public bool ModifyOtherKeys2 => _vtProcessor is ITerminalModifyOtherKeysStateSource { ModifyOtherKeys2: true };
+
         public bool MouseReportingEnabled => _vtProcessor is ITerminalMouseReportingStateSource mouse
             ? mouse.MouseReportingEnabled
             : false;
@@ -431,6 +455,9 @@ public sealed class TerminalSessionService : ITerminalSessionService
             add => _modeChanged += value;
             remove => _modeChanged -= value;
         }
+
+        public bool IsKeyEncodingAuthoritative =>
+            (_vtProcessor as ITerminalKeyEncodingPolicy)?.IsKeyEncodingAuthoritative == true;
 
         public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
         {

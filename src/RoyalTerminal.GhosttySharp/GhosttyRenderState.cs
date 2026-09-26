@@ -22,16 +22,37 @@ public sealed class GhosttyRenderState : IDisposable
     public GhosttyRenderState()
     {
         NativeLibraryLoader.Initialize();
+        try
+        {
+            ThrowIfFailed(GhosttyVtNative.RenderStateNew(nint.Zero, out _handle), "ghostty_render_state_new");
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateRowIteratorNew(nint.Zero, out _rowIterator),
+                "ghostty_render_state_row_iterator_new");
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateRowCellsNew(nint.Zero, out _rowCells),
+                "ghostty_render_state_row_cells_new");
 
-        ThrowIfFailed(GhosttyVtNative.RenderStateNew(nint.Zero, out _handle), "ghostty_render_state_new");
-        ThrowIfFailed(
-            GhosttyVtNative.RenderStateRowIteratorNew(nint.Zero, out _rowIterator),
-            "ghostty_render_state_row_iterator_new");
-        ThrowIfFailed(
-            GhosttyVtNative.RenderStateRowCellsNew(nint.Zero, out _rowCells),
-            "ghostty_render_state_row_cells_new");
+            _ownsHandle = true;
+        }
+        catch
+        {
+            if (_rowCells != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateRowCellsFree(_rowCells);
+            }
 
-        _ownsHandle = true;
+            if (_rowIterator != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateRowIteratorFree(_rowIterator);
+            }
+
+            if (_handle != nint.Zero)
+            {
+                GhosttyVtNative.RenderStateFree(_handle);
+            }
+
+            throw;
+        }
     }
 
     internal GhosttyRenderState(nint handle, bool ownsHandle = false)
@@ -78,6 +99,13 @@ public sealed class GhosttyRenderState : IDisposable
         ThrowIfFailed(GhosttyVtNative.RenderStateEndUpdate(_handle), "ghostty_render_state_end_update");
     }
 
+    /// <summary>Marks the global and per-row dirty state as consumed after a complete frame.</summary>
+    public void Clean()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfFailed(GhosttyVtNative.RenderStateClean(_handle), "ghostty_render_state_clean");
+    }
+
     /// <summary>Gets the render-state dirty flag.</summary>
     public GhosttyVtNative.GhosttyRenderStateDirty GetDirty()
         => GetValue<GhosttyVtNative.GhosttyRenderStateDirty>(GhosttyVtNative.GhosttyRenderStateData.Dirty);
@@ -103,8 +131,32 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         GhosttyVtNative.GhosttyRenderStateColors colors = GhosttyVtNative.GhosttyRenderStateColors.CreateSized();
-        ThrowIfFailed(GhosttyVtNative.RenderStateColorsGet(_handle, ref colors), "ghostty_render_state_colors_get");
+        unsafe
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.RenderStateGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyRenderStateData.Colors,
+                    &colors),
+                "ghostty_render_state_get(colors)");
+        }
+
         return colors;
+    }
+
+    /// <summary>Gets all cursor state in a single native call.</summary>
+    public unsafe GhosttyVtNative.GhosttyRenderStateCursor GetCursor()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyRenderStateCursor cursor =
+            GhosttyVtNative.GhosttyRenderStateCursor.CreateSized();
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateGet(
+                _handle,
+                GhosttyVtNative.GhosttyRenderStateData.Cursor,
+                &cursor),
+            "ghostty_render_state_get(cursor)");
+        return cursor;
     }
 
     /// <summary>Gets the cursor visual style.</summary>
@@ -160,6 +212,16 @@ public sealed class GhosttyRenderState : IDisposable
         return GhosttyVtNative.RenderStateRowIteratorNext(_rowIterator);
     }
 
+    /// <summary>Moves to the next row that requires redraw and returns its viewport row.</summary>
+    public unsafe bool MoveNextDirtyRow(out ushort row)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ushort value = 0;
+        bool result = GhosttyVtNative.RenderStateRowIteratorNextDirty(_rowIterator, &value);
+        row = value;
+        return result;
+    }
+
     /// <summary>Gets whether the current row is dirty.</summary>
     public bool GetCurrentRowDirty()
         => GetRowValue<bool>(GhosttyVtNative.GhosttyRenderStateRowData.Dirty);
@@ -167,6 +229,23 @@ public sealed class GhosttyRenderState : IDisposable
     /// <summary>Gets the raw current row value.</summary>
     public ulong GetCurrentRowRaw()
         => GetRowValue<ulong>(GhosttyVtNative.GhosttyRenderStateRowData.Raw);
+
+    /// <summary>
+    /// Gets a borrowed view over the raw cells in the current row.
+    /// The span is invalidated by the next render-state update.
+    /// </summary>
+    public unsafe ReadOnlySpan<ulong> GetCurrentRowRawCells()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyCellsView view = default;
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateRowGet(
+                _rowIterator,
+                GhosttyVtNative.GhosttyRenderStateRowData.CellsRaw,
+                &view),
+            "ghostty_render_state_row_get(cells_raw)");
+        return new ReadOnlySpan<ulong>(view.Pointer, checked((int)view.Length));
+    }
 
     /// <summary>Gets whether the current row soft-wraps into the next row.</summary>
     public bool GetCurrentRowWrap()
@@ -247,6 +326,28 @@ public sealed class GhosttyRenderState : IDisposable
             GhosttyVtNative.RenderStateRowCellsGet(_rowCells, GhosttyVtNative.GhosttyRenderStateRowCellsData.Style, &style),
             "ghostty_render_state_row_cells_get(style)");
         return style;
+    }
+
+    /// <summary>
+    /// Gets the current cell's style and grapheme length with one native call,
+    /// sharing iterator validation across both required metadata values.
+    /// </summary>
+    public unsafe void GetCurrentCellMetadata(out GhosttyVtNative.GhosttyStyle style, out uint graphemeLength)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyStyle nativeStyle = GhosttyVtNative.GhosttyStyle.CreateSized();
+        uint nativeLength = 0;
+        GhosttyVtNative.GhosttyRenderStateRowCellsData* keys = stackalloc GhosttyVtNative.GhosttyRenderStateRowCellsData[2]
+        {
+            GhosttyVtNative.GhosttyRenderStateRowCellsData.Style,
+            GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesLength,
+        };
+        void** values = stackalloc void*[2] { &nativeStyle, &nativeLength };
+        ThrowIfFailed(
+            GhosttyVtNative.RenderStateRowCellsGetMulti(_rowCells, 2, keys, values, null),
+            "ghostty_render_state_row_cells_get_multi(metadata)");
+        style = nativeStyle;
+        graphemeLength = nativeLength;
     }
 
     /// <summary>Gets the number of codepoints in the current cell grapheme.</summary>
@@ -373,7 +474,10 @@ public sealed class GhosttyRenderState : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        }
         color = value;
         return true;
     }
@@ -382,7 +486,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
-        ThrowIfFailed(GhosttyVtNative.RenderStateRowGet(_rowIterator, data, &value), $"ghostty_render_state_row_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateRowGet(_rowIterator, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_get({data})");
+        }
         return value;
     }
 
@@ -390,7 +498,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         bool value = false;
-        ThrowIfFailed(GhosttyVtNative.RowGet(row, data, &value), $"ghostty_row_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RowGet(row, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_row_get({data})");
+        }
         return value;
     }
 
@@ -398,7 +510,11 @@ public sealed class GhosttyRenderState : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
-        ThrowIfFailed(GhosttyVtNative.RenderStateRowCellsGet(_rowCells, data, &value), $"ghostty_render_state_row_cells_get({data})");
+        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateRowCellsGet(_rowCells, data, &value);
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_row_cells_get({data})");
+        }
         return value;
     }
 
@@ -408,7 +524,10 @@ public sealed class GhosttyRenderState : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.RenderStateGet(_handle, data, &value);
-        ThrowIfFailed(result, $"ghostty_render_state_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_render_state_get({data})");
+        }
         return value;
     }
 

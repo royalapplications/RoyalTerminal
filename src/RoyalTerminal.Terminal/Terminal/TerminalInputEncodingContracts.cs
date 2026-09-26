@@ -10,17 +10,24 @@ namespace RoyalTerminal.Terminal;
 /// <param name="KeyId">
 /// Stable key identity supplied by the UI layer.
 /// Current producers use <c>Avalonia.Input.Key.ToString()</c>.
+/// Extended keypad identities use NumPadEnter, NumPadEqual, NumPadLeft/Right/Up/Down,
+/// NumPadPageUp/PageDown, NumPadHome/End, NumPadInsert/Delete and NumPadBegin;
+/// Separator identifies the keypad separator. Unsupported IDs produce no bytes.
 /// </param>
-/// <param name="Action">Press or release action.</param>
+/// <param name="Action">Press, repeat or release action.</param>
 /// <param name="Text">Optional text payload associated with the key event.</param>
 /// <param name="Modifiers">Normalized modifier flags.</param>
 /// <param name="IsComposing">Whether IME composition is active.</param>
+/// <param name="UnshiftedCodepoint">Layout-derived Unicode scalar, or zero for the physical-key fallback.</param>
+/// <param name="ConsumedModifiers">Modifiers consumed in producing Text; ignored when Text is empty.</param>
 public readonly record struct TerminalKeyEncodingRequest(
     string KeyId,
     TerminalInputAction Action,
     string? Text,
     TerminalModifiers Modifiers,
-    bool IsComposing = false);
+    bool IsComposing = false,
+    uint UnshiftedCodepoint = 0,
+    TerminalModifiers ConsumedModifiers = TerminalModifiers.None);
 
 /// <summary>
 /// Geometry context for encoding pointer events into terminal mouse protocol bytes.
@@ -44,23 +51,40 @@ public readonly record struct TerminalPointerEncodingContext(
     int PaddingLeftPx = 0);
 
 /// <summary>
-/// Optional source for native key-sequence encoding.
+/// Optional source for backend-owned key-sequence encoding.
 /// </summary>
 public interface ITerminalKeySequenceEncoderSource
 {
     /// <summary>
     /// Tries to encode the supplied key event into terminal input bytes.
+    /// False allows the host's legacy fallback encoder to handle the key unless
+    /// the source opts into <see cref="ITerminalKeyEncodingPolicy"/>.
     /// </summary>
     bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence);
 }
 
+/// <summary>Optional policy for a backend that completely owns key encoding.</summary>
+public interface ITerminalKeyEncodingPolicy
+{
+    /// <summary>
+    /// When true, a false encoding result means suppression, not permission to
+    /// retry through legacy or win32-input encoders. Text-input deferral remains
+    /// the host's responsibility. Sources without this policy retain fallback.
+    /// </summary>
+    bool IsKeyEncodingAuthoritative { get; }
+}
+
 /// <summary>
-/// Optional source for native mouse-sequence encoding.
+/// Optional authoritative source for mouse-sequence encoding.
 /// </summary>
 public interface ITerminalPointerSequenceEncoderSource
 {
     /// <summary>
     /// Tries to encode the supplied pointer event into terminal input bytes.
+    /// False means no bytes should be sent; callers must not re-encode the event
+    /// through a fallback, which could bypass protocol filtering or deduplication.
+    /// Positions are normalized to native single-precision surface coordinates;
+    /// invalid/nonfinite geometry or unrepresentable native coordinates return false.
     /// </summary>
     bool TryEncodePointer(
         in TerminalPointerEvent pointerEvent,
@@ -77,4 +101,11 @@ public interface ITerminalMouseReportingStateSource
     /// Gets whether mouse reporting is currently enabled by terminal state.
     /// </summary>
     bool MouseReportingEnabled { get; }
+}
+
+/// <summary>Authoritative live mouse state, including restored state and effective protocol selection.</summary>
+public interface ITerminalMouseModeStateSource : ITerminalMouseReportingStateSource
+{
+    /// <summary>Gets the effective tracking/encoding flags used for input, not frozen render state or inferred mode bits.</summary>
+    TerminalMouseModeState MouseModeState { get; }
 }

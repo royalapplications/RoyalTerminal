@@ -14,9 +14,14 @@ public static partial class GhosttyVtNative
     /// <summary>
     /// Checks whether <c>libghostty-vt</c> is available at runtime.
     /// </summary>
+    /// <remarks>
+    /// CI uses the same availability policy as interactive hosts. Set
+    /// <c>ROYALTERMINAL_DISABLE_GHOSTTY_PROBE</c> to <c>1</c> or <c>true</c>
+    /// to explicitly report the native backend as unavailable.
+    /// </remarks>
     public static bool IsAvailable()
     {
-        if (ShouldSkipNativeAvailabilityProbe())
+        if (ShouldSkipNativeAvailabilityProbe(Environment.GetEnvironmentVariable("ROYALTERMINAL_DISABLE_GHOSTTY_PROBE")))
         {
             return false;
         }
@@ -24,22 +29,10 @@ public static partial class GhosttyVtNative
         return s_nativeLibraryHandle != nint.Zero;
     }
 
-    private static bool ShouldSkipNativeAvailabilityProbe()
+    internal static bool ShouldSkipNativeAvailabilityProbe(string? disableProbe)
     {
-        string? disableProbe = Environment.GetEnvironmentVariable("ROYALTERMINAL_DISABLE_GHOSTTY_PROBE");
-        if (string.Equals(disableProbe, "1", StringComparison.Ordinal) ||
-            string.Equals(disableProbe, "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        bool runningInCi =
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "1", StringComparison.Ordinal) ||
-            string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "1", StringComparison.Ordinal) ||
-            string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
-
-        return runningInCi && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
+        return string.Equals(disableProbe, "1", StringComparison.Ordinal) ||
+            string.Equals(disableProbe, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static nint LoadNativeLibraryHandle()
@@ -120,15 +113,49 @@ public static partial class GhosttyVtNative
         return (mode.Value & 0x8000) != 0;
     }
 
+    public static GhosttyMode ModeKeyboardAction => CreateMode(2, ansi: true);
+    public static GhosttyMode ModeInsert => CreateMode(4, ansi: true);
+    public static GhosttyMode ModeSendReceive => CreateMode(12, ansi: true);
+    public static GhosttyMode ModeLineFeed => CreateMode(20, ansi: true);
     public static GhosttyMode ModeDecckm => CreateMode(1, ansi: false);
-    public static GhosttyMode ModeBackarrowKeyMode => CreateMode(67, ansi: false);
+    public static GhosttyMode Mode132Column => CreateMode(3, ansi: false);
+    public static GhosttyMode ModeSlowScroll => CreateMode(4, ansi: false);
+    public static GhosttyMode ModeReverseColors => CreateMode(5, ansi: false);
+    public static GhosttyMode ModeOrigin => CreateMode(6, ansi: false);
+    public static GhosttyMode ModeWraparound => CreateMode(7, ansi: false);
+    public static GhosttyMode ModeAutorepeat => CreateMode(8, ansi: false);
+    public static GhosttyMode ModeX10Mouse => CreateMode(9, ansi: false);
+    public static GhosttyMode ModeCursorBlinking => CreateMode(12, ansi: false);
+    public static GhosttyMode ModeCursorVisible => CreateMode(25, ansi: false);
+    public static GhosttyMode ModeEnableMode3 => CreateMode(40, ansi: false);
+    public static GhosttyMode ModeReverseWrap => CreateMode(45, ansi: false);
+    public static GhosttyMode ModeAltScreenLegacy => CreateMode(47, ansi: false);
     public static GhosttyMode ModeKeypadKeys => CreateMode(66, ansi: false);
+    public static GhosttyMode ModeBackarrowKeyMode => CreateMode(67, ansi: false);
+    public static GhosttyMode ModeLeftRightMargin => CreateMode(69, ansi: false);
+    public static GhosttyMode ModeNormalMouse => CreateMode(1000, ansi: false);
+    public static GhosttyMode ModeButtonMouse => CreateMode(1002, ansi: false);
+    public static GhosttyMode ModeAnyMouse => CreateMode(1003, ansi: false);
+    public static GhosttyMode ModeFocusEvent => CreateMode(1004, ansi: false);
+    public static GhosttyMode ModeUtf8Mouse => CreateMode(1005, ansi: false);
+    public static GhosttyMode ModeSgrMouse => CreateMode(1006, ansi: false);
+    public static GhosttyMode ModeAltScroll => CreateMode(1007, ansi: false);
+    public static GhosttyMode ModeUrxvtMouse => CreateMode(1015, ansi: false);
+    public static GhosttyMode ModeSgrPixelsMouse => CreateMode(1016, ansi: false);
+    public static GhosttyMode ModeNumlockKeypad => CreateMode(1035, ansi: false);
+    public static GhosttyMode ModeAltEscapePrefix => CreateMode(1036, ansi: false);
+    public static GhosttyMode ModeAltSendsEscape => CreateMode(1039, ansi: false);
+    public static GhosttyMode ModeReverseWrapExtended => CreateMode(1045, ansi: false);
     public static GhosttyMode ModeAltScreen => CreateMode(1047, ansi: false);
+    public static GhosttyMode ModeSaveCursor => CreateMode(1048, ansi: false);
     public static GhosttyMode ModeAltScreenSave => CreateMode(1049, ansi: false);
     public static GhosttyMode ModeBracketedPaste => CreateMode(2004, ansi: false);
-    public static GhosttyMode ModeFocusEvent => CreateMode(1004, ansi: false);
+    public static GhosttyMode ModeSynchronizedOutput => CreateMode(2026, ansi: false);
+    public static GhosttyMode ModeGraphemeCluster => CreateMode(2027, ansi: false);
     public static GhosttyMode ModeColorSchemeReport => CreateMode(2031, ansi: false);
+    public static GhosttyMode ModeVisibilityReport => CreateMode(2033, ansi: false);
     public static GhosttyMode ModeInBandResize => CreateMode(2048, ansi: false);
+    public static GhosttyMode ModePasteEvents => CreateMode(5522, ansi: false);
 
     public enum GhosttyModeReportState : int
     {
@@ -256,11 +283,27 @@ public static partial class GhosttyVtNative
         History = 3,
     }
 
+    /// <summary>Native coordinate payload and reserved storage for a Ghostty point.</summary>
+    [StructLayout(LayoutKind.Explicit, Size = 16)]
+    public unsafe struct GhosttyPointValue
+    {
+        /// <summary>The coordinate for the point's tagged coordinate space.</summary>
+        [FieldOffset(0)]
+        public GhosttyPointCoordinate Coordinate;
+
+        [FieldOffset(0)]
+        internal fixed ulong _padding[2];
+    }
+
     [StructLayout(LayoutKind.Explicit, Size = 24)]
     public struct GhosttyPoint
     {
         [FieldOffset(0)]
         public GhosttyPointTag Tag;
+
+        /// <summary>Native tagged union payload; overlaps the convenience X/Y fields.</summary>
+        [FieldOffset(8)]
+        public GhosttyPointValue Value;
 
         [FieldOffset(8)]
         public ushort X;

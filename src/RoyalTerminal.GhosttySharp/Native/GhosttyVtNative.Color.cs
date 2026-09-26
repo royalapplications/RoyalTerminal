@@ -11,7 +11,7 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct GhosttyColorPaletteMask
     {
-        private fixed ulong _bits[4];
+        internal fixed ulong _bits[4];
 
         public void Set(byte index)
         {

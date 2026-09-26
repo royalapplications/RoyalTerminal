@@ -215,7 +215,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_Csi21t_ReportsWindowTitlePayload()
+    public void BasicVtProcessor_Csi21t_IsDisabledByDefault()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -225,12 +225,72 @@ public class TerminalQueryTests
 
         processor.Process("\x1b[21t"u8);
 
-        Assert.NotNull(response);
-        Assert.Equal("\x1b]l\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Null(response);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Csi_Dsr6_SendsCursorPositionReport()
+    public void BasicVtProcessor_Csi21t_ReportsWhenExplicitlyEnabled()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(
+            screen,
+            new BasicVtProcessorOptions { TitleReportEnabled = true });
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[21t"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b]l\x1b\\", Encoding.ASCII.GetString(response));
+    }
+
+    [Fact]
+    public void BasicVtProcessor_PrivateDeviceStatus_ReportsColorSchemeAndVisibility()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1b[?996n\x1b[?998n"u8);
+
+        Assert.Equal(["\x1b[?997;1n", "\x1b[?999;1n"], responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_VisibilityMode_ReportsImmediatelyOnEveryEnable()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1b[?2033h\x1b[?2033h\x1b[?2033l"u8);
+
+        Assert.Equal(["\x1b[?999;1n", "\x1b[?999;1n"], responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_InBandSizeMode_ReportsOnEnableAndPixelResize()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+        processor.NotifyResize(80, 24, 800, 480);
+
+        processor.Process("\x1b[?2048h"u8);
+        processor.NotifyResize(80, 24, 805, 485);
+        processor.Process("\x1b[?2048l"u8);
+        processor.NotifyResize(80, 24, 810, 490);
+
+        Assert.Equal(
+            ["\x1b[48;24;80;480;800t", "\x1b[48;24;80;480;800t"],
+            responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_GroundC1Csi_IsInvalidUtf8NotCursorQuery()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -241,12 +301,14 @@ public class TerminalQueryTests
         processor.Process("\x1b[4;5H"u8);
         processor.Process([0x9B, (byte)'6', (byte)'n']);
 
-        Assert.NotNull(response);
-        Assert.Equal("\x1b[4;5R", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Null(response);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(3)[4].Codepoint);
+        Assert.Equal('6', screen.GetViewportRow(3)[5].Codepoint);
+        Assert.Equal('n', screen.GetViewportRow(3)[6].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleBelTerminator_InvokesTitleCallback()
+    public void BasicVtProcessor_GroundC1Osc_WithBellDoesNotSetTitle()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -256,11 +318,12 @@ public class TerminalQueryTests
         byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'t', (byte)'i', (byte)'t', (byte)'l', (byte)'e', 0x07];
         processor.Process(payload);
 
-        Assert.Equal("c1-title", title);
+        Assert.Null(title);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleStTerminator_InvokesTitleCallback()
+    public void BasicVtProcessor_GroundC1Osc_WithRawStDoesNotSetTitle()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -270,11 +333,13 @@ public class TerminalQueryTests
         byte[] payload = [0x9D, (byte)'2', (byte)';', (byte)'c', (byte)'1', (byte)'-', (byte)'s', (byte)'t', 0x9C];
         processor.Process(payload);
 
-        Assert.Equal("c1-st", title);
+        Assert.Null(title);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[8].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Osc_TitleStTerminator_AllowsFollowingPrintableData()
+    public void BasicVtProcessor_GroundC1Osc_PrintsFollowingDataLiterally()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -288,13 +353,15 @@ public class TerminalQueryTests
         ];
         processor.Process(payload);
 
-        Assert.Equal("x", title);
+        Assert.Null(title);
         TerminalRow row = screen.GetViewportRow(0);
-        Assert.Equal('A', row[0].Codepoint);
+        Assert.Equal(0xFFFD, row[0].Codepoint);
+        Assert.Equal(0xFFFD, row[4].Codepoint);
+        Assert.Equal('A', row[5].Codepoint);
     }
 
     [Fact]
-    public void BasicVtProcessor_C1Dcs_DecrqssMargins_ReturnsResponse()
+    public void BasicVtProcessor_GroundC1Dcs_IsInvalidUtf8NotQuery()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -303,8 +370,44 @@ public class TerminalQueryTests
 
         processor.Process([0x90, (byte)'$', (byte)'q', (byte)'r', 0x9C]);
 
-        Assert.NotNull(response);
-        Assert.Equal("\x1bP1$r1;24r\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Null(response);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[0].Codepoint);
+        Assert.Equal(0xFFFD, screen.GetViewportRow(0)[4].Codepoint);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Xtgettcap_UsesCompleteGhosttyMapAndConfiguredName()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1bP+q616d;436f;536d756c78;544e;57484f\x1b\\"u8);
+
+        Assert.Equal(
+            [
+                "\x1bP1+r616D\x1b\\",
+                "\x1bP1+r436F=323536\x1b\\",
+                "\x1bP1+r536D756C78=5C455B343A25703125646D\x1b\\",
+                "\x1bP1+r544E=787465726D2D67686F73747479\x1b\\",
+            ],
+            responses);
+    }
+
+    [Fact]
+    public void BasicVtProcessor_Xtgettcap_TerminfoNameCanBeSuppressed()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(
+            screen,
+            new BasicVtProcessorOptions { TerminfoName = null });
+        List<string> responses = [];
+        processor.ResponseCallback = data => responses.Add(Encoding.ASCII.GetString(data));
+
+        processor.Process("\x1bP+q544E;436F\x1b\\"u8);
+
+        Assert.Equal(["\x1bP1+r436F=323536\x1b\\"], responses);
     }
 
     [Fact]
@@ -492,7 +595,7 @@ public class TerminalQueryTests
         processor.Process("\x1b]4;1;?\x07"u8);
 
         Assert.NotNull(response);
-        Assert.Equal("\x1b]4;1;rgb:cdcd/0000/0000\x1b\\", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b]4;1;rgb:cdcd/0000/0000\x07", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -554,7 +657,7 @@ public class TerminalQueryTests
         string? title = null;
         processor.TitleCallback = value => title = value;
 
-        string largePayload = "2;" + new string('A', 5000);
+        string largePayload = "2;" + new string('A', 8 * 1024 * 1024);
         processor.Process(System.Text.Encoding.ASCII.GetBytes($"\x1b]{largePayload}\x1b\\"));
 
         Assert.Null(title);
@@ -565,7 +668,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_UnterminatedOsc_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    public void BasicVtProcessor_UnterminatedOsc_IgnoresPromptControlsUntilTerminated()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -576,7 +679,11 @@ public class TerminalQueryTests
         processor.Process("\r\n$ ready\r\n"u8);
 
         Assert.Null(title);
-        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
+        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(0, processor.CursorRow);
+        processor.Process("\x1b\\X"u8);
+        Assert.Equal("broken-title$ ready", title);
+        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]
@@ -644,25 +751,24 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_DcsDecrqss_SgrQuery_ReportsEffectiveClampedPaletteState()
+    public void BasicVtProcessor_DcsDecrqss_SgrQuery_ReportsEffectiveTruncatedPaletteState()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
         byte[]? response = null;
         processor.ResponseCallback = data => response = data;
 
-        // RoyalTerminal retains its saturating palette lookup policy for
-        // invalid indices. The tracked SGR state must use that same effective
-        // index so DECRQSS recreates the colors that were actually rendered.
+        // Ghostty truncates indexed SGR colors to eight bits. DECRQSS must
+        // report those effective indices so replay recreates the rendered colors.
         processor.Process("\x1b[38;5;999;48;5;1000mA"u8);
         processor.Process("\x1bP$qm\x1b\\"u8);
 
         TerminalCell cell = screen.GetViewportRow(0)[0];
-        Assert.Equal(screen.Theme.Palette[255], cell.Foreground);
-        Assert.Equal(screen.Theme.Palette[255], cell.Background);
+        Assert.Equal(screen.Theme.Palette[231], cell.Foreground);
+        Assert.Equal(screen.Theme.Palette[232], cell.Background);
         Assert.NotNull(response);
         Assert.Equal(
-            "\x1bP1$r0;38:5:255;48:5:255m\x1b\\",
+            "\x1bP1$r0;38:5:231;48:5:232m\x1b\\",
             System.Text.Encoding.ASCII.GetString(response));
     }
 
@@ -744,14 +850,16 @@ public class TerminalQueryTests
         int firstId = row[0].HyperlinkId;
         int secondId = row[1].HyperlinkId;
         int closedId = row[2].HyperlinkId;
-        int reusedId = row[3].HyperlinkId;
+        int nextImplicitId = row[3].HyperlinkId;
 
         Assert.True(firstId > 0);
         Assert.Equal(firstId, secondId);
         Assert.Equal(0, closedId);
-        Assert.Equal(firstId, reusedId);
+        Assert.NotEqual(firstId, nextImplicitId);
         Assert.True(screen.TryGetHyperlinkUrl(firstId, out string? resolvedUrl));
         Assert.Equal("https://example.com/a", resolvedUrl);
+        Assert.True(screen.TryGetHyperlinkUrl(nextImplicitId, out string? nextUrl));
+        Assert.Equal(resolvedUrl, nextUrl);
     }
 
     [Fact]
@@ -804,7 +912,7 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_UnterminatedDcs_AbortsOnPromptControlBytes_AndRendersFollowingPrompt()
+    public void BasicVtProcessor_UnterminatedDcs_KeepsPromptControlsInPayloadUntilTerminated()
     {
         var screen = new TerminalScreen(80, 24, 0);
         var processor = new BasicVtProcessor(screen);
@@ -815,7 +923,10 @@ public class TerminalQueryTests
         processor.Process("\r\n$ ready\r\n"u8);
 
         Assert.Null(response);
-        Assert.Contains("$ ready", ReadAsciiPrefix(screen, 1, 16));
+        Assert.Equal((0, 0), (processor.CursorRow, processor.CursorCol));
+        processor.Process("\x1b\\X"u8);
+        Assert.Null(response); // Oversized DECRQSS is silently discarded.
+        Assert.Equal('X', screen.GetViewportRow(0)[0].Codepoint);
     }
 
     [Fact]
@@ -1211,7 +1322,7 @@ public class TerminalQueryTests
             1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 69,
             1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016,
             1035, 1036, 1039, 1045, 1047, 1048, 1049,
-            2004, 2026, 2027, 2031, 2048,
+            2004, 2026, 2027, 2031, 2033, 2048, 5522,
         ];
 
         for (int i = 0; i < ansiModes.Length; i++)
@@ -1235,6 +1346,20 @@ public class TerminalQueryTests
             string payload = System.Text.Encoding.ASCII.GetString(response);
             Assert.Matches($@"^\x1b\[\?{mode};[12]\$y$", payload);
         }
+    }
+
+    [Fact]
+    public void BasicVtProcessor_ModeQuery_ReportsDececmPermanentlyReset()
+    {
+        var screen = new TerminalScreen(80, 24, 0);
+        var processor = new BasicVtProcessor(screen);
+        byte[]? response = null;
+        processor.ResponseCallback = data => response = data;
+
+        processor.Process("\x1b[?117$p"u8);
+
+        Assert.NotNull(response);
+        Assert.Equal("\x1b[?117;4$y", Encoding.ASCII.GetString(response));
     }
 
     [Fact]
@@ -1314,6 +1439,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(familyEmoji));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1334,6 +1460,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(coupleWithHeart));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1353,6 +1480,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(canadaFlag));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1373,6 +1501,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(triplet));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1395,6 +1524,7 @@ public class TerminalQueryTests
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(keycap));
 
         TerminalRow row = screen.GetViewportRow(0);
@@ -1407,19 +1537,20 @@ public class TerminalQueryTests
     }
 
     [Fact]
-    public void BasicVtProcessor_TextPresentationSelector_KeepsSymbolSingleWidth()
+    public void BasicVtProcessor_InvalidTextPresentationSelector_IsNotStored()
     {
         const string sliderThumb = "\U0001F837\uFE0E";
 
         var screen = new TerminalScreen(16, 4, 0);
         var processor = new BasicVtProcessor(screen);
 
+        processor.Process("\u001b[?2027h"u8);
         processor.Process(System.Text.Encoding.UTF8.GetBytes(sliderThumb + "-"));
 
         TerminalRow row = screen.GetViewportRow(0);
         Assert.Equal(2, processor.CursorCol);
         Assert.Equal(0x1F837, row[0].Codepoint);
-        Assert.Equal(sliderThumb, row[0].Grapheme);
+        Assert.Null(row[0].Grapheme);
         Assert.Equal(1, row[0].Width);
         Assert.Equal('-', row[1].Codepoint);
         Assert.Equal(1, row[1].Width);
@@ -1573,6 +1704,46 @@ public class TerminalQueryTests
         parity.ProcessBoth("\x1b[5 q"u8);
         parity.ProcessBoth("\x1bP$q q\x1b\\"u8);
         AssertResponseParity(parity, "DECRQSS cursor style");
+    }
+
+    [Fact]
+    public void ManagedVsNative_NewGhosttyReportsAndXtgettcapMatch_WhenNativeAvailable()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            return;
+        }
+
+        using VtParityPair parity = CreateVtParityPair(columns: 80, rows: 24);
+
+        parity.ProcessBoth("\x1b[?117$p"u8);
+        if (!CanCompareResponseParity(parity))
+        {
+            return;
+        }
+        AssertResponseParity(parity, "DECECM permanent reset");
+
+        parity.ProcessBoth("\x1b[?996n"u8);
+        AssertResponseParity(parity, "color scheme report");
+
+        parity.ProcessBoth("\x1b[?998n"u8);
+        AssertResponseParity(parity, "visibility query");
+
+        parity.ProcessBoth("\x1b[?2033h"u8);
+        AssertResponseParity(parity, "visibility mode enable");
+
+        parity.ProcessBoth("\x1bP+q616D;436F;536D756C78;544E\x1b\\"u8);
+        AssertResponseParity(parity, "XTGETTCAP");
+
+        parity.ManagedProcessor.NotifyResize(80, 24, 800, 480);
+        parity.NativeProcessor.NotifyResize(80, 24, 800, 480);
+        parity.ClearResponses();
+        parity.ProcessBoth("\x1b[?2048h"u8);
+        AssertResponseParity(parity, "mode 2048 enable");
+
+        parity.ManagedProcessor.NotifyResize(80, 24, 805, 485);
+        parity.NativeProcessor.NotifyResize(80, 24, 805, 485);
+        AssertResponseParity(parity, "mode 2048 resize");
     }
 
     [Fact]

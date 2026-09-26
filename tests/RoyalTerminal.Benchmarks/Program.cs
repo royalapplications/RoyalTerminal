@@ -11,6 +11,36 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--managed-print", StringComparer.Ordinal))
+{
+    ManagedPrintBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
+{
+    ApcIngestionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--ghostty-render-metadata", StringComparer.Ordinal))
+{
+    GhosttyRenderMetadataBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--pty-output", StringComparer.Ordinal))
+{
+    PtyOutputBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--terminal-reflow", StringComparer.Ordinal))
+{
+    TerminalReflowBenchmark.Run();
+    return;
+}
+
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
 
 BenchmarkScenario[] defaultRenderScenarios =

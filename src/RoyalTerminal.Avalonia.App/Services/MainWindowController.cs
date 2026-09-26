@@ -38,6 +38,7 @@ using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Avalonia.App.ViewModels;
+using RoyalTerminal.Avalonia.App.Services.Notifications;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Shaders;
@@ -96,6 +97,8 @@ internal sealed class MainWindowController
     private static readonly Geometry s_dismissRegularIconFallback = StreamGeometry.Parse(DismissRegularIconPathData);
 
     private readonly Window _window;
+    private DesktopNotificationService? _desktopNotifications;
+    private readonly Dictionary<TerminalControl, DesktopNotificationHost> _notificationHosts = new();
     private readonly MainWindowViewModel _viewModel;
     private readonly Grid _terminalHost;
     private readonly ContentControl _titleBarTabStripHost;
@@ -233,6 +236,7 @@ internal sealed class MainWindowController
     public IDisposable Activate()
     {
         CompositeDisposable lifetime = new();
+        lifetime.Add(new DesktopNotificationWindowLifetime(_window, () => _desktopNotifications, DisableNotificationHosts));
         RegisterCaptionButtonHandlers(lifetime);
         RegisterInteractionHandlers(lifetime);
         RegisterShellLayoutHandlers(lifetime);
@@ -1242,6 +1246,8 @@ internal sealed class MainWindowController
         _viewModel.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
         _viewModel.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
         _viewModel.FontEmbolden = appearance.FontRendering.Embolden;
+        _viewModel.FontThicken = appearance.FontRendering.Thicken;
+        _viewModel.FontThickenStrength = appearance.FontRendering.ThickenStrength;
         _viewModel.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
         _viewModel.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
         _viewModel.TextHighlightingMode = appearance.TextHighlightingMode;
@@ -1823,6 +1829,8 @@ internal sealed class MainWindowController
                 BaselineSnap = _viewModel.FontBaselineSnap,
                 EmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps,
                 Embolden = _viewModel.FontEmbolden,
+                Thicken = _viewModel.FontThicken,
+                ThickenStrength = _viewModel.FontThickenStrength,
                 ForceAutoHinting = _viewModel.FontForceAutoHinting,
                 LinearMetrics = _viewModel.FontLinearMetrics,
             },
@@ -2861,7 +2869,7 @@ internal sealed class MainWindowController
         ArgumentNullException.ThrowIfNull(session);
 
         TerminalTheme theme = _viewModel.ActiveTheme;
-        TerminalControl standaloneControl = CreateStandaloneControl();
+        TerminalControl standaloneControl = CreateStandaloneControl(notificationsEnabled: false);
         ApplyFontSettings(standaloneControl);
         standaloneControl.Columns = Math.Max(1, session.InitialColumns);
         standaloneControl.Rows = Math.Max(1, session.InitialRows);
@@ -3087,7 +3095,7 @@ internal sealed class MainWindowController
         renderer.TextRenderPipeline = s_textRenderPipeline;
     }
 
-    private TerminalControl CreateStandaloneControl()
+    private TerminalControl CreateStandaloneControl(bool notificationsEnabled = true)
     {
         INativeVtProcessorProvider[] nativeProviders = [new GhosttyVtProcessorProvider()];
         DefaultPtyFactory ptyFactory = new();
@@ -3112,16 +3120,53 @@ internal sealed class MainWindowController
                     }),
             });
 
-        return new TerminalControl(
+        TerminalControl control = new(
             new TerminalSessionService(),
             new HandledInputSuppressingTerminalInputAdapter(new DefaultTerminalInputAdapter()),
             new DefaultTerminalSelectionService(),
             new DefaultTerminalScrollService(),
-            new DefaultVtProcessorFactory(nativeProviders),
+            new DefaultVtProcessorFactory(nativeProviders, new BasicVtProcessorOptions
+            {
+                KittyGraphicsPngDecoder = new SkiaKittyGraphicsPngDecoder(),
+                KittyGraphicsMediumReader = new LocalKittyGraphicsMediumReader(new KittyGraphicsMediumPolicy
+                {
+                    FileEnabled = true,
+                    TemporaryDirectory = System.IO.Path.GetTempPath(),
+                    SharedMemoryEnabled = true,
+                }),
+            }),
             ptyFactory,
             credentialProvider,
             hostKeyValidator,
             transportFactory);
+        if (notificationsEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
+        {
+            if (_desktopNotifications is null)
+            {
+                if (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows())
+                    _desktopNotifications = new(new NativeDesktopNotificationBackend(static () => new NativeNotificationTransport(),
+                        OperatingSystem.IsWindows() ? NativeNotificationPlatform.Windows : NativeNotificationPlatform.MacOS));
+                else
+                {
+                    DesktopThemeFiles files = new();
+                    LinuxDesktopThemeEnvironment themes = new(files, Environment.GetEnvironmentVariable, LinuxDesktopThemeSettings.Read);
+                    FreedesktopNotificationResources resources = new(files, themes.Read, TimeProvider.System);
+                    _desktopNotifications = new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection(), resources));
+                }
+            }
+            DesktopNotificationHost host = new(_desktopNotifications, _window, control, () =>
+            {
+                if (FindTabForControl(control) is not { } tab) return;
+                ActivateTabById(tab.Index);
+                SetActivePane(control, focus: false);
+                if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
+                _window.Activate();
+                control.Focus();
+            });
+            _notificationHosts.Add(control, host);
+            control.NotificationHost = host;
+        }
+        return control;
     }
 
     private bool PromptForSshHostKeyTrust(SshHostKeyTrustPromptRequest request)
@@ -5129,6 +5174,8 @@ internal sealed class MainWindowController
         standalone.FontBaselineSnap = _viewModel.FontBaselineSnap;
         standalone.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
         standalone.FontEmbolden = _viewModel.FontEmbolden;
+        standalone.FontThicken = _viewModel.FontThicken;
+        standalone.FontThickenStrength = _viewModel.FontThickenStrength;
         standalone.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
         standalone.FontLinearMetrics = _viewModel.FontLinearMetrics;
     }
@@ -5153,6 +5200,8 @@ internal sealed class MainWindowController
         standalone.FontBaselineSnap = appearance.FontRendering.BaselineSnap;
         standalone.FontEmbeddedBitmaps = appearance.FontRendering.EmbeddedBitmaps;
         standalone.FontEmbolden = appearance.FontRendering.Embolden;
+        standalone.FontThicken = appearance.FontRendering.Thicken;
+        standalone.FontThickenStrength = appearance.FontRendering.ThickenStrength;
         standalone.FontForceAutoHinting = appearance.FontRendering.ForceAutoHinting;
         standalone.FontLinearMetrics = appearance.FontRendering.LinearMetrics;
         standalone.AutoScroll = appearance.AutoScroll;
@@ -5183,6 +5232,8 @@ internal sealed class MainWindowController
                 BaselineSnap = control.FontBaselineSnap,
                 EmbeddedBitmaps = control.FontEmbeddedBitmaps,
                 Embolden = control.FontEmbolden,
+                Thicken = control.FontThicken,
+                ThickenStrength = control.FontThickenStrength,
                 ForceAutoHinting = control.FontForceAutoHinting,
                 LinearMetrics = control.FontLinearMetrics,
             },
@@ -5576,6 +5627,8 @@ internal sealed class MainWindowController
             current.FontBaselineSnap = _viewModel.FontBaselineSnap;
             current.FontEmbeddedBitmaps = _viewModel.FontEmbeddedBitmaps;
             current.FontEmbolden = _viewModel.FontEmbolden;
+            current.FontThicken = _viewModel.FontThicken;
+            current.FontThickenStrength = _viewModel.FontThickenStrength;
             current.FontForceAutoHinting = _viewModel.FontForceAutoHinting;
             current.FontLinearMetrics = _viewModel.FontLinearMetrics;
             current.AutoScroll = appearanceFlags.AutoScroll;
@@ -5746,6 +5799,8 @@ internal sealed class MainWindowController
         _viewModel.FontBaselineSnap = state.FontBaselineSnap;
         _viewModel.FontEmbeddedBitmaps = state.FontEmbeddedBitmaps;
         _viewModel.FontEmbolden = state.FontEmbolden;
+        _viewModel.FontThicken = state.FontThicken;
+        _viewModel.FontThickenStrength = state.FontThickenStrength;
         _viewModel.FontForceAutoHinting = state.FontForceAutoHinting;
         _viewModel.FontLinearMetrics = state.FontLinearMetrics;
         _viewModel.SetFontSizeFromSettings(fontSize);
@@ -6513,6 +6568,10 @@ internal sealed class MainWindowController
             DisposeTabTerminals(tab);
         }
         _tabs.Clear();
+        foreach (DesktopNotificationHost host in _notificationHosts.Values) host.Dispose();
+        _notificationHosts.Clear();
+        _desktopNotifications?.Dispose();
+        _desktopNotifications = null;
         _captureRuntimes.Clear();
         _commandHistoryHandlers.Clear();
         _commandHistoryCaptures.Clear();
@@ -6525,6 +6584,16 @@ internal sealed class MainWindowController
         }
         _sessionLogWriters.Clear();
 
+    }
+
+    private void DisableNotificationHosts()
+    {
+        foreach (KeyValuePair<TerminalControl, DesktopNotificationHost> entry in _notificationHosts)
+        {
+            entry.Key.NotificationHost = null;
+            entry.Value.Dispose();
+        }
+        _notificationHosts.Clear();
     }
 
     private void FlushTerminalRuntimeStateBeforePersistence()
@@ -6760,6 +6829,8 @@ internal sealed class MainWindowController
     {
         if (control is TerminalControl standaloneControl)
         {
+            standaloneControl.NotificationHost = null;
+            if (_notificationHosts.Remove(standaloneControl, out DesktopNotificationHost? notificationHost)) notificationHost.Dispose();
             if (_captureRuntimes.Remove(standaloneControl, out TerminalCaptureRuntime? runtime))
             {
                 runtime.StateChanged -= OnCaptureRuntimeStateChanged;

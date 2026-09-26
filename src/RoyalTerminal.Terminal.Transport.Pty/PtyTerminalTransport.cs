@@ -7,12 +7,28 @@ namespace RoyalTerminal.Terminal.Transport.Pty;
 /// <summary>
 /// Terminal transport that wraps an <see cref="IPty"/> instance.
 /// </summary>
-public sealed class PtyTerminalTransport : ITerminalPtyTransport
+public sealed class PtyTerminalTransport : ITerminalPtyTransport, ITerminalOutputLeaseSource, ITerminalPasswordInputSource
 {
     private readonly IPtyFactory _ptyFactory;
     private readonly IShellProfileCatalog _shellProfileCatalog;
     private IPty? _pty;
     private bool _disposed;
+    private bool _supportsOutputLeases;
+    private Action<TerminalOutputLease>? _outputLeaseCallback;
+
+    /// <inheritdoc />
+    public Action<TerminalOutputLease>? OutputLeaseCallback
+    {
+        get => _outputLeaseCallback;
+        set
+        {
+            _outputLeaseCallback = value;
+            if (_pty is ITerminalOutputLeaseSource source)
+            {
+                source.OutputLeaseCallback = value;
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes a new PTY transport.
@@ -36,6 +52,17 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
     public IPty Pty => _pty ?? throw new InvalidOperationException("PTY transport is not running.");
 
     /// <inheritdoc />
+    public bool SupportsPasswordInputDetection =>
+        (_pty as ITerminalPasswordInputSource)?.SupportsPasswordInputDetection == true;
+
+    /// <inheritdoc />
+    public bool TryGetPasswordInput(out bool passwordInput)
+    {
+        passwordInput = false;
+        return _pty is ITerminalPasswordInputSource source && source.TryGetPasswordInput(out passwordInput);
+    }
+
+    /// <inheritdoc />
     public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -53,6 +80,11 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
         cancellationToken.ThrowIfCancellationRequested();
 
         IPty pty = _ptyFactory.Create();
+        _supportsOutputLeases = pty is ITerminalOutputLeaseSource;
+        if (pty is ITerminalOutputLeaseSource leaseSource)
+        {
+            leaseSource.OutputLeaseCallback = _outputLeaseCallback;
+        }
         pty.DataReceived += OnDataReceived;
         pty.ProcessExited += OnProcessExited;
 
@@ -76,6 +108,10 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
         {
             pty.DataReceived -= OnDataReceived;
             pty.ProcessExited -= OnProcessExited;
+            if (pty is ITerminalOutputLeaseSource failedSource)
+            {
+                failedSource.OutputLeaseCallback = null;
+            }
             pty.Dispose();
             throw;
         }
@@ -115,6 +151,10 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
 
         _pty.DataReceived -= OnDataReceived;
         _pty.ProcessExited -= OnProcessExited;
+        if (_pty is ITerminalOutputLeaseSource source)
+        {
+            source.OutputLeaseCallback = null;
+        }
         _pty.Dispose();
         _pty = null;
 
@@ -151,6 +191,13 @@ public sealed class PtyTerminalTransport : ITerminalPtyTransport
 
     private void OnDataReceived(byte[] data, int length)
     {
+        // A PTY without the optional lease capability still supplies the normal path.
+        if (!_supportsOutputLeases && _outputLeaseCallback is not null)
+        {
+            _outputLeaseCallback(new TerminalOutputLease(data.AsMemory(0, length).ToArray()));
+            return;
+        }
+
         DataReceived?.Invoke(data, length);
     }
 

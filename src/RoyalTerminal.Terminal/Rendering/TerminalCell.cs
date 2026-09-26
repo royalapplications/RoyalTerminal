@@ -2,7 +2,9 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 // RoyalTerminal.Avalonia - Terminal cell model.
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using RoyalTerminal.Terminal.Snapshots;
 using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -18,14 +20,14 @@ public readonly record struct TerminalGridPosition(int Column, int Row);
 /// </summary>
 public struct TerminalCell
 {
-    /// <summary>UTF-32 codepoint for this cell. 0 for empty cells.</summary>
-    public int Codepoint;
-
     /// <summary>
     /// Optional grapheme text for this cell.
     /// When null, rendering/copy should use <see cref="Codepoint"/>.
     /// </summary>
     public string? Grapheme;
+
+    /// <summary>UTF-32 codepoint for this cell. 0 for empty cells.</summary>
+    public int Codepoint;
 
     /// <summary>Foreground color as packed ARGB.</summary>
     public uint Foreground;
@@ -33,14 +35,26 @@ public struct TerminalCell
     /// <summary>Background color as packed ARGB.</summary>
     public uint Background;
 
+    /// <summary>Unresolved SGR foreground identity, retained for protocols and state serialization.</summary>
+    public TerminalColorIdentity ForegroundIdentity;
+
+    /// <summary>Unresolved SGR background identity, retained independently of the displayed ARGB.</summary>
+    public TerminalColorIdentity BackgroundIdentity;
+
+    /// <summary>Unresolved SGR underline identity; default means no explicit underline color.</summary>
+    public TerminalColorIdentity UnderlineIdentity;
+
+    /// <summary>Optional explicit underline color as packed ARGB.</summary>
+    public uint UnderlineColor;
+
+    /// <summary>Hyperlink token id for OSC8 links. Zero means no hyperlink.</summary>
+    public int HyperlinkId;
+
     /// <summary>Cell attribute flags.</summary>
     public CellAttributes Attributes;
 
     /// <summary>Underline rendering style for this cell.</summary>
     public TerminalUnderlineStyle UnderlineStyle;
-
-    /// <summary>Optional explicit underline color as packed ARGB.</summary>
-    public uint UnderlineColor;
 
     /// <summary>Whether <see cref="UnderlineColor"/> should be used.</summary>
     public bool HasUnderlineColor;
@@ -53,24 +67,48 @@ public struct TerminalCell
     /// </summary>
     public bool HasBackground;
 
-    /// <summary>
-    /// Hyperlink token id for OSC8 links. Zero means no hyperlink.
-    /// </summary>
-    public int HyperlinkId;
-
     /// <summary>Number of columns this character spans (1 for normal, 2 for wide/CJK).</summary>
     public byte Width;
+
+    /// <summary>Whether this zero-width cell pads the right edge before a wrapped wide glyph,
+    /// rather than being the trailing half of a glyph on this row.</summary>
+    public bool IsWideSpacerHead
+    {
+        readonly get => (_metadata & 1) != 0;
+        set => _metadata = (byte)(value ? _metadata | 1 : _metadata & ~1);
+    }
+
+    private byte _metadata;
+
+    /// <summary>Whether selective erase must preserve this cell (DEC/ISO character protection).</summary>
+    public bool IsProtected
+    {
+        readonly get => (_metadata & 2) != 0;
+        set => _metadata = (byte)(value ? _metadata | 2 : _metadata & ~2);
+    }
+
+    /// <summary>Shell-integration classification assigned when this cell was printed.</summary>
+    public TerminalSemanticContent SemanticContent
+    {
+        readonly get => (TerminalSemanticContent)((_metadata >> 2) & 3);
+        set => _metadata = (byte)((_metadata & ~12) | (((byte)value & 3) << 2));
+    }
 
     /// <summary>Returns true if this cell has content.</summary>
     public readonly bool HasContent => Codepoint != 0 || !string.IsNullOrEmpty(Grapheme);
 
     /// <summary>Creates a default empty cell with the given colors.</summary>
-    public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E) => new()
+    public static TerminalCell Empty(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
+        => Empty(fg, bg, default);
+
+    /// <summary>Creates an erased cell retaining the original background color identity.</summary>
+    public static TerminalCell Empty(uint fg, uint bg, TerminalColorIdentity backgroundIdentity) => new()
     {
         Codepoint = 0,
         Grapheme = null,
         Foreground = fg,
         Background = bg,
+        BackgroundIdentity = backgroundIdentity,
         Attributes = CellAttributes.None,
         UnderlineStyle = TerminalUnderlineStyle.None,
         UnderlineColor = 0,
@@ -154,8 +192,18 @@ public readonly record struct TerminalHighlightSpan(
 /// </summary>
 public sealed class TerminalRow
 {
+    internal RoyalTerminal.Terminal.Snapshots.GhosttySnapshotPageAllocation? SnapshotAllocation { get; set; }
+    internal int SnapshotAllocationRow { get; set; }
+    internal bool SnapshotAllocationUnmodified { get; set; }
+    internal ulong SnapshotMetadataRevision { get; private set; }
     private TerminalCell[] _cells;
     private int _columns;
+    private byte _rowMetadata;
+    private bool CellsAreShared
+    {
+        get => (_rowMetadata & 1) != 0;
+        set => _rowMetadata = (byte)(value ? _rowMetadata | 1 : _rowMetadata & ~1);
+    }
 
     /// <summary>Whether this row has been modified since last render.</summary>
     public bool IsDirty { get; set; } = true;
@@ -165,6 +213,23 @@ public sealed class TerminalRow
     /// Explicit line feeds keep this false.
     /// </summary>
     public bool WrapsToNext { get; set; }
+
+    /// <summary>
+    /// Whether this physical row continues a soft-wrapped predecessor. This is
+    /// retained independently of the predecessor, which may leave scrollback.
+    /// </summary>
+    public bool IsWrapContinuation
+    {
+        get => (_rowMetadata & 8) != 0;
+        set => _rowMetadata = (byte)(value ? _rowMetadata | 8 : _rowMetadata & ~8);
+    }
+
+    /// <summary>Shell prompt marker; it can be present even on an otherwise empty row.</summary>
+    public TerminalSemanticPrompt SemanticPrompt
+    {
+        get => (TerminalSemanticPrompt)((_rowMetadata >> 1) & 3);
+        set => _rowMetadata = (byte)((_rowMetadata & ~6) | (((byte)value & 3) << 1));
+    }
 
     /// <summary>
     /// True when this row was appended only to preserve a Windows PTY live viewport during resize.
@@ -178,7 +243,14 @@ public sealed class TerminalRow
     public int PreservedColumns => _cells.Length;
 
     /// <summary>Access the cells array as a span.</summary>
-    public Span<TerminalCell> Cells => _cells.AsSpan(0, _columns);
+    public Span<TerminalCell> Cells
+    {
+        get
+        {
+            EnsureWritableCells();
+            return _cells.AsSpan(0, _columns);
+        }
+    }
 
     /// <summary>Read-only access to cells.</summary>
     public ReadOnlySpan<TerminalCell> ReadOnlyCells => _cells.AsSpan(0, _columns);
@@ -187,16 +259,63 @@ public sealed class TerminalRow
     public ReadOnlySpan<TerminalCell> ReadOnlyPreservedCells => _cells.AsSpan();
 
     public TerminalRow(int columns, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
+        : this(columns, defaultFg, defaultBg, initialize: true)
+    {
+    }
+
+    private TerminalRow(int columns, uint defaultFg, uint defaultBg, bool initialize)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(columns);
 
         _columns = columns;
         _cells = new TerminalCell[columns];
-        Clear(defaultFg, defaultBg);
+        if (initialize)
+        {
+            Clear(defaultFg, defaultBg);
+        }
     }
 
+    // Reflow overwrites the live prefix and fills the unused suffix itself.
+    internal static TerminalRow CreateForReflow(int columns)
+        => new(columns, 0, 0, initialize: false);
+
+    private TerminalRow(TerminalRow source)
+    {
+        SnapshotAllocation = source.SnapshotAllocation;
+        SnapshotAllocationRow = source.SnapshotAllocationRow;
+        SnapshotAllocationUnmodified = source.SnapshotAllocationUnmodified;
+        SnapshotMetadataRevision = source.SnapshotMetadataRevision;
+        _cells = source._cells;
+        _columns = source._columns;
+        CellsAreShared = source.CellsAreShared = true;
+        IsDirty = source.IsDirty;
+        WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
+        IsTransientResizeRow = source.IsTransientResizeRow;
+    }
+
+    // Callers hold the screen lock and must not retain writable cell references
+    // across this boundary. Subsequent mutations detach only the affected row.
+    internal TerminalRow CreateStateCopy() => new(this);
+
+    // A search snapshot pins the backing cells with COW. Comparing storage plus
+    // row layout detects mutation independently of renderer dirty acknowledgments.
+    internal bool HasSameSearchContent(TerminalRow other) =>
+        ReferenceEquals(_cells, other._cells) && _columns == other._columns &&
+        WrapsToNext == other.WrapsToNext && IsWrapContinuation == other.IsWrapContinuation;
+
+    internal object SearchStorageIdentity => _cells;
+
     /// <summary>Access a cell by column index.</summary>
-    public ref TerminalCell this[int column] => ref _cells[column];
+    public ref TerminalCell this[int column]
+    {
+        get
+        {
+            EnsureWritableCells();
+            return ref _cells[column];
+        }
+    }
 
     /// <summary>Resize the active row width without discarding preserved cells.</summary>
     public void Resize(int columns, uint defaultFg = 0xFFD4D4D4, uint defaultBg = 0xFF1E1E1E)
@@ -224,6 +343,8 @@ public sealed class TerminalRow
         }
 
         WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
         IsTransientResizeRow = source.IsTransientResizeRow;
         IsDirty = true;
     }
@@ -244,8 +365,29 @@ public sealed class TerminalRow
         }
 
         WrapsToNext = source.WrapsToNext;
+        IsWrapContinuation = source.IsWrapContinuation;
+        SemanticPrompt = source.SemanticPrompt;
         IsTransientResizeRow = source.IsTransientResizeRow;
         IsDirty = true;
+    }
+
+    /// <summary>Swaps equal-width active cell-array ownership for an in-page row shift.</summary>
+    internal void SwapActiveStorage(TerminalRow other)
+    {
+        if (_columns != other._columns || _cells.Length != _columns || other._cells.Length != other._columns)
+            throw new InvalidOperationException("Active storage swaps require equal, unhidden widths.");
+        // Swap ownership, not payload. Each retained COW reader keeps its arrays;
+        // swapping the shared flags with them avoids a copy until a later write.
+        (_cells, other._cells) = (other._cells, _cells);
+        bool shared = CellsAreShared;
+        CellsAreShared = other.CellsAreShared;
+        other.CellsAreShared = shared;
+        (SemanticPrompt, other.SemanticPrompt) = (other.SemanticPrompt, SemanticPrompt);
+        (IsTransientResizeRow, other.IsTransientResizeRow) = (other.IsTransientResizeRow, IsTransientResizeRow);
+        SnapshotAllocationUnmodified = other.SnapshotAllocationUnmodified = false;
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
+        other.SnapshotMetadataRevision = unchecked(other.SnapshotMetadataRevision + 1);
+        IsDirty = other.IsDirty = true;
     }
 
     /// <summary>Clears cells retained outside the active width after this row is edited while narrow.</summary>
@@ -256,6 +398,8 @@ public sealed class TerminalRow
         {
             return;
         }
+
+        EnsureWritableCells();
 
         if (start < _columns)
         {
@@ -284,23 +428,25 @@ public sealed class TerminalRow
         IsDirty = true;
     }
 
-    /// <summary>Remaps cell colors across active and retained cells.</summary>
-    internal bool RemapCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    /// <summary>Resolves logical colors across active and retained cells.</summary>
+    internal bool ResolveCellColors(TerminalTheme theme)
     {
         bool changed = false;
         for (int col = 0; col < _cells.Length; col++)
         {
-            ref TerminalCell cell = ref _cells[col];
-
-            if (colorRemap.TryGetValue(cell.Foreground, out uint mappedFg))
+            TerminalCell cell = _cells[col];
+            uint foreground = Resolve(cell.ForegroundIdentity, cell.Foreground, theme.DefaultForeground);
+            uint background = Resolve(cell.BackgroundIdentity, cell.Background, theme.DefaultBackground);
+            uint underline = cell.HasUnderlineColor
+                ? Resolve(cell.UnderlineIdentity, cell.UnderlineColor, foreground)
+                : cell.UnderlineColor;
+            if (foreground != cell.Foreground || background != cell.Background || underline != cell.UnderlineColor)
             {
-                cell.Foreground = mappedFg;
-                changed = true;
-            }
-
-            if (colorRemap.TryGetValue(cell.Background, out uint mappedBg))
-            {
-                cell.Background = mappedBg;
+                // Resolve first so cursor-only or unchanged themes do not detach shared rows.
+                EnsureWritableCells();
+                _cells[col].Foreground = foreground;
+                _cells[col].Background = background;
+                _cells[col].UnderlineColor = underline;
                 changed = true;
             }
         }
@@ -311,15 +457,36 @@ public sealed class TerminalRow
         }
 
         return changed;
+
+        uint Resolve(TerminalColorIdentity identity, uint current, uint defaultColor)
+            => identity.Kind switch
+            {
+                TerminalColorKind.Palette => theme.Palette[(int)identity.Value],
+                TerminalColorKind.Rgb => current,
+                _ => defaultColor,
+            };
     }
 
     /// <summary>Clear all cells to the default state.</summary>
     public void Clear(uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
+        => Clear(fg, bg, default);
+
+    /// <summary>Clears all cells while retaining the original background color identity.</summary>
+    public void Clear(uint fg, uint bg, TerminalColorIdentity backgroundIdentity)
     {
+        if (CellsAreShared)
+        {
+            // Every cell is overwritten, so no old payload needs copying.
+            _cells = new TerminalCell[_columns];
+            CellsAreShared = false;
+        }
+
         ResizePreservedStorage(_columns, fg, bg);
         for (var i = 0; i < _columns; i++)
-            _cells[i] = TerminalCell.Empty(fg, bg);
+            _cells[i] = TerminalCell.Empty(fg, bg, backgroundIdentity);
         WrapsToNext = false;
+        IsWrapContinuation = false;
+        SemanticPrompt = TerminalSemanticPrompt.None;
         IsTransientResizeRow = false;
         IsDirty = true;
     }
@@ -342,17 +509,35 @@ public sealed class TerminalRow
 
     private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
     {
+        SnapshotAllocationUnmodified = false;
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
         if (columns == _cells.Length)
         {
+            EnsureWritableCells();
             return;
         }
 
         int previousLength = _cells.Length;
         Array.Resize(ref _cells, columns);
+        CellsAreShared = false;
         for (int i = previousLength; i < _cells.Length; i++)
         {
             _cells[i] = TerminalCell.Empty(defaultFg, defaultBg);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureWritableCells()
+    {
+        SnapshotAllocationUnmodified = false;
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
+        if (!CellsAreShared)
+        {
+            return;
+        }
+
+        _cells = (TerminalCell[])_cells.Clone();
+        CellsAreShared = false;
     }
 }
 
@@ -409,6 +594,20 @@ internal sealed class TerminalRowBuffer
         {
             Add(row);
         }
+    }
+
+    /// <summary>Prepends owned rows in oldest-to-newest order without moving existing cells.</summary>
+    internal void PrependRange(ReadOnlySpan<TerminalRow> rows)
+    {
+        if (rows.IsEmpty) return;
+        foreach (TerminalRow row in rows) ArgumentNullException.ThrowIfNull(row);
+        int count = checked(Count + rows.Length);
+        EnsureCapacity(count); // All fallible work precedes mutation.
+        int head = (int)(((long)_head + _items.Length - rows.Length % _items.Length) % _items.Length);
+        for (int i = 0; i < rows.Length; i++)
+            _items[(int)(((long)head + i) % _items.Length)] = rows[i];
+        _head = head;
+        Count = count;
     }
 
     public void Clear()
@@ -509,11 +708,8 @@ internal sealed class TerminalRowBuffer
             return;
         }
 
-        int nextCapacity = _items.Length == 0 ? 4 : _items.Length * 2;
-        while (nextCapacity < desiredCapacity)
-        {
-            nextCapacity *= 2;
-        }
+        int nextCapacity = (int)Math.Max(desiredCapacity,
+            Math.Min(Array.MaxLength, Math.Max(4L, (long)_items.Length * 2)));
 
         TerminalRow?[] nextItems = new TerminalRow[nextCapacity];
         CopyLogicalTo(nextItems);
@@ -572,14 +768,15 @@ internal sealed class TerminalRowBuffer
 /// Screen buffer holding a grid of terminal cells with optional scrollback.
 /// Supports virtualized access for large scroll buffers.
 /// </summary>
-public sealed class TerminalScreen
+public sealed partial class TerminalScreen
 {
     private TerminalRowBuffer _rows;
     private TerminalRowBuffer? _primaryRows;
     private TerminalRowBuffer? _alternateRows;
-    private readonly Dictionary<int, string> _hyperlinksById = [];
-    private readonly Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
-    private readonly Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
+    private Dictionary<int, string> _hyperlinksById = [];
+    private Dictionary<string, int> _hyperlinkIdsByUrl = new(StringComparer.Ordinal);
+    private TerminalHyperlinkRegistry _hyperlinkIdentities = new();
+    private Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
     private Dictionary<int, TerminalRasterImageSource> _rasterImagesById = [];
     private List<TerminalRasterImagePlacement> _rasterPlacements = [];
     private Dictionary<int, TerminalRasterImageSource>? _primaryRasterImagesById;
@@ -634,8 +831,9 @@ public sealed class TerminalScreen
         set => _viewportTop = Math.Clamp(value, 0, MaxScrollOffset);
     }
 
-    /// <summary>Maximum scroll offset.</summary>
-    public int MaxScrollOffset => Math.Max(0, TotalRows - ViewportRows);
+    /// <summary>Maximum scroll offset; alternate page-local history is not user scrollback.</summary>
+    public int MaxScrollOffset => _alternateBufferActive || _snapshotScrollbackQuota?.MaximumBytes == 0
+        ? 0 : Math.Max(0, TotalRows - ViewportRows);
 
     /// <summary>Whether the screen is currently rendering the alternate buffer.</summary>
     public bool AlternateBufferActive => _alternateBufferActive;
@@ -656,10 +854,13 @@ public sealed class TerminalScreen
     public long ThemeRevision => _themeRevision;
 
     /// <summary>Lock object for thread-safe access from UI and composition threads.</summary>
-    public object SyncRoot { get; } = new object();
+    public object SyncRoot => Synchronization.SyncRoot;
+
+    /// <summary>Coordinates terminal mutation with pending render demand.</summary>
+    public TerminalStateSynchronization Synchronization { get; } = new();
 
     /// <summary>Gets whether the current viewport snapshot includes Kitty image placements.</summary>
-    public bool HasKittyGraphics => _kittyPlacements.Length > 0;
+    public bool HasKittyGraphics => !GetKittyPlacements().IsEmpty;
 
     /// <summary>Gets whether the current screen includes protocol-neutral raster image placements.</summary>
     public bool HasRasterGraphics => _rasterPlacements.Count > 0;
@@ -683,6 +884,13 @@ public sealed class TerminalScreen
             _rows.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
     }
 
+    // State copies assign every field from their source; do not allocate a
+    // throwaway viewport or palette before replacing it with the copied state.
+    private TerminalScreen(TerminalRowBuffer rows)
+    {
+        _rows = rows;
+    }
+
     private static int NormalizeScrollbackLimit(int scrollbackLimit)
     {
         return Math.Max(0, scrollbackLimit);
@@ -695,12 +903,9 @@ public sealed class TerminalScreen
     {
         ArgumentNullException.ThrowIfNull(theme);
 
-        TerminalTheme previousTheme = _theme;
-        Dictionary<uint, uint> colorRemap = BuildColorRemap(previousTheme, theme);
-
-        if (colorRemap.Count > 0)
+        if (CellThemeColorsChanged(_theme, theme))
         {
-            RemapExistingCellColors(colorRemap);
+            ResolveExistingCellColors(theme);
         }
 
         _theme = theme;
@@ -714,66 +919,36 @@ public sealed class TerminalScreen
         }
     }
 
-    private void RemapExistingCellColors(IReadOnlyDictionary<uint, uint> colorRemap)
+    private static bool CellThemeColorsChanged(TerminalTheme previous, TerminalTheme next)
     {
-        RemapRowColors(_rows, colorRemap);
+        if (previous.DefaultForeground != next.DefaultForeground || previous.DefaultBackground != next.DefaultBackground)
+            return true;
+        if (ReferenceEquals(previous.Palette, next.Palette)) return false;
+        for (int i = 0; i < 256; i++)
+            if (previous.Palette[i] != next.Palette[i]) return true;
+        return false;
+    }
+
+    private void ResolveExistingCellColors(TerminalTheme theme)
+    {
+        ResolveRowColors(_rows, theme);
 
         if (_primaryRows is not null && !ReferenceEquals(_primaryRows, _rows))
         {
-            RemapRowColors(_primaryRows, colorRemap);
+            ResolveRowColors(_primaryRows, theme);
         }
 
         if (_alternateRows is not null && !ReferenceEquals(_alternateRows, _rows))
         {
-            RemapRowColors(_alternateRows, colorRemap);
+            ResolveRowColors(_alternateRows, theme);
         }
     }
 
-    private static void RemapRowColors(TerminalRowBuffer rows, IReadOnlyDictionary<uint, uint> colorRemap)
+    private static void ResolveRowColors(TerminalRowBuffer rows, TerminalTheme theme)
     {
         for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
-            rows[rowIndex].RemapCellColors(colorRemap);
-        }
-    }
-
-    private static Dictionary<uint, uint> BuildColorRemap(TerminalTheme previousTheme, TerminalTheme nextTheme)
-    {
-        Dictionary<uint, uint> remap = new(capacity: 258);
-        HashSet<uint> ambiguousSources = new();
-
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultForeground, nextTheme.DefaultForeground);
-        AddColorRemap(remap, ambiguousSources, previousTheme.DefaultBackground, nextTheme.DefaultBackground);
-
-        for (int i = 0; i < 256; i++)
-        {
-            AddColorRemap(remap, ambiguousSources, previousTheme.Palette[i], nextTheme.Palette[i]);
-        }
-
-        return remap;
-    }
-
-    private static void AddColorRemap(
-        IDictionary<uint, uint> remap,
-        ISet<uint> ambiguousSources,
-        uint source,
-        uint target)
-    {
-        if (source == target || ambiguousSources.Contains(source))
-        {
-            return;
-        }
-
-        if (!remap.TryGetValue(source, out uint existing))
-        {
-            remap[source] = target;
-            return;
-        }
-
-        if (existing != target)
-        {
-            remap.Remove(source);
-            ambiguousSources.Add(source);
+            rows[rowIndex].ResolveCellColors(theme);
         }
     }
 
@@ -864,8 +1039,37 @@ public sealed class TerminalScreen
         return _hyperlinksById.TryGetValue(hyperlinkId, out url);
     }
 
+    /// <summary>
+    /// Registers an owned OSC 8 identity without coalescing distinct IDs by URL.
+    /// A nonempty explicit ID takes precedence over the numeric implicit ID.
+    /// Re-registering an existing identity is allocation-free.
+    /// </summary>
+    public int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId)
+    {
+        if (uri.IsEmpty) throw new ArgumentException("A hyperlink URI cannot be empty.", nameof(uri));
+        if (_hyperlinkIdentities.TryFind(uri, explicitId, implicitId, out int token)) return token;
+        token = _nextHyperlinkId;
+        if (token == int.MaxValue)
+        {
+            token = 1;
+            while (_hyperlinksById.ContainsKey(token)) token++;
+        }
+        TerminalHyperlink value = _hyperlinkIdentities.Add(token, uri, explicitId, implicitId);
+        _hyperlinksById.Add(token, value.Uri);
+        _nextHyperlinkId = token + 1;
+        return token;
+    }
+
+    /// <summary>Gets the owned protocol identity, when registered with its original bytes.</summary>
+    public bool TryGetHyperlink(int hyperlinkId, out TerminalHyperlink? hyperlink)
+        => _hyperlinkIdentities.TryGet(hyperlinkId, out hyperlink);
+
     /// <summary>Gets the current Kitty image placement snapshot.</summary>
-    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements() => _kittyPlacements;
+    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements()
+    {
+        RefreshKittyProjection();
+        return _kittyPlacements;
+    }
 
     /// <summary>Attempts to resolve a Kitty image payload by image id.</summary>
     public bool TryGetKittyImageSource(int imageId, out TerminalKittyImageSource? source)
@@ -884,6 +1088,10 @@ public sealed class TerminalScreen
         IReadOnlyList<TerminalKittyImageSource>? images,
         IReadOnlyList<TerminalKittyImagePlacement>? placements)
     {
+        _kittyAnchoredPlacements = null;
+        _kittyPlaceholderScene = null;
+        _kittyPlaceholderRuns = null;
+        _kittyProjectionState = null;
         _kittyImagesById.Clear();
         if (images is not null)
         {
@@ -907,6 +1115,7 @@ public sealed class TerminalScreen
             }
 
             _kittyPlacements = copy;
+            Array.Sort(_kittyPlacements, TerminalKittyImagePlacement.ComparePaintOrder);
         }
 
         InvalidateViewport();
@@ -915,6 +1124,10 @@ public sealed class TerminalScreen
     /// <summary>Clears the current Kitty image snapshot.</summary>
     public void ClearKittyGraphics()
     {
+        _kittyAnchoredPlacements = null;
+        _kittyPlaceholderScene = null;
+        _kittyPlaceholderRuns = null;
+        _kittyProjectionState = null;
         if (_kittyImagesById.Count == 0 && _kittyPlacements.Length == 0)
         {
             return;
@@ -1115,24 +1328,42 @@ public sealed class TerminalScreen
     /// <summary>
     /// Adds a new row to the bottom, potentially scrolling up.
     /// </summary>
-    public TerminalRow AddRow()
-    {
-        var row = new TerminalRow(Columns, DefaultForeground, DefaultBackground);
-        _rows.Add(row);
+    public TerminalRow AddRow() => AddRowCore(ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit));
 
-        // Trim scrollback if exceeding limit
-        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
-        int removedRows = 0;
-        int overflowRows = _rows.Count - maxRows;
-        if (overflowRows > 0)
+    private TerminalRow AddRowCore(int maxRows, GhosttySnapshotScrollbackQuota? growthQuota = null)
+    {
+        int removedRows = Math.Max(0, _rows.Count + 1 - maxRows);
+        TerminalRow row;
+        if (removedRows > 0 && _rows.Count > 0)
         {
-            _rows.RemoveFirst(overflowRows);
-            removedRows = overflowRows;
+            // Once a row leaves scrollback, retain its storage for the new bottom
+            // row. Clearing all metadata prevents stale wrap/resize state.
+            row = _rows[0];
+            RemoveRows(0, Math.Min(removedRows, _rows.Count));
+            // Reusing the CLR array is not retaining the historical native page.
+            // Admission assigns the recycled row to the new tail's capacity.
+            row.SnapshotAllocation = null;
+            row.SnapshotAllocationRow = 0;
+            row.Resize(Columns, DefaultForeground, DefaultBackground);
+            row.Clear(DefaultForeground, DefaultBackground);
         }
+        else
+        {
+            row = new TerminalRow(Columns, DefaultForeground, DefaultBackground);
+        }
+
+        _rows.Add(row);
+        if (maxRows == 0)
+        {
+            RemoveRows(0, _rows.Count);
+        }
+
+        removedRows += RemoveSnapshotQuotaRowsAfterGrowth(growthQuota);
 
         if (removedRows > 0)
         {
             ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
+            ScrollOffset = _viewportTop;
         }
 
         return row;
@@ -1200,9 +1431,9 @@ public sealed class TerminalScreen
         _primaryRasterPlacements = null;
         _alternateBufferActive = false;
 
-        ResizeActiveRows(Columns);
+        if (!_snapshotRowGeometry) ResizeActiveRows(Columns);
         EnsureMinimumRows(ViewportRows);
-        TrimScrollbackRows();
+        if (!_snapshotRowGeometry) TrimScrollbackRows();
         ScrollOffset = _primaryScrollOffset;
         InvalidateAll();
     }
@@ -1217,9 +1448,13 @@ public sealed class TerminalScreen
             return;
         }
 
+        if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
+        _snapshotPageTracker?.DiscardCursor(1);
         _alternateRows = null;
+        _snapshotAlternateLineLimit = false;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
+        PruneAnchorsFromRow(0, alternate: true);
     }
 
     /// <summary>
@@ -1257,6 +1492,16 @@ public sealed class TerminalScreen
             return;
         }
 
+        ClearHistoryCore(reuseNativeTailSlots: false);
+    }
+
+    // VT ED3 acts on either active screen, unlike the host's primary-only
+    // ClearScrollback command. PageList.eraseRows also leaves the erased row
+    // offsets in its unused tail for subsequent growth to reuse.
+    internal void EraseActiveHistory() => ClearHistoryCore(reuseNativeTailSlots: true);
+
+    private void ClearHistoryCore(bool reuseNativeTailSlots)
+    {
         int scrollbackRows = Math.Max(0, _rows.Count - ViewportRows);
         if (scrollbackRows <= 0)
         {
@@ -1271,7 +1516,11 @@ public sealed class TerminalScreen
             rows.Add(_rows[rowIndex]);
         }
 
+        if (reuseNativeTailSlots && TracksSnapshotMetadata)
+            (_snapshotPageTracker ??= new()).RetireHistoryRows(_rows, firstViewportRow);
+        else RetireSnapshotRows(0, firstViewportRow);
         _rows = rows;
+        if (_alternateBufferActive) _alternateRows = rows;
         EnsureMinimumRows(ViewportRows);
         ShiftRasterGraphicsAfterTopRowsRemoved(scrollbackRows);
         ScrollOffset = 0;
@@ -1307,9 +1556,11 @@ public sealed class TerminalScreen
             rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
         }
 
+        RetireSnapshotRows(0, _rows.Count);
         _rows = rows;
         ClearRasterGraphics();
         ClearKittyGraphics();
+        PruneAnchorsFromRow(0, _alternateBufferActive);
         ScrollOffset = 0;
         InvalidateAll();
     }
@@ -1325,14 +1576,19 @@ public sealed class TerminalScreen
         }
 
         _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        _snapshotPageTracker = null;
         _primaryRows = null;
+        if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;
+        _snapshotAlternateLineLimit = false;
         _primaryRasterImagesById = null;
         _primaryRasterPlacements = null;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
         _primaryScrollOffset = 0;
         _viewportTop = 0;
+        _trackedAnchors.Clear();
+        _anchorRevision++;
         ClearHyperlinks();
         ClearRasterGraphics();
         ClearKittyGraphics();
@@ -1342,25 +1598,31 @@ public sealed class TerminalScreen
     /// <summary>
     /// Moves the non-empty active viewport into scrollback and clears the active viewport.
     /// </summary>
-    public void MoveViewportToScrollbackAndClear()
+    public void MoveViewportToScrollbackAndClear() => MoveViewportToScrollbackAndClearCore();
+
+    // Return the active-area displacement so the parser can reload its cursor
+    // pin rather than unconditionally homing a cursor on a retained blank row.
+    internal int MoveViewportToScrollbackAndClearCore(bool clearActiveRows = true)
     {
         if (_alternateBufferActive)
         {
+            if (!clearActiveRows) return ScrollAlternateViewportToHistory();
             EnsureAlternateRows();
             ClearActiveRows();
             ClearRasterGraphics();
             ClearKittyGraphics();
             ScrollOffset = 0;
             InvalidateAll();
-            return;
+            return ViewportRows;
         }
 
         DiscardTransientResizeRows();
         ScrollOffset = 0;
 
-        AppendBlankRowsAndTrimScrollback(GetNonEmptyViewportRowCount());
+        int movedRows = GetNonEmptyViewportRowCount();
+        AppendBlankRowsAndTrimScrollback(movedRows);
 
-        ClearViewportRows();
+        if (clearActiveRows) ClearViewportRows();
         ClearRasterGraphicsInViewportRectangle(
             0,
             Math.Max(0, ViewportRows - 1),
@@ -1369,6 +1631,7 @@ public sealed class TerminalScreen
         ClearKittyGraphics();
         ScrollOffset = 0;
         InvalidateAll();
+        return movedRows;
     }
 
     /// <summary>
@@ -1399,7 +1662,8 @@ public sealed class TerminalScreen
             return 0;
         }
 
-        _rows.RemoveRange(_rows.Count - removableRows, removableRows);
+        RemoveRows(_rows.Count - removableRows, removableRows);
+        PruneAnchorsFromRow(_rows.Count, _alternateBufferActive);
         ScrollOffset = 0;
         InvalidateAll();
         return removableRows;
@@ -1424,13 +1688,23 @@ public sealed class TerminalScreen
     {
         for (int viewportRow = ViewportRows - 1; viewportRow >= 0; viewportRow--)
         {
-            if (RowHasContent(GetViewportRow(viewportRow)) || RowHasRasterContent(viewportRow))
+            if (RowHasScrollClearContent(GetViewportRow(viewportRow)) || RowHasRasterContent(viewportRow))
             {
                 return viewportRow + 1;
             }
         }
 
         return 0;
+    }
+
+    private static bool RowHasScrollClearContent(TerminalRow row)
+    {
+        // Ghostty Cell.isEmpty includes wide spacers and erased background
+        // cells. A row without text can still need preserving in history.
+        foreach (ref readonly TerminalCell cell in row.ReadOnlyCells)
+            if (cell.HasContent || cell.Width != 1 || cell.BackgroundIdentity.Kind != TerminalColorKind.Default)
+                return true;
+        return false;
     }
 
     private bool RowHasRasterContent(int viewportRow)
@@ -1454,6 +1728,7 @@ public sealed class TerminalScreen
 
     private void ClearHyperlinks()
     {
+        _hyperlinkIdentities.Clear();
         _hyperlinksById.Clear();
         _hyperlinkIdsByUrl.Clear();
         _nextHyperlinkId = 1;
@@ -1469,6 +1744,8 @@ public sealed class TerminalScreen
             TerminalRow row = _rows[i];
             if (row.PreservedColumns > row.Columns)
             {
+                using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
+                styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
                 row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
             }
         }
@@ -1476,21 +1753,33 @@ public sealed class TerminalScreen
 
     private void EnsureAlternateRows()
     {
+        // Restored pages may retain physical widths and incidental history.
+        // Switching routes is not a resize or a request to evict those pages.
+        if (_snapshotRowGeometry)
+        {
+            EnsureMinimumRows(ViewportRows);
+            ScrollOffset = 0;
+            return;
+        }
         ResizeActiveRows(Columns);
         EnsureMinimumRows(ViewportRows);
         if (_rows.Count > ViewportRows)
         {
-            _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+            RemoveRows(ViewportRows, _rows.Count - ViewportRows);
+            PruneAnchorsFromRow(ViewportRows, _alternateBufferActive);
         }
+
+        ClampActiveAnchorsToColumns();
 
         ScrollOffset = 0;
     }
 
     private void ClearActiveRows()
     {
+        PruneAnchorsFromRow(0, _alternateBufferActive);
         for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
         {
-            _rows[rowIndex].Clear(DefaultForeground, DefaultBackground);
+            ClearRow(_rows[rowIndex]);
         }
     }
 
@@ -1498,7 +1787,7 @@ public sealed class TerminalScreen
     {
         for (int rowIndex = 0; rowIndex < ViewportRows; rowIndex++)
         {
-            GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
+            ClearRow(GetViewportRow(rowIndex));
         }
     }
 
@@ -1509,11 +1798,19 @@ public sealed class TerminalScreen
             return;
         }
 
+        if (TracksSnapshotMetadata)
+        {
+            // Assign physical tail slots even without a finite quota. Each
+            // newly exposed page also has its own byte-recycling event.
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) AddRow();
+            return;
+        }
+
         int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
         int overflowRows = Math.Max(0, _rows.Count + rowCount - maxRows);
         if (overflowRows > 0)
         {
-            _rows.RemoveFirst(overflowRows);
+            RemoveRows(0, overflowRows);
             ShiftRasterGraphicsAfterTopRowsRemoved(overflowRows);
         }
 
@@ -1536,6 +1833,7 @@ public sealed class TerminalScreen
         {
             _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
         }
+        ClampActiveAnchorsToColumns();
     }
 
     private void EnsureMinimumRows(int rows)
@@ -1548,6 +1846,7 @@ public sealed class TerminalScreen
 
     private void ShiftRasterGraphicsAfterTopRowsRemoved(int removedRows)
     {
+        ShiftAnchorsAfterTopRowsRemoved(removedRows);
         if (_rasterPlacements.Count == 0 || removedRows <= 0)
         {
             return;
@@ -1701,16 +2000,18 @@ public sealed class TerminalScreen
 
             int rowStart = Math.Min(startColumn, row.Columns - 1);
             int rowEnd = Math.Min(endColumn, row.Columns - 1);
-            if (rowStart > 0 && row[rowStart].Width == 0)
+            if (rowStart > 0 && row.ReadOnlyCells[rowStart].Width == 0 && !row.ReadOnlyCells[rowStart].IsWideSpacerHead)
             {
                 rowStart--;
             }
 
-            if (rowEnd + 1 < row.Columns && row[rowEnd].Width == 2)
+            if (rowEnd + 1 < row.Columns && row.ReadOnlyCells[rowEnd].Width == 2)
             {
                 rowEnd++;
             }
 
+            using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
+            styles.Clear(rowStart, rowEnd - rowStart + 1);
             for (int column = rowStart; column <= rowEnd; column++)
             {
                 ClearCellTextPreservingColors(ref row[column]);
@@ -1745,7 +2046,7 @@ public sealed class TerminalScreen
         int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
         if (overflowRows > 0)
         {
-            _rows.RemoveFirst(overflowRows);
+            RemoveRows(0, overflowRows);
             removedRows = overflowRows;
         }
 
@@ -1808,6 +2109,17 @@ public sealed class TerminalScreen
         TerminalGridPosition? trackedViewportPosition,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
+        => Resize(columns, viewportRows, reflowOnResize, trackedViewportPosition,
+            trackedAbsolutePositions, preserveViewportTopOnRowsIncrease, preserveVtCursorOnResize: false);
+
+    internal TerminalGridPosition Resize(
+        int columns,
+        int viewportRows,
+        bool reflowOnResize,
+        TerminalGridPosition? trackedViewportPosition,
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease,
+        bool preserveVtCursorOnResize)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
@@ -1840,11 +2152,13 @@ public sealed class TerminalScreen
             : 0;
         List<TerminalRasterImagePlacement>? reflowRasterPlacements = null;
         List<ReflowAnchorPosition>? reflowAnchors = null;
+        List<TerminalScreenAnchor>? reflowCellAnchors = null;
+        int cellAnchorOffset = -1;
         int trackedAbsolutePositionCount = trackedAbsolutePositions.Length;
         int liveViewportTopAnchorIndex = -1;
         if (columns != oldColumns &&
             reflowOnResize &&
-            (trackedAbsolutePositionCount > 0 || preserveLiveViewportTop || _rasterPlacements.Count > 0))
+            (trackedAbsolutePositionCount > 0 || preserveLiveViewportTop || _rasterPlacements.Count > 0 || _trackedAnchors.Count > 0))
         {
             if (_rasterPlacements.Count > 0)
             {
@@ -1882,6 +2196,9 @@ public sealed class TerminalScreen
                     placement.AnchorRow,
                     placement.AnchorColumn));
             }
+
+            cellAnchorOffset = reflowAnchors.Count;
+            reflowCellAnchors = AppendTrackedCellReflowAnchors(reflowAnchors);
         }
 
         int trackedAbsoluteRow = trackedViewportPosition is { } trackedPosition
@@ -1892,24 +2209,49 @@ public sealed class TerminalScreen
             : 0;
         int mappedAbsoluteRow = trackedAbsoluteRow;
         int mappedColumn = Math.Clamp(trackedColumn, 0, columns);
+        // Ghostty grows below a non-bottom cursor rather than pulling history.
+        // Follow the same height-before-narrowing / height-after-widening order.
+        int vtRowsToAppend = preserveVtCursorOnResize && trackedViewportPosition is { } vtCursor &&
+            vtCursor.Row < oldViewportRows - 1 ? Math.Max(0, viewportRows - oldViewportRows) : 0;
+
+        // PageList.resize shrinks height before narrower-column REFLOW. The
+        // no-reflow path always changes columns first: truncation can make a
+        // trailing row blank and eligible for trimming instead of history.
+        bool trimBottom = trackedViewportPosition.HasValue &&
+            !preserveViewportTopOnRowsIncrease && viewportRows < oldViewportRows;
+        bool trimBeforeColumns = reflowOnResize && columns < oldColumns;
+        if (trimBottom && trimBeforeColumns)
+            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, trackedAbsoluteRow);
+        if (trimBeforeColumns) AppendBlankResizeRows(vtRowsToAppend, oldColumns);
 
         if (columns != oldColumns)
         {
             if (reflowOnResize)
             {
+                int reflowViewportRows = columns < oldColumns ? viewportRows : oldViewportRows;
+                ReflowCursorPadding? cursorPadding = preserveVtCursorOnResize && trackedViewportPosition.HasValue
+                    ? CaptureReflowCursorPadding(trackedAbsoluteRow, trackedViewportPosition.Value.Row, reflowViewportRows)
+                    : null;
                 ReflowRows(
                     columns,
                     trackedAbsoluteRow,
                     trackedColumn,
                     reflowAnchors,
+                    trimTrailingBlankRows: !preserveViewportTopOnRowsIncrease,
                     out mappedAbsoluteRow,
                     out mappedColumn);
+                if (cursorPadding is { } padding)
+                    RestoreReflowCursorPadding(padding, mappedAbsoluteRow, reflowViewportRows, columns);
             }
             else
             {
                 ResizeRows(columns);
             }
         }
+
+        if (!trimBeforeColumns) AppendBlankResizeRows(vtRowsToAppend, columns);
+        if (trimBottom && !trimBeforeColumns)
+            TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow, reflowAnchors);
 
         Columns = columns;
         ViewportRows = viewportRows;
@@ -1932,7 +2274,17 @@ public sealed class TerminalScreen
         {
             if (_rows.Count > ViewportRows)
             {
-                _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+                if (trackedViewportPosition.HasValue)
+                {
+                    // Native no-scrollback screens erase the history created
+                    // by shrinking: retain the bottom active rows, not the top.
+                    removedRows = _rows.Count - ViewportRows;
+                    RemoveRows(0, removedRows);
+                }
+                else
+                {
+                    RemoveRows(ViewportRows, _rows.Count - ViewportRows);
+                }
             }
         }
         else
@@ -1940,10 +2292,17 @@ public sealed class TerminalScreen
             int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
             if (overflowRows > 0)
             {
-                _rows.RemoveFirst(overflowRows);
+                RemoveRows(0, overflowRows);
                 removedRows = overflowRows;
             }
         }
+
+        // Reflow accounts its output before viewport padding is appended.
+        // Padding also occupies native page slots, even with unlimited quotas
+        // and before the cursor next visits those rows.
+        if (TracksSnapshotMetadata && HasNativeSnapshotGeometry)
+            _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, SnapshotPageLayout());
+        removedRows += RemoveSnapshotQuotaRows(GhosttySnapshotQuotaCheckpoint.Resize);
 
         if (mappedAbsoluteRow >= 0)
         {
@@ -1994,6 +2353,19 @@ public sealed class TerminalScreen
             RemapTrackedAbsolutePositionsWithoutReflow(trackedAbsolutePositions, columns, removedRows);
         }
 
+        if (reflowCellAnchors is not null && reflowAnchors is not null)
+        {
+            RemapTrackedCellAnchors(reflowCellAnchors, reflowAnchors, cellAnchorOffset, removedRows);
+        }
+        else
+        {
+            // The raster removal path above also shifts cell anchors. When it
+            // was bypassed by a reflow anchor list, apply the removal here.
+            if (reflowAnchors is not null) ShiftAnchorsAfterTopRowsRemoved(removedRows);
+            PruneAnchorsFromRow(TotalRows, _alternateBufferActive);
+            ClampActiveAnchorsToColumns();
+        }
+
         if (mappedLiveViewportTopAbsoluteRow >= 0)
         {
             int minimumViewportTopAbsoluteRow = CalculateWindowsPtyResizeViewportTop(
@@ -2012,7 +2384,9 @@ public sealed class TerminalScreen
             row.IsDirty = true;
         }
 
-        return GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
+        return trackedViewportPosition.HasValue && mappedAbsoluteRow < _rows.Count - ViewportRows
+            ? new TerminalGridPosition(0, 0)
+            : GetViewportPositionForAbsoluteRow(mappedAbsoluteRow, mappedColumn);
     }
 
     private int CalculateWindowsPtyResizeViewportTop(
@@ -2107,6 +2481,12 @@ public sealed class TerminalScreen
 
     private void ResizeRows(int columns)
     {
+        if (columns > Columns && PrepareSnapshotResize(columns) is { } tracker)
+        {
+            GhosttySnapshotColumnResize.Resize(_rows, columns, DefaultForeground, DefaultBackground,
+                SnapshotPageLayout(), tracker, this);
+            return;
+        }
         for (int i = 0; i < _rows.Count; i++)
         {
             _rows[i].Resize(columns, DefaultForeground, DefaultBackground);
@@ -2131,11 +2511,15 @@ public sealed class TerminalScreen
         int trackedAbsoluteRow,
         int trackedColumn,
         List<ReflowAnchorPosition>? additionalTrackedPositions,
+        bool trimTrailingBlankRows,
         out int mappedAbsoluteRow,
         out int mappedColumn)
     {
+        GhosttySnapshotReflowAllocation? snapshotAllocation = CreateSnapshotReflowAllocation(columns);
+        List<GhosttySnapshotReflowAllocation.Source>? snapshotSources = snapshotAllocation is null ? null : [];
         List<TerminalRow> reflowedRows = new(_rows.Count);
         List<TerminalCell> logicalLine = new(Math.Max(Columns, columns));
+        List<(int Start, int End, TerminalSemanticPrompt Prompt)>? semanticRows = null;
         ReflowAnchorProcessingIndex[]? trackedPositionIndexes =
             CreateReflowAnchorProcessingOrder(additionalTrackedPositions);
         List<int>? lineTrackedIndexes = trackedPositionIndexes is null ? null : new List<int>();
@@ -2144,10 +2528,26 @@ public sealed class TerminalScreen
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
         int nextTrackedPositionIndex = 0;
+        int lastDestinationColumn = 0;
         int rowIndex = 0;
-        while (rowIndex < _rows.Count)
+        int sourceRowCount = _rows.Count;
+        if (trimTrailingBlankRows)
+        {
+            int lastPinnedRow = trackedAbsoluteRow;
+            if (additionalTrackedPositions is not null)
+                foreach (ReflowAnchorPosition pin in additionalTrackedPositions)
+                    lastPinnedRow = Math.Max(lastPinnedRow, pin.OldAbsoluteRow);
+            // Ghostty defers empty rows and never writes the trailing suffix.
+            // Keep pinned rows; the target viewport is padded after reflow.
+            while (sourceRowCount > lastPinnedRow + 1 &&
+                   GetReflowEndExclusive(_rows[sourceRowCount - 1]) == 0)
+                sourceRowCount--;
+        }
+        while (rowIndex < sourceRowCount)
         {
             logicalLine.Clear();
+            snapshotSources?.Clear();
+            semanticRows?.Clear();
             lineTrackedIndexes?.Clear();
             lineTrackedOffsets?.Clear();
             int trackedLogicalOffset = -1;
@@ -2157,13 +2557,6 @@ public sealed class TerminalScreen
             {
                 TerminalRow row = _rows[rowIndex];
                 int endExclusive = GetReflowEndExclusive(row);
-                if (rowIndex == trackedAbsoluteRow)
-                {
-                    int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
-                    endExclusive = Math.Max(endExclusive, clampedTrackedColumn);
-                    trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
-                }
-
                 if (additionalTrackedPositions is not null && trackedPositionIndexes is not null)
                 {
                     while (nextTrackedPositionIndex < trackedPositionIndexes.Length)
@@ -2184,6 +2577,17 @@ public sealed class TerminalScreen
                         }
 
                         int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
+                        if (position.CellAnchor && clampedColumn >= endExclusive)
+                        {
+                            // Ghostty clamps before advancing a deferred newline
+                            // or pending wrap. At a full row the physical cursor
+                            // remains on the last cell, not column zero.
+                            int destinationColumn = logicalLine.Count == 0
+                                ? lastDestinationColumn
+                                : Math.Min(columns - 1, MapLogicalOffsetToReflowedPosition(
+                                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column);
+                            clampedColumn = Math.Min(clampedColumn, columns - 1 - destinationColumn);
+                        }
                         int effectiveTrackedColumn = position.ExtendLineToColumn
                             ? clampedColumn
                             : endExclusive == 0
@@ -2191,7 +2595,7 @@ public sealed class TerminalScreen
                                 : Math.Min(clampedColumn, endExclusive);
                         if (position.ExtendLineToColumn)
                         {
-                            endExclusive = Math.Max(endExclusive, clampedColumn);
+                            endExclusive = Math.Max(endExclusive, clampedColumn + (position.CellAnchor ? 1 : 0));
                         }
 
                         lineTrackedIndexes!.Add(positionIndex);
@@ -2200,29 +2604,61 @@ public sealed class TerminalScreen
                     }
                 }
 
-                if (endExclusive > 0)
+                // The live cursor extends the row only after ordinary pins
+                // have been clamped, matching PageList.ReflowCursor.reflowRow.
+                if (rowIndex == trackedAbsoluteRow)
                 {
-                    ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells[..endExclusive];
-                    for (int i = 0; i < cells.Length; i++)
-                    {
-                        logicalLine.Add(cells[i]);
-                    }
+                    int clampedTrackedColumn = Math.Clamp(trackedColumn, 0, row.Columns);
+                    endExclusive = Math.Max(endExclusive, Math.Min(row.Columns, clampedTrackedColumn + 1));
+                    trackedLogicalOffset = logicalLine.Count + clampedTrackedColumn;
                 }
 
-                hasContinuation = row.WrapsToNext && rowIndex + 1 < _rows.Count;
+                if (endExclusive > 0)
+                {
+                    if (snapshotSources is not null)
+                        GhosttySnapshotReflowAllocation.CaptureSource(snapshotSources, logicalLine.Count, row);
+                    // Adjacent equal markers form one run. In particular,
+                    // ordinary output keeps the original bulk-copy fast path.
+                    if (row.SemanticPrompt != TerminalSemanticPrompt.None || semanticRows is { Count: > 0 })
+                    {
+                        semanticRows ??= new();
+                        if (semanticRows.Count == 0 && logicalLine.Count > 0)
+                            semanticRows.Add((0, logicalLine.Count, TerminalSemanticPrompt.None));
+                        if (semanticRows.Count > 0 && semanticRows[^1].Prompt == row.SemanticPrompt)
+                        {
+                            var previous = semanticRows[^1];
+                            semanticRows[^1] = (previous.Start, logicalLine.Count + endExclusive, previous.Prompt);
+                        }
+                        else
+                        {
+                            semanticRows.Add((logicalLine.Count, logicalLine.Count + endExclusive, row.SemanticPrompt));
+                        }
+                    }
+                    ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells[..endExclusive];
+                    logicalLine.AddRange(cells);
+                }
+
+                hasContinuation = row.WrapsToNext && rowIndex + 1 < sourceRowCount;
                 rowIndex++;
             }
             while (hasContinuation);
 
             int destinationStartRow = reflowedRows.Count;
             TerminalGridPosition? mappedLinePosition = AppendReflowedLogicalLine(
-                logicalLine,
+                CollectionsMarshal.AsSpan(logicalLine),
                 columns,
                 reflowedRows,
-                trackedLogicalOffset);
+                trackedLogicalOffset,
+                semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows),
+                snapshotAllocation,
+                snapshotSources is null ? default : CollectionsMarshal.AsSpan(snapshotSources),
+                ref lastDestinationColumn);
 
             if (mappedLinePosition is { } mappedPosition)
             {
+                if (trackedColumn < Columns)
+                    mappedPosition = MapLogicalCellOffsetToReflowedPosition(
+                        CollectionsMarshal.AsSpan(logicalLine), columns, trackedLogicalOffset);
                 mappedAbsoluteRow = destinationStartRow + mappedPosition.Row;
                 mappedColumn = mappedPosition.Column;
             }
@@ -2233,12 +2669,11 @@ public sealed class TerminalScreen
             {
                 for (int i = 0; i < lineTrackedIndexes.Count; i++)
                 {
-                    TerminalGridPosition mappedAnchorPosition = MapLogicalOffsetToReflowedPosition(
-                        logicalLine,
-                        columns,
-                        lineTrackedOffsets[i]);
                     int positionIndex = lineTrackedIndexes[i];
                     ReflowAnchorPosition position = additionalTrackedPositions[positionIndex];
+                    TerminalGridPosition mappedAnchorPosition = position.CellAnchor
+                        ? MapLogicalCellOffsetToReflowedPosition(CollectionsMarshal.AsSpan(logicalLine), columns, lineTrackedOffsets[i])
+                        : MapLogicalOffsetToReflowedPosition(CollectionsMarshal.AsSpan(logicalLine), columns, lineTrackedOffsets[i]);
                     int maxColumn = position.AllowEndColumn ? columns : Math.Max(0, columns - 1);
                     position.NewAbsoluteRow = destinationStartRow + mappedAnchorPosition.Row;
                     position.NewColumn = Math.Clamp(mappedAnchorPosition.Column, 0, maxColumn);
@@ -2248,8 +2683,10 @@ public sealed class TerminalScreen
             }
         }
 
+        snapshotAllocation?.Finish(reflowedRows, DefaultForeground, DefaultBackground);
         _rows.Clear();
         _rows.AddRange(reflowedRows);
+        snapshotAllocation?.AccountResult(this, _rows);
     }
 
     private static ReflowAnchorProcessingIndex[]? CreateReflowAnchorProcessingOrder(
@@ -2319,70 +2756,99 @@ public sealed class TerminalScreen
         {
             if (IsReflowLineEndCell(in cells[i]))
             {
-                return i + 1;
+                // A trailing spacer belongs to the final wide cell. Its pen
+                // need not equal the head's (a late selector can change it).
+                return Math.Min(cells.Length, i + Math.Max(1, (int)cells[i].Width));
             }
         }
 
-        return 0;
+        return row.SemanticPrompt != TerminalSemanticPrompt.None && row.Columns > 0 ? 1 : 0;
     }
 
     private static bool IsReflowLineEndCell(ref readonly TerminalCell cell)
     {
-        if (cell.Width == 0)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return !IsAsciiSpaceGrapheme(cell.Grapheme);
-        }
-
-        return cell.Codepoint != 0 && cell.Codepoint != ' ';
-    }
-
-    private static bool IsAsciiSpaceGrapheme(string grapheme)
-    {
-        for (int i = 0; i < grapheme.Length; i++)
-        {
-            if (grapheme[i] != ' ')
-            {
-                return false;
-            }
-        }
-
-        return true;
+        // Ghostty Cell.isEmpty retains printed spaces, wide spacers and
+        // background-only cells. A literal space is not an unwritten cell.
+        return cell.Width != 1 || cell.HasContent ||
+            cell.BackgroundIdentity.Kind != TerminalColorKind.Default;
     }
 
     private TerminalGridPosition? AppendReflowedLogicalLine(
-        List<TerminalCell> logicalLine,
+        ReadOnlySpan<TerminalCell> logicalLine,
         int columns,
         List<TerminalRow> destination,
-        int trackedLogicalOffset)
+        int trackedLogicalOffset,
+        ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows,
+        GhosttySnapshotReflowAllocation? snapshotAllocation,
+        ReadOnlySpan<GhosttySnapshotReflowAllocation.Source> snapshotSources,
+        ref int lastDestinationColumn)
     {
         int destinationStart = destination.Count;
         TerminalGridPosition? mappedPosition = null;
 
-        if (logicalLine.Count == 0)
+        if (logicalLine.IsEmpty)
         {
-            destination.Add(new TerminalRow(columns, DefaultForeground, DefaultBackground));
+            TerminalRow blank = new(columns, DefaultForeground, DefaultBackground);
+            destination.Add(blank);
+            snapshotAllocation?.DeferBlank(blank);
             return trackedLogicalOffset >= 0
                 ? new TerminalGridPosition(Math.Clamp(trackedLogicalOffset, 0, columns), 0)
                 : null;
         }
 
         int sourceIndex = 0;
-        while (sourceIndex < logicalLine.Count)
+        int semanticIndex = 0;
+        int snapshotSourceIndex = 0;
+        while (sourceIndex < logicalLine.Length)
         {
-            TerminalRow row = new(columns, DefaultForeground, DefaultBackground);
-            int destinationRow = destination.Count - destinationStart;
-            int column = 0;
-
-            while (sourceIndex < logicalLine.Count && column < columns)
+            TerminalRow row = TerminalRow.CreateForReflow(columns);
+            if (snapshotAllocation is not null)
             {
+                while (snapshotSourceIndex + 1 < snapshotSources.Length && sourceIndex >= snapshotSources[snapshotSourceIndex + 1].Start)
+                    snapshotSourceIndex++;
+                snapshotAllocation.Append(row, snapshotSources[snapshotSourceIndex].Page);
+            }
+            row.SemanticPrompt = semanticRows.IsEmpty ? TerminalSemanticPrompt.None : semanticRows[semanticIndex].Prompt;
+            int destinationRow = destination.Count - destinationStart;
+            row.IsWrapContinuation = destinationRow > 0;
+            int column = 0;
+            bool wideWrap = false;
+
+            while (sourceIndex < logicalLine.Length && column < columns)
+            {
+                while (semanticIndex + 1 < semanticRows.Length && sourceIndex >= semanticRows[semanticIndex + 1].Start)
+                    row.SemanticPrompt = semanticRows[++semanticIndex].Prompt;
                 if (mappedPosition is null && trackedLogicalOffset >= 0 && trackedLogicalOffset <= sourceIndex)
                 {
                     mappedPosition = new TerminalGridPosition(column, destinationRow);
+                }
+
+                // Cell payloads still copy in bulk. Snapshot-aware reflow also
+                // records native metadata allocation/copies before the payload;
+                // ordinary screens skip that bookkeeping entirely.
+                int runLength = GetReflowCopyRunLength(
+                    logicalLine[sourceIndex..], semanticRows.IsEmpty ? columns - column
+                        : Math.Min(columns - column, semanticRows[semanticIndex].End - sourceIndex));
+                if (runLength > 0)
+                {
+                    snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
+                    logicalLine.Slice(sourceIndex, runLength).CopyTo(row.Cells[column..]);
+                    if (mappedPosition is null && trackedLogicalOffset >= 0 &&
+                        trackedLogicalOffset <= sourceIndex + runLength)
+                    {
+                        int offset = trackedLogicalOffset - sourceIndex;
+                        if (offset > 0 && offset < runLength &&
+                            logicalLine[sourceIndex + offset - 1].Width == 2)
+                        {
+                            offset++;
+                        }
+
+                        mappedPosition = new TerminalGridPosition(column + offset, destinationRow);
+                    }
+
+                    sourceIndex += runLength;
+                    column += runLength;
+                    continue;
                 }
 
                 TerminalCell cell = logicalLine[sourceIndex];
@@ -2396,6 +2862,7 @@ public sealed class TerminalScreen
                 int width = cell.Width <= 1 ? 1 : 2;
                 if (width == 2 && columns == 1)
                 {
+                    row[column] = TerminalCell.Empty(DefaultForeground, DefaultBackground);
                     sourceIndex += sourceStep;
                     column++;
 
@@ -2409,15 +2876,21 @@ public sealed class TerminalScreen
 
                 if (width == 2 && column == columns - 1)
                 {
+                    wideWrap = true;
                     break;
                 }
 
                 cell.Width = (byte)width;
+                snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
                 row[column] = cell;
 
                 if (width == 2 && column + 1 < columns)
                 {
-                    row[column + 1] = CreateWideSpacer(cell);
+                    snapshotAllocation?.CopyMetadata(row, column + 1, snapshotSources, ref snapshotSourceIndex,
+                        sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]) ? sourceIndex + 1 : sourceIndex, 1,
+                        includeGraphemes: sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]));
+                    row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
+                        ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                 }
 
                 sourceIndex += sourceStep;
@@ -2429,8 +2902,20 @@ public sealed class TerminalScreen
                 }
             }
 
-            row.WrapsToNext = sourceIndex < logicalLine.Count;
+            // Native reflow copies the next source row's metadata before
+            // consuming a pending wrap. Preserve that overwrite at exact row
+            // boundaries, without rescanning the logical line for each marker.
+            while (semanticIndex + 1 < semanticRows.Length && sourceIndex >= semanticRows[semanticIndex + 1].Start)
+                row.SemanticPrompt = semanticRows[++semanticIndex].Prompt;
+            row.Cells[column..].Fill(TerminalCell.Empty(DefaultForeground, DefaultBackground));
+            if (wideWrap)
+            {
+                row[column].Width = 0;
+                row[column].IsWideSpacerHead = true;
+            }
+            row.WrapsToNext = sourceIndex < logicalLine.Length;
             destination.Add(row);
+            lastDestinationColumn = Math.Min(column, columns - 1);
         }
 
         if (mappedPosition is null && trackedLogicalOffset >= 0)
@@ -2443,11 +2928,11 @@ public sealed class TerminalScreen
     }
 
     private static TerminalGridPosition MapLogicalOffsetToReflowedPosition(
-        List<TerminalCell> logicalLine,
+        ReadOnlySpan<TerminalCell> logicalLine,
         int columns,
         int trackedLogicalOffset)
     {
-        if (logicalLine.Count == 0)
+        if (logicalLine.IsEmpty)
         {
             return new TerminalGridPosition(Math.Clamp(trackedLogicalOffset, 0, columns), 0);
         }
@@ -2455,7 +2940,7 @@ public sealed class TerminalScreen
         int sourceIndex = 0;
         int destinationRow = 0;
         int column = 0;
-        while (sourceIndex < logicalLine.Count)
+        while (sourceIndex < logicalLine.Length)
         {
             if (trackedLogicalOffset <= sourceIndex)
             {
@@ -2511,7 +2996,7 @@ public sealed class TerminalScreen
         return new TerminalGridPosition(0, Math.Max(0, destinationRow));
     }
 
-    private static int GetReflowSourceStep(List<TerminalCell> logicalLine, int sourceIndex)
+    private static int GetReflowSourceStep(ReadOnlySpan<TerminalCell> logicalLine, int sourceIndex)
     {
         TerminalCell cell = logicalLine[sourceIndex];
         if (cell.Width <= 1)
@@ -2519,10 +3004,41 @@ public sealed class TerminalScreen
             return 1;
         }
 
-        return sourceIndex + 1 < logicalLine.Count && logicalLine[sourceIndex + 1].Width == 0
+        return sourceIndex + 1 < logicalLine.Length && logicalLine[sourceIndex + 1].Width == 0 &&
+            !logicalLine[sourceIndex + 1].IsWideSpacerHead
             ? 2
             : 1;
     }
+
+    private static int GetReflowCopyRunLength(ReadOnlySpan<TerminalCell> cells, int availableColumns)
+    {
+        int limit = Math.Min(cells.Length, availableColumns);
+        int length = 0;
+        while (length < limit)
+        {
+            ref readonly TerminalCell cell = ref cells[length];
+            if (cell.Width == 1)
+            {
+                length++;
+                continue;
+            }
+
+            if (cell.Width != 2 || length + 1 >= limit ||
+                !IsNormalizedWideSpacer(in cells[length + 1]))
+            {
+                break;
+            }
+
+            length += 2;
+        }
+
+        return length;
+    }
+
+    // A late variation selector can print the tail with a different current pen
+    // (including OSC 133 classification). Such pairs are valid, not malformed.
+    private static bool IsNormalizedWideSpacer(in TerminalCell tail)
+        => tail.Width == 0 && !tail.IsWideSpacerHead && tail.Codepoint == 0 && tail.Grapheme is null;
 
     private static TerminalCell CreateWideSpacer(TerminalCell source) => new()
     {
@@ -2530,6 +3046,9 @@ public sealed class TerminalScreen
         Grapheme = null,
         Foreground = source.Foreground,
         Background = source.Background,
+        ForegroundIdentity = source.ForegroundIdentity,
+        BackgroundIdentity = source.BackgroundIdentity,
+        UnderlineIdentity = source.UnderlineIdentity,
         Attributes = source.Attributes,
         UnderlineStyle = source.UnderlineStyle,
         UnderlineColor = source.UnderlineColor,
@@ -2537,6 +3056,8 @@ public sealed class TerminalScreen
         Decorations = source.Decorations,
         HasBackground = source.HasBackground,
         HyperlinkId = source.HyperlinkId,
+        IsProtected = source.IsProtected,
+        SemanticContent = source.SemanticContent,
         Width = 0,
     };
 
@@ -2546,12 +3067,14 @@ public sealed class TerminalScreen
             int oldAbsoluteRow,
             int oldColumn,
             bool allowEndColumn = false,
-            bool extendLineToColumn = true)
+            bool extendLineToColumn = true,
+            bool cellAnchor = false)
         {
             OldAbsoluteRow = oldAbsoluteRow;
             OldColumn = oldColumn;
             AllowEndColumn = allowEndColumn;
             ExtendLineToColumn = extendLineToColumn;
+            CellAnchor = cellAnchor;
             NewAbsoluteRow = oldAbsoluteRow;
             NewColumn = oldColumn;
             IsMapped = false;
@@ -2564,6 +3087,8 @@ public sealed class TerminalScreen
         public bool AllowEndColumn { get; }
 
         public bool ExtendLineToColumn { get; }
+
+        public bool CellAnchor { get; }
 
         public int NewAbsoluteRow { get; set; }
 

@@ -579,6 +579,14 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             nameof(FontEmbolden),
             TerminalFontRenderingSettings.Default.Embolden);
 
+    /// <summary>macOS smoothing toggle shared with terminal controls.</summary>
+    public static readonly StyledProperty<bool> FontThickenProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(FontThicken), false);
+
+    /// <summary>macOS smoothing strength shared with terminal controls.</summary>
+    public static readonly StyledProperty<byte> FontThickenStrengthProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, byte>(nameof(FontThickenStrength), 255);
+
     public static readonly StyledProperty<bool> FontForceAutoHintingProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
             nameof(FontForceAutoHinting),
@@ -1152,6 +1160,20 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(FontEmboldenProperty, value);
     }
 
+    /// <summary>Gets or sets macOS font smoothing for normal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => GetValue(FontThickenProperty);
+        set => SetValue(FontThickenProperty, value);
+    }
+
+    /// <summary>Gets or sets macOS smoothing strength (0–255).</summary>
+    public byte FontThickenStrength
+    {
+        get => GetValue(FontThickenStrengthProperty);
+        set => SetValue(FontThickenStrengthProperty, value);
+    }
+
     public bool FontForceAutoHinting
     {
         get => GetValue(FontForceAutoHintingProperty);
@@ -1539,6 +1561,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             BaselineSnap = FontBaselineSnap,
             EmbeddedBitmaps = FontEmbeddedBitmaps,
             Embolden = FontEmbolden,
+            Thicken = FontThicken,
+            ThickenStrength = FontThickenStrength,
             ForceAutoHinting = FontForceAutoHinting,
             LinearMetrics = FontLinearMetrics,
         }.Normalize();
@@ -1803,6 +1827,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             FontBaselineSnap = fontRendering.BaselineSnap;
             FontEmbeddedBitmaps = fontRendering.EmbeddedBitmaps;
             FontEmbolden = fontRendering.Embolden;
+            FontThicken = fontRendering.Thicken;
+            FontThickenStrength = fontRendering.ThickenStrength;
             FontForceAutoHinting = fontRendering.ForceAutoHinting;
             FontLinearMetrics = fontRendering.LinearMetrics;
             AutoScroll = profile.Appearance.AutoScroll;

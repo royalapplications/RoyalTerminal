@@ -28,6 +28,301 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalControlHeadlessInteractionTests
 {
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_PasswordCursorUsesProcessorStateAndSurvivesHiddenModeAndFocusLoss(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(), preference);
+        TextBox sibling = new();
+        Window window = new() { Width = 640, Height = 400, Content = new StackPanel { Children = { control, sibling } } };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            SkiaTerminalRenderer renderer = control.Renderer!;
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            control.WriteOutput("\u001b[?25l"u8);
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            sibling.Focus();
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Lock, renderer.CursorStyle);
+            transport.Detected = false;
+            control.Focus();
+            Assert.False(renderer.CursorVisible);
+            control.WriteOutput("\u001b[?25h\u001b[6 q"u8);
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            sibling.Focus();
+            Assert.True(renderer.CursorVisible);
+            Assert.Equal(CursorStyle.BlockHollow, renderer.CursorStyle);
+            control.Focus();
+            Assert.Equal(CursorStyle.Bar, renderer.CursorStyle);
+            transport.Detected = true;
+            Assert.True(await WaitUntilAsync(() => renderer.CursorStyle == CursorStyle.Lock, TimeSpan.FromSeconds(3)));
+            int polls = transport.Polls;
+            control.WriteOutput("\u001bc"u8);
+            Assert.True(await WaitUntilAsync(() => transport.Polls > polls, TimeSpan.FromSeconds(3)));
+            Assert.True(control.PasswordInput);
+            Assert.NotEqual(CursorStyle.Lock, renderer.CursorStyle);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_SecureInputBalancesFocusWindowDetachAndSession(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        FakeSecureInputPlatform platform = new();
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(), preference,
+            new TerminalSecureInputScope(platform));
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
+            control.Focus();
+            Assert.True(control.AutoSecureInput);
+            Assert.True(control.PasswordInput);
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+            control.AutoSecureInput = false;
+            Assert.True(control.PasswordInput);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            control.ClearValue(TerminalControl.AutoSecureInputProperty);
+            Assert.True(control.AutoSecureInput);
+            Assert.Equal(1, platform.Owners);
+            sibling.Focus();
+            Assert.Equal(0, platform.Owners);
+            control.Focus();
+            Assert.Equal(1, platform.Owners);
+
+            // The headless backend posts deactivation when the window hides.
+            window.Hide();
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(window.IsActive);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            int polls = transport.Polls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+
+            panel.Children.Remove(control);
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            Assert.True(control.SecureInputEnabled);
+            control.StopPty();
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Assert.True(await WaitUntilAsync(() => control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            window.Close();
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            Assert.Equal(platform.EnableCalls, platform.DisableCalls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_SecureInputFailuresRetryWithoutLosingOwnership()
+    {
+        FakeSecureInputPlatform platform = new();
+        PasswordModeTransport transport = new() { Detected = true };
+        TerminalControl control = CreateControlWithTransport(transport, new PasswordStateProcessorFactory(),
+            VtProcessorPreference.Managed, new TerminalSecureInputScope(platform));
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
+            control.Focus();
+            Assert.True(control.SecureInputEnabled);
+            platform.DisableFailures = 1;
+            control.AutoSecureInput = false;
+            Assert.True(control.SecureInputEnabled);
+            Assert.Equal(1, platform.Owners);
+            Assert.True(await WaitUntilAsync(() => !control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(0, platform.Owners);
+            platform.EnableFailures = 1;
+            control.AutoSecureInput = true;
+            Assert.False(control.SecureInputEnabled);
+            Assert.Equal(0, platform.Owners);
+            Assert.True(await WaitUntilAsync(() => control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(1, platform.Owners);
+
+            // Detach must retain a failed-release scope long enough to retry,
+            // but may not resurrect it after the control has left the window.
+            platform.DisableFailures = 3;
+            window.Content = null;
+            Assert.True(await WaitUntilAsync(() => !control.SecureInputEnabled, TimeSpan.FromSeconds(3)));
+            Assert.Equal(0, platform.Owners);
+            int enables = platform.EnableCalls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(enables, platform.EnableCalls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_PasswordModePollingUpdatesBothEnginesAndStopsWithFocusAndSession(VtProcessorPreference preference, bool naturalExit)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        PasswordModeTransport transport = new() { Detected = true };
+        PasswordStateProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.Focus();
+            Assert.True(control.PasswordInput);
+            Assert.True(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            int resetPolls = transport.Polls;
+            control.WriteOutput("\u001bc"u8);
+            Assert.True(await WaitUntilAsync(() => transport.Polls > resetPolls, TimeSpan.FromSeconds(3)));
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            Assert.True(control.PasswordInput); // Latest host hint, not replayed after RIS.
+            transport.Detected = false;
+            Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+
+            sibling.Focus();
+            int polls = transport.Polls;
+            transport.Detected = true;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            Assert.False(control.PasswordInput);
+            control.Focus();
+            Assert.True(control.PasswordInput);
+
+            panel.Children.Remove(control);
+            polls = transport.Polls;
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            transport.Available = false;
+            Assert.True(await WaitUntilAsync(() => !control.PasswordInput, TimeSpan.FromSeconds(3)));
+            transport.Available = true;
+            Assert.True(await WaitUntilAsync(() => control.PasswordInput, TimeSpan.FromSeconds(3)));
+            if (naturalExit)
+            {
+                await transport.StopAsync();
+                Dispatcher.UIThread.RunJobs();
+            }
+            else control.StopPty();
+            Assert.False(control.PasswordInput);
+            Assert.False(((ITerminalPasswordInputState)factory.Processor!).PasswordInput);
+            polls = transport.Polls;
+            sibling.Focus();
+            control.Focus();
+            await Task.Delay(300);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(polls, transport.Polls);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    private sealed class PasswordModeTransport : RecordingTransport, ITerminalPasswordInputSource
+    {
+        public bool SupportsPasswordInputDetection => true;
+        public bool Detected { get; set; }
+        public bool Available { get; set; } = true;
+        public int Polls { get; private set; }
+        public bool TryGetPasswordInput(out bool passwordInput)
+        {
+            Polls++;
+            passwordInput = Available && IsRunning && Detected;
+            return Available && IsRunning;
+        }
+    }
+
+    private sealed class PasswordStateProcessorFactory : IVtProcessorFactory
+    {
+        public IVtProcessor? Processor { get; private set; }
+        public IVtProcessor Create(TerminalScreen screen, VtProcessorPreference preference)
+            => Processor = preference == VtProcessorPreference.Native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_KittyRepeatStateClearsOnFocusLossDetachAndSessionRestart()
+    {
+        RecordingTransport transport = new();
+        TerminalControl control = CreateControlWithTransport(transport);
+        TextBox sibling = new();
+        StackPanel panel = new() { Children = { control, sibling } };
+        Window window = new() { Width = 640, Height = 400, Content = panel };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[=11u"u8);
+            control.Focus();
+            Press("\u001b[97u");
+            Press("\u001b[97;1:2u");
+            sibling.Focus();
+            control.Focus();
+            Press("\u001b[97u");
+            panel.Children.Remove(control);
+            panel.Children.Insert(0, control);
+            control.Focus();
+            Press("\u001b[97u");
+            control.StopPty();
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[=11u"u8);
+            control.Focus();
+            Press("\u001b[97u");
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+
+        void Press(string expected)
+        {
+            transport.ClearInputs();
+            window.KeyPressQwerty(PhysicalKey.A, RawInputModifiers.None);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Single(transport.Inputs);
+            Assert.Equal(expected, Encoding.UTF8.GetString(transport.Inputs[0]));
+        }
+    }
+
     [AvaloniaFact]
     public async Task Headless_WindowResize_UpdatesGrid_AndPropagatesToTransport()
     {
@@ -646,14 +941,14 @@ public sealed class TerminalControlHeadlessInteractionTests
             await StabilizeWindowAsync(window, control);
             control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(
-                "while :; do printf 'busy-output\\n'; done\n");
+                "while :; do printf 'busy-%s\\n' output; done\n");
 
             bool floodSeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, floodNeedle),
@@ -662,7 +957,7 @@ public sealed class TerminalControlHeadlessInteractionTests
 
             Stopwatch interruptLatency = Stopwatch.StartNew();
             control.SendInput(new byte[] { 0x03 });
-            control.SendInput($"echo {postInterruptMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(postInterruptMarker));
 
             bool interrupted = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, postInterruptMarker),
@@ -678,20 +973,34 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Headless_ManagedPty_CtrlC_RecoversVisibleScreenAfterUnterminatedOscFlood()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_Pty_CtrlC_AndExplicitStRecoverVisibleScreenAfterOscFlood(VtProcessorPreference preference)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
 
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+
         const string readyMarker = "__ROYALTERMINAL_OSC_READY__";
+        const string hiddenMarker = "__ROYALTERMINAL_OSC_STILL_PENDING__";
         const string visibleRecoveryMarker = "__ROYALTERMINAL_OSC_VISIBLE_RECOVERY__";
 
-        TerminalControl control = new()
+        TerminalControl control = new(
+            new TerminalSessionService(),
+            new DefaultTerminalInputAdapter(),
+            new DefaultTerminalSelectionService(),
+            new DefaultTerminalScrollService(),
+            new DefaultVtProcessorFactory(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() }),
+            new DefaultPtyFactory(),
+            new NullSshCredentialProvider(),
+            new RejectAllSshHostKeyValidator(),
+            transportFactory: null)
         {
-            VtProcessorPreference = VtProcessorPreference.Managed,
+            VtProcessorPreference = preference,
         };
         Window window = new()
         {
@@ -720,7 +1029,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             await StabilizeWindowAsync(window, control);
             control.StartPty(shell: "/bin/sh", workingDirectory: Environment.CurrentDirectory);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
@@ -733,14 +1042,24 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(oscFloodSeen, $"Did not observe OSC flood output before interrupt. Output: {SnapshotOutput(outputSync, output)}");
 
             control.SendInput(new byte[] { 0x03 });
-            control.SendInput($"printf '{visibleRecoveryMarker}\\n'\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(hiddenMarker));
+            bool outputResumed = await WaitUntilAsync(
+                () => ContainsOutput(outputSync, output, hiddenMarker),
+                TimeSpan.FromSeconds(5));
+            Assert.True(outputResumed, "Ctrl+C must interrupt the producer even while OSC parsing remains pending.");
+            await StabilizeWindowAsync(window, control);
+            Assert.False(ContainsScreenText(control, hiddenMarker));
+
+            // Ctrl+C/newlines do not terminate OSC in Ghostty. Explicit ST
+            // recovery must work through the real PTY for both engines.
+            control.SendInput("printf '\\033\\134'; " + UnixPtyTestCommands.PrintMarker(visibleRecoveryMarker));
 
             bool visibleRecoverySeen = await WaitUntilAsync(
                 () => ContainsScreenText(control, visibleRecoveryMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(
                 visibleRecoverySeen,
-                $"Did not observe visible post-interrupt marker on the managed VT screen. Output: {SnapshotOutput(outputSync, output)}");
+                $"Did not observe visible post-ST marker on the {preference} VT screen. Output: {SnapshotOutput(outputSync, output)}");
         }
         finally
         {
@@ -1776,7 +2095,7 @@ public sealed class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
-    public async Task Headless_Padding_DragReleaseOutsideContentClampsToContentEdge()
+    public async Task Headless_Padding_DragReleaseOutsideContentPreservesEndpointCoordinates()
     {
         RecordingEndpoint endpoint = new();
         TerminalControl control = new()
@@ -1822,8 +2141,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             TerminalPointerEvent release = endpoint.PointerEvents.Last(static evt =>
                 evt.Kind == TerminalPointerEventKind.Button &&
                 evt.Action == TerminalInputAction.Release);
-            double expectedContentRight = control.Bounds.Width - control.Padding.Left - control.Padding.Right;
-            Assert.InRange(release.X, expectedContentRight - 0.01d, expectedContentRight + 0.01d);
+            double expectedReleaseX = control.Bounds.Width - 4d - control.Padding.Left;
+            Assert.InRange(release.X, expectedReleaseX - 0.01d, expectedReleaseX + 0.01d);
             Assert.InRange(release.Y, 2.5d * control.Renderer.CellHeight - 1d, 2.5d * control.Renderer.CellHeight + 1d);
         }
         finally
@@ -1881,13 +2200,17 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task Headless_Padding_SgrPixelsReleaseOutsideContentClampsToLastContentPixel()
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_Padding_SgrPixelsReleaseOutsideContentPreservesRawPixel(VtProcessorPreference preference)
     {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
         RecordingTransport transport = new();
         TerminalControl control = CreateControlWithTransport(
             transport,
-            preference: VtProcessorPreference.Managed);
+            new DefaultVtProcessorFactory(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() }),
+            preference: preference);
         control.Width = 640;
         control.Height = 400;
         control.Padding = new Thickness(10);
@@ -1922,10 +2245,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             string release = transport.Inputs
                 .Select(static input => Encoding.ASCII.GetString(input))
                 .Last(static text => text.EndsWith('m'));
-            int expectedRightPixel = (int)Math.Round(control.Bounds.Width - control.Padding.Left - control.Padding.Right);
-
-            Assert.Contains($";{expectedRightPixel};", release, StringComparison.Ordinal);
-            Assert.DoesNotContain($";{expectedRightPixel + 1};", release, StringComparison.Ordinal);
+            int expectedPixel = (int)Math.Round(control.Bounds.Width - 2d - control.Padding.Left);
+            Assert.Equal($"\u001b[<0;{expectedPixel};20m", release);
         }
         finally
         {
@@ -2201,6 +2522,131 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Headless_MouseInput_DoesNotOverrideAuthoritativeDisabledOrSuppressedEvents(bool disabled)
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            // Keep the raw tracker enabled while the authoritative processor
+            // rejects input, as can happen after snapshot installation.
+            control.WriteOutput("\u001b[?1000;1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            if (disabled) processor.MouseModeState = default;
+            else processor.SuppressPointer = true;
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: 2);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Empty(transport.Inputs);
+            Assert.Equal(2, processor.ObservedButtons.Count);
+            if (disabled) Assert.Empty(processor.PointerEvents);
+            else Assert.NotEmpty(processor.PointerEvents);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseInput_UsesAuthoritativePixelEncodingWithFractionalCells()
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            Assert.NotNull(control.Renderer);
+            control.Renderer!.SetCellSize(control.Renderer.CellWidth, 15.5f);
+            control.WriteOutput("\u001b[?1000;1006h"u8); // Tracker incorrectly says cell SGR.
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseModeState = new(TerminalMouseTrackingMode.PressRelease, TerminalMouseEncoding.SgrPixels);
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: control.Rows - 1);
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotEmpty(processor.PointerEvents);
+            Assert.InRange(Math.Abs(processor.PointerEvents[0].Y - point.Y), 0, 1.0);
+            Assert.Contains(transport.Inputs, static bytes => bytes.Length == 1 && bytes[0] == NativePointerRecordingVtProcessor.EncodedPointerByte);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseDragAndReleasePreserveOutsidePixelCoordinates()
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseModeState = new(TerminalMouseTrackingMode.AnyMotion, TerminalMouseEncoding.SgrPixels);
+            Point start = await GetCellInteractionPointAsync(control, window, column: 1, row: 1);
+            Point end = new(-23, -37);
+            RaiseMouseDragReleaseSequence(control, window, start, end, KeyModifiers.None);
+            Assert.Contains(processor.PointerEvents, e => e.Kind == TerminalPointerEventKind.Move && e.X == -23 && e.Y == -37);
+            Assert.Contains(processor.PointerEvents, e => e.Kind == TerminalPointerEventKind.Button && e.Action == TerminalInputAction.Release && e.X == -23 && e.Y == -37);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [MemberData(nameof(TerminalMouseShiftCaptureTests.Policies), MemberType = typeof(TerminalMouseShiftCaptureTests))]
+    public async Task Headless_ShiftMouse_RespectsHostAndApplicationPolicy(
+        TerminalMouseShiftCapturePolicy policy, bool? application, bool captured)
+    {
+        RecordingTransport transport = new();
+        NativePointerRecordingVtProcessorFactory factory = new();
+        TerminalControl control = CreateControlWithTransport(transport, factory, VtProcessorPreference.Managed);
+        control.Width = 640; control.Height = 400;
+        control.MouseShiftCapturePolicy = policy;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("\u001b[?1000;1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            NativePointerRecordingVtProcessor processor = factory.LastProcessor!;
+            processor.MouseShiftCaptureOverride = application;
+            transport.Inputs.Clear();
+            Point point = await GetCellInteractionPointAsync(control, window, column: 3, row: 2);
+            RaiseMousePressReleaseSequence(control, window, point, KeyModifiers.Shift);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(captured, transport.Inputs.Count != 0);
+            Assert.Equal(captured, processor.PointerEvents.Count != 0);
+            Assert.Equal(2, processor.ObservedButtons.Count);
+            Assert.Equal(TerminalInputAction.Release, processor.ObservedButtons[^1].Action);
+            if (captured) Assert.All(processor.PointerEvents, e => Assert.True((e.Modifiers & TerminalModifiers.Shift) != 0));
+            transport.Inputs.Clear();
+            RaiseMousePressReleaseSequence(control, window, point);
+            Dispatcher.UIThread.RunJobs();
+            Assert.NotEmpty(transport.Inputs);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
     [AvaloniaFact]
     public async Task Headless_MouseInput_EncodesSgrReleaseToTransport_WhenMode1006Enabled()
     {
@@ -2238,6 +2684,108 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             await CleanupWindowAsync(window, control.StopPty);
         }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_ShiftDrag_SelectsOrReportsAccordingToTerminalRequest(VtProcessorPreference preference, bool capture)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        RecordingTransport transport = new();
+        DefaultVtProcessorFactory factory = new(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() });
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            control.WriteOutput("alpha beta gamma\u001b[?1003;1006h"u8);
+            if (capture) control.WriteOutput("\u001b[>1s"u8);
+            Dispatcher.UIThread.RunJobs();
+            transport.Inputs.Clear();
+            Point start = await GetCellInteractionPointAsync(control, window, column: 1, row: 0);
+            Point end = await GetCellInteractionPointAsync(control, window, column: 5, row: 0);
+            RaiseMouseDragReleaseSequence(control, window, start, end, KeyModifiers.Shift);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(!capture, control.HasSelection);
+            Assert.Equal(capture, transport.Inputs.Count != 0);
+            if (capture)
+            {
+                Assert.Equal(3, transport.Inputs.Count);
+                Assert.StartsWith("\u001b[<4;", Encoding.ASCII.GetString(transport.Inputs[0]));
+                Assert.EndsWith("m", Encoding.ASCII.GetString(transport.Inputs[^1]));
+            }
+            else
+            {
+                Assert.Equal((1, 0), control.Renderer!.SelectionStart);
+                Assert.Equal((5, 0), control.Renderer.SelectionEnd);
+            }
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_OscMouseShapes_MapEveryShapeAndRestoreAfterHyperlinksAndReattach(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        RecordingTransport transport = new();
+        DefaultVtProcessorFactory factory = new(new INativeVtProcessorProvider[] { new GhosttyVtProcessorProvider() });
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
+        control.Width = 640; control.Height = 400;
+        Window window = new() { Width = 640, Height = 400, Content = control };
+        window.Show();
+        try
+        {
+            await StabilizeWindowAsync(window, control);
+            await control.StartSessionAsync(new FakeTransportOptions("fake"));
+            string[] names = ["default", "context-menu", "help", "pointer", "progress", "wait", "cell", "crosshair", "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing", "all-scroll", "col-resize", "row-resize", "n-resize", "e-resize", "s-resize", "w-resize", "ne-resize", "nw-resize", "se-resize", "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize", "zoom-in", "zoom-out"];
+            string[] expected = ["Arrow", "Arrow", "Help", "Hand", "AppStarting", "Wait", "Cross", "Cross", "Ibeam", "Ibeam", "DragLink", "DragCopy", "DragMove", "No", "No", "Hand", "Hand", "SizeAll", "SizeWestEast", "SizeNorthSouth", "TopSide", "RightSide", "BottomSide", "LeftSide", "TopRightCorner", "TopLeftCorner", "BottomRightCorner", "BottomLeftCorner", "SizeWestEast", "SizeNorthSouth", "TopRightCorner", "TopLeftCorner", "Cross", "Cross"];
+            for (int i = 0; i < names.Length; i++)
+            {
+                byte[] command = Encoding.ASCII.GetBytes("\u001b]22;" + names[i] + "\u0007");
+                control.WriteOutput(command);
+                Assert.Equal(expected[i], control.Cursor?.ToString());
+                Cursor? cursor = control.Cursor;
+                control.WriteOutput(command);
+                Assert.Same(cursor, control.Cursor);
+            }
+            control.SetHoveredLinkUrl("https://example.com");
+            Assert.Equal("Hand", control.Cursor?.ToString());
+            control.WriteOutput("\u001b[?2026h\u001b]22;crosshair\u0007"u8);
+            Assert.Equal("Hand", control.Cursor?.ToString());
+            control.SetHoveredLinkUrl(null);
+            Assert.Equal("Cross", control.Cursor?.ToString());
+            Cursor? previous = control.Cursor;
+            window.Content = null;
+            Assert.Null(control.Cursor);
+            window.Content = control;
+            await StabilizeWindowAsync(window, control);
+            Assert.Equal("Cross", control.Cursor?.ToString());
+            Assert.NotSame(previous, control.Cursor);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public void Headless_MouseCursorCache_ReusesNativeCursorWithoutWarmAllocations()
+    {
+        using TerminalMouseCursorCache cache = new();
+        Cursor cross = cache.Get(TerminalMouseShape.Crosshair, false);
+        Cursor hand = cache.Get(TerminalMouseShape.Text, true);
+        for (int i = 0; i < 1000; i++) _ = cache.Get(TerminalMouseShape.Crosshair, false);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) _ = cache.Get(TerminalMouseShape.Crosshair, false);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Same(cross, cache.Get(TerminalMouseShape.Cell, false));
+        Assert.Same(hand, cache.Get(TerminalMouseShape.Pointer, false));
+        Assert.True(cache.Owns(hand)); Assert.False(cache.Owns(null));
     }
 
     [AvaloniaFact]
@@ -2600,7 +3148,8 @@ public sealed class TerminalControlHeadlessInteractionTests
     private static TerminalControl CreateControlWithTransport(
         ITerminalTransport transport,
         IVtProcessorFactory? vtProcessorFactory = null,
-        VtProcessorPreference preference = VtProcessorPreference.Auto)
+        VtProcessorPreference preference = VtProcessorPreference.Auto,
+        ITerminalSecureInputScope? secureInputScope = null)
     {
         CompositeTerminalTransportFactory factory = new(
             new ITerminalTransportProvider[]
@@ -2617,7 +3166,8 @@ public sealed class TerminalControlHeadlessInteractionTests
             new DefaultPtyFactory(),
             new NullSshCredentialProvider(),
             new RejectAllSshHostKeyValidator(),
-            factory)
+            factory,
+            secureInputScope ?? new TerminalSecureInputScope(new FakeSecureInputPlatform()))
         {
             Background = Brushes.Transparent,
         };
@@ -2893,7 +3443,9 @@ public sealed class TerminalControlHeadlessInteractionTests
         byte expectedInputByte)
     {
         const string readyMarker = "__ROYALTERMINAL_KEYDOWN_CTRL_READY__";
-        const string floodNeedle = "Build step";
+        // The shell command itself contains "Build step". Require rendered
+        // escape bytes so Ctrl+Z cannot race ahead of foreground job creation.
+        const string floodNeedle = "\u001b[32mINFO\u001b[0m Build step";
 
         TerminalControl control = new()
         {
@@ -2937,12 +3489,13 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(shell is not null, $"Expected a job-control capable shell for {controlCharacterLabel} managed PTY test.");
             control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory, arguments: arguments);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
             Assert.True(readySeen, $"Did not observe PTY ready marker. Output: {SnapshotOutput(outputSync, output)}");
 
+            string startupOutput = SnapshotOutput(outputSync, output);
             control.SendInput(BuildAnsiFloodCommand(launchAsChildJob: physicalKey == PhysicalKey.Z));
 
             bool floodSeen = await WaitUntilAsync(
@@ -2968,7 +3521,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 $"Did not observe expected PTY input byte 0x{expectedInputByte:X2} after {controlCharacterLabel}. Inputs: {SnapshotInputs(inputSync, inputs)}");
 
             Stopwatch postInterruptLatency = Stopwatch.StartNew();
-            control.SendInput($"echo {postInterruptMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(postInterruptMarker));
 
             bool interrupted = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, postInterruptMarker),
@@ -2979,7 +3532,7 @@ public sealed class TerminalControlHeadlessInteractionTests
                 totalLatency.Elapsed < TimeSpan.FromSeconds(3),
                 $"Expected managed PTY {controlCharacterLabel} keydown interrupt to be prompt under ANSI flood. " +
                 $"Total={totalLatency.Elapsed}, KeyDispatch={keyDispatchLatency.Elapsed}, InputObserved={inputObservationLatency.Elapsed}, " +
-                $"PostInterrupt={postInterruptLatency.Elapsed}.");
+                $"PostInterrupt={postInterruptLatency.Elapsed}. Startup={startupOutput}");
         }
         finally
         {
@@ -3038,7 +3591,7 @@ public sealed class TerminalControlHeadlessInteractionTests
             Assert.True(shell is not null, $"Expected a job-control capable shell for repeated {controlCharacterLabel} managed PTY test.");
             control.StartPty(shell: shell, workingDirectory: Environment.CurrentDirectory, arguments: arguments);
 
-            control.SendInput($"echo {readyMarker}\n");
+            control.SendInput(UnixPtyTestCommands.PrintMarker(readyMarker));
             bool readySeen = await WaitUntilAsync(
                 () => ContainsOutput(outputSync, output, readyMarker),
                 TimeSpan.FromSeconds(5));
@@ -4041,9 +4594,19 @@ public sealed class TerminalControlHeadlessInteractionTests
         }
     }
 
-    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource
+    private sealed class NativePointerRecordingVtProcessor : IVtProcessor, ITerminalPointerSequenceEncoderSource, ITerminalMouseModeStateSource, ITerminalMouseShiftCaptureState, ITerminalPointerButtonStateSink
     {
         public const byte EncodedPointerByte = 0x4E;
+
+        public TerminalMouseModeState MouseModeState { get; set; } = new(TerminalMouseTrackingMode.PressRelease, TerminalMouseEncoding.Sgr);
+        public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
+        public bool SuppressPointer { get; set; }
+        public bool? MouseShiftCaptureOverride { get; set; }
+        public List<TerminalPointerEvent> ObservedButtons { get; } = [];
+        public void ObservePointerButton(in TerminalPointerEvent pointerEvent)
+        {
+            if (pointerEvent.Kind == TerminalPointerEventKind.Button) ObservedButtons.Add(pointerEvent);
+        }
 
         public List<TerminalPointerEvent> PointerEvents { get; } = [];
         public List<TerminalPointerEncodingContext> Contexts { get; } = [];
@@ -4085,6 +4648,7 @@ public sealed class TerminalControlHeadlessInteractionTests
         {
             PointerEvents.Add(pointerEvent);
             Contexts.Add(context);
+            if (SuppressPointer) { sequence = []; return false; }
             sequence = [EncodedPointerByte];
             return true;
         }

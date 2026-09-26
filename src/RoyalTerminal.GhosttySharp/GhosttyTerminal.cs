@@ -9,10 +9,13 @@ namespace RoyalTerminal.GhosttySharp;
 /// <summary>
 /// Managed lifetime wrapper for the official <c>GhosttyTerminal</c> libghostty-vt API.
 /// </summary>
-public sealed class GhosttyTerminal : IDisposable
+public sealed partial class GhosttyTerminal : IDisposable
 {
+    private readonly object _lifetimeSync = new();
     private nint _handle;
     private bool _disposed;
+    private bool _disposeRequested;
+    private int _nativeLeaseCount;
     private readonly bool _ownsHandle;
 
     /// <summary>
@@ -65,6 +68,20 @@ public sealed class GhosttyTerminal : IDisposable
         }
     }
 
+    internal NativeLifetimeLease AcquireNativeLifetimeLease()
+    {
+        lock (_lifetimeSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            checked
+            {
+                _nativeLeaseCount++;
+            }
+
+            return new NativeLifetimeLease(this);
+        }
+    }
+
     /// <summary>Writes VT bytes into the terminal parser.</summary>
     public unsafe void Write(ReadOnlySpan<byte> data)
     {
@@ -79,6 +96,80 @@ public sealed class GhosttyTerminal : IDisposable
         {
             GhosttyVtNative.TerminalVtWrite(_handle, dataPtr, (nuint)data.Length);
         }
+        GC.KeepAlive(_royalNotificationCallback);
+    }
+
+    /// <summary>
+    /// Consumes the shortest input prefix that reaches VT ground state.
+    /// Returns true when ground was reached and reports the consumed byte count.
+    /// </summary>
+    public unsafe bool WriteUntilGround(ReadOnlySpan<byte> data, out nuint consumed)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        fixed (byte* pointer = data)
+        {
+            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalVtWriteUntilGround(
+                _handle,
+                pointer,
+                (nuint)data.Length,
+                out consumed);
+            GC.KeepAlive(_royalNotificationCallback);
+            if (result == GhosttyVtNative.GhosttyResult.NoValue)
+            {
+                return false;
+            }
+
+            ThrowIfFailed(result, "ghostty_terminal_vt_write_until_ground");
+            return true;
+        }
+    }
+
+    /// <summary>Copies the replay-safe unfinished VT continuation.</summary>
+    public unsafe byte[] GetContinuation()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyResult probe = GhosttyVtNative.TerminalContinuationBuffer(
+            _handle,
+            null,
+            0,
+            out nuint required);
+        if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace)
+        {
+            ThrowIfFailed(probe, "ghostty_terminal_continuation_buf(probe)");
+        }
+
+        if (required == 0)
+        {
+            return [];
+        }
+
+        byte[] result = new byte[checked((int)required)];
+        fixed (byte* pointer = result)
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalContinuationBuffer(
+                    _handle,
+                    pointer,
+                    (nuint)result.Length,
+                    out nuint written),
+                "ghostty_terminal_continuation_buf");
+            if (written != (nuint)result.Length)
+            {
+                Array.Resize(ref result, checked((int)written));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Streams the replay-safe unfinished VT continuation.</summary>
+    public void WriteContinuationTo(Stream destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyStreamWriter.Write(
+            destination,
+            writer => GhosttyVtNative.TerminalContinuationWrite(_handle, writer),
+            "ghostty_terminal_continuation_write");
     }
 
     /// <summary>Resets the terminal to its initial state.</summary>
@@ -108,19 +199,48 @@ public sealed class GhosttyTerminal : IDisposable
     public bool GetMode(GhosttyVtNative.GhosttyMode mode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ThrowIfFailed(
-            GhosttyVtNative.TerminalModeGet(_handle, mode, out bool value),
-            "ghostty_terminal_mode_get");
-        return value;
+        unsafe
+        {
+            GhosttyVtNative.GhosttyTerminalModeConfig config = new()
+            {
+                Mode = mode,
+            };
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyTerminalData.Mode,
+                    &config),
+                "ghostty_terminal_get(mode)");
+            return config.Value;
+        }
     }
 
     /// <summary>Sets the current value of a VT mode.</summary>
     public void SetMode(GhosttyVtNative.GhosttyMode mode, bool value)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        ThrowIfFailed(
-            GhosttyVtNative.TerminalModeSet(_handle, mode, value),
-            "ghostty_terminal_mode_set");
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.Mode,
+            new GhosttyVtNative.GhosttyTerminalModeConfig
+            {
+                Mode = mode,
+                Value = value,
+            },
+            "ghostty_terminal_set(mode)");
+    }
+
+    /// <summary>Sets a mode and changes the value restored by a full terminal reset.</summary>
+    public void SetDefaultMode(GhosttyVtNative.GhosttyMode mode, bool value)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ModeDefault,
+            new GhosttyVtNative.GhosttyTerminalModeConfig
+            {
+                Mode = mode,
+                Value = value,
+            },
+            "ghostty_terminal_set(mode_default)");
     }
 
     /// <summary>Sets the shared callback userdata pointer.</summary>
@@ -192,6 +312,24 @@ public sealed class GhosttyTerminal : IDisposable
         SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.ClipboardWrite, callback);
     }
 
+    /// <summary>Configures the normalized clipboard-read callback.</summary>
+    public void SetClipboardReadCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.ClipboardRead, callback);
+    }
+
+    /// <summary>Configures the unsupported-sequence callback.</summary>
+    public void SetUnknownSequenceCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.UnknownSequence, callback);
+    }
+
+    /// <summary>Configures the synchronized-output render-hold callback.</summary>
+    public void SetRenderHoldCallback(nint callback)
+    {
+        SetPointerOption(GhosttyVtNative.GhosttyTerminalOption.RenderHold, callback);
+    }
+
     /// <summary>Configures the desktop-notification callback.</summary>
     public void SetDesktopNotificationCallback(nint callback)
     {
@@ -209,6 +347,36 @@ public sealed class GhosttyTerminal : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ThrowIfFailed(GhosttyVtNative.TerminalSet(_handle, option, null), $"ghostty_terminal_set({option})");
+    }
+
+    /// <summary>Sets the terminal title, or clears it when null.</summary>
+    public void SetTitle(string? title)
+    {
+        if (title is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.Title);
+            return;
+        }
+
+        SetStringOption(
+            GhosttyVtNative.GhosttyTerminalOption.Title,
+            title,
+            "ghostty_terminal_set(title)");
+    }
+
+    /// <summary>Sets the terminal working-directory value, or clears it when null.</summary>
+    public void SetWorkingDirectory(string? workingDirectory)
+    {
+        if (workingDirectory is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.Pwd);
+            return;
+        }
+
+        SetStringOption(
+            GhosttyVtNative.GhosttyTerminalOption.Pwd,
+            workingDirectory,
+            "ghostty_terminal_set(pwd)");
     }
 
     /// <summary>Sets the default foreground color.</summary>
@@ -365,6 +533,75 @@ public sealed class GhosttyTerminal : IDisposable
             GhosttyVtNative.GhosttyTerminalOption.GlyphProtocol,
             enabled,
             "ghostty_terminal_set(glyph_protocol)");
+    }
+
+    /// <summary>Sets the maximum replay-safe unfinished VT continuation size.</summary>
+    public void SetContinuationMaxBytes(nuint bytes)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ContinuationMaxBytes,
+            bytes,
+            "ghostty_terminal_set(continuation_max_bytes)");
+    }
+
+    /// <summary>Enables or disables potentially unsafe CSI 21 t title reports.</summary>
+    public void SetTitleReport(bool enabled)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.TitleReport,
+            enabled,
+            "ghostty_terminal_set(title_report)");
+    }
+
+    /// <summary>Sets the retained byte limit for unsupported terminal sequences.</summary>
+    public void SetUnknownSequenceMaxBytes(nuint bytes)
+    {
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.UnknownMaxBytes,
+            bytes,
+            "ghostty_terminal_set(unknown_max_bytes)");
+    }
+
+    /// <summary>Sets the terminfo name reported for XTGETTCAP TN queries.</summary>
+    public void SetTerminfoName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        SetStringOption(
+            GhosttyVtNative.GhosttyTerminalOption.TerminfoName,
+            name,
+            "ghostty_terminal_set(terminfo_name)");
+    }
+
+    /// <summary>Sets or resets the Kitty clipboard transaction byte limit.</summary>
+    public void SetClipboardWriteMaxBytes(nuint? bytes)
+    {
+        if (bytes is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ClipboardWriteMaxBytes);
+            return;
+        }
+
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ClipboardWriteMaxBytes,
+            bytes.Value,
+            "ghostty_terminal_set(clipboard_write_max_bytes)");
+    }
+
+    /// <summary>
+    /// Sets whether resize can pull rows back from scrollback; null restores Ghostty's default.
+    /// </summary>
+    public void SetResizePullScrollback(bool? enabled)
+    {
+        if (enabled is null)
+        {
+            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ResizePullScrollback);
+            return;
+        }
+
+        SetStructOption(
+            GhosttyVtNative.GhosttyTerminalOption.ResizePullScrollback,
+            enabled.Value,
+            "ghostty_terminal_set(resize_pull_scrollback)");
     }
 
     /// <summary>Sets the terminal-owned selection, or clears it when null.</summary>
@@ -661,12 +898,34 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the cursor row in active-screen coordinates.</summary>
     public ushort GetCursorY() => GetValue<ushort>(GhosttyVtNative.GhosttyTerminalData.CursorY);
 
+    /// <summary>Gets whether the next printable cell will soft-wrap.</summary>
+    public bool GetCursorPendingWrap()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.CursorPendingWrap);
+
     /// <summary>Gets the active screen buffer.</summary>
     public GhosttyVtNative.GhosttyTerminalScreen GetActiveScreen()
         => GetValue<GhosttyVtNative.GhosttyTerminalScreen>(GhosttyVtNative.GhosttyTerminalData.ActiveScreen);
 
     /// <summary>Gets whether the cursor is visible.</summary>
     public bool GetCursorVisible() => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.CursorVisible);
+
+    /// <summary>Gets the current SGR style applied to newly printed cells.</summary>
+    public GhosttyVtNative.GhosttyStyle GetCursorStyle()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyStyle style = GhosttyVtNative.GhosttyStyle.CreateSized();
+        unsafe
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyTerminalData.CursorStyle,
+                    &style),
+                "ghostty_terminal_get(cursor_style)");
+        }
+
+        return style;
+    }
 
     /// <summary>Gets the kitty keyboard protocol flags.</summary>
     public GhosttyVtNative.GhosttyKittyKeyFlags GetKittyKeyboardFlags()
@@ -687,6 +946,12 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the current terminal working directory.</summary>
     public string GetWorkingDirectory() => GetBorrowedString(GhosttyVtNative.GhosttyTerminalData.Pwd);
 
+    /// <summary>Gets active-screen rows including scrollback.</summary>
+    public nuint GetTotalRows() => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.TotalRows);
+
+    /// <summary>Gets active-screen rows currently retained as scrollback.</summary>
+    public nuint GetScrollbackRows() => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.ScrollbackRows);
+
     /// <summary>Gets the current effective terminal scrollbar state.</summary>
     public GhosttyVtNative.GhosttyTerminalScrollbar GetScrollbar()
         => GetValue<GhosttyVtNative.GhosttyTerminalScrollbar>(GhosttyVtNative.GhosttyTerminalData.Scrollbar);
@@ -706,6 +971,22 @@ public sealed class GhosttyTerminal : IDisposable
     /// <summary>Gets the configured physical scrollback line limit when bounded.</summary>
     public bool TryGetScrollbackMaxLines(out nuint lines)
         => TryGetValue(GhosttyVtNative.GhosttyTerminalData.ScrollbackMaxLines, out lines);
+
+    /// <summary>Gets the configured VT continuation tracking limit.</summary>
+    public nuint GetContinuationMaxBytes()
+        => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.ContinuationMaxBytes);
+
+    /// <summary>Gets whether the VT parser and UTF-8 decoder are at ground.</summary>
+    public bool GetVtGround()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.VtGround);
+
+    /// <summary>Gets whether semantic prompt markers place the cursor at a prompt or input area.</summary>
+    public bool GetCursorAtPrompt()
+        => GetValue<bool>(GhosttyVtNative.GhosttyTerminalData.CursorAtPrompt);
+
+    /// <summary>Gets the configured Kitty clipboard write transaction limit.</summary>
+    public nuint GetClipboardWriteMaxBytes()
+        => GetValue<nuint>(GhosttyVtNative.GhosttyTerminalData.ClipboardWriteMaxBytes);
 
     /// <summary>Gets the current scrollback-compression activity token.</summary>
     public ulong GetCompressionActivity()
@@ -786,6 +1067,18 @@ public sealed class GhosttyTerminal : IDisposable
     public bool TryGetCursorColor(out GhosttyVtNative.GhosttyColorRgb color)
         => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorCursor, out color);
 
+    /// <summary>Gets the configured default foreground color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultForegroundColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorForegroundDefault, out color);
+
+    /// <summary>Gets the configured default background color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultBackgroundColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorBackgroundDefault, out color);
+
+    /// <summary>Gets the configured default cursor color, ignoring OSC overrides.</summary>
+    public bool TryGetDefaultCursorColor(out GhosttyVtNative.GhosttyColorRgb color)
+        => TryGetColor(GhosttyVtNative.GhosttyTerminalData.ColorCursorDefault, out color);
+
     /// <summary>Copies the current terminal palette into the provided span.</summary>
     public unsafe void GetPalette(Span<GhosttyVtNative.GhosttyColorRgb> destination)
     {
@@ -801,6 +1094,27 @@ public sealed class GhosttyTerminal : IDisposable
             ThrowIfFailed(
                 GhosttyVtNative.TerminalGet(_handle, GhosttyVtNative.GhosttyTerminalData.ColorPalette, destinationPtr),
                 "ghostty_terminal_get(color_palette)");
+        }
+    }
+
+    /// <summary>Copies the configured default palette, ignoring OSC overrides.</summary>
+    public unsafe void GetDefaultPalette(Span<GhosttyVtNative.GhosttyColorRgb> destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (destination.Length < 256)
+        {
+            throw new ArgumentException("Destination span must contain at least 256 colors.", nameof(destination));
+        }
+
+        fixed (GhosttyVtNative.GhosttyColorRgb* destinationPtr = destination)
+        {
+            ThrowIfFailed(
+                GhosttyVtNative.TerminalGet(
+                    _handle,
+                    GhosttyVtNative.GhosttyTerminalData.ColorPaletteDefault,
+                    destinationPtr),
+                "ghostty_terminal_get(color_palette_default)");
         }
     }
 
@@ -884,18 +1198,74 @@ public sealed class GhosttyTerminal : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        nint handleToFree = nint.Zero;
+        lock (_lifetimeSync)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (_ownsHandle && _handle != nint.Zero && _nativeLeaseCount > 0)
+            {
+                _disposeRequested = true;
+                return;
+            }
+
+            if (_ownsHandle)
+            {
+                handleToFree = _handle;
+            }
+
+            _handle = nint.Zero;
         }
 
-        _disposed = true;
-        if (_ownsHandle && _handle != nint.Zero)
+        if (handleToFree != nint.Zero)
         {
-            GhosttyVtNative.TerminalFree(_handle);
+            GhosttyVtNative.TerminalFree(handleToFree);
+        }
+    }
+
+    private void ReleaseNativeLifetimeLease()
+    {
+        nint handleToFree = nint.Zero;
+        lock (_lifetimeSync)
+        {
+            if (_nativeLeaseCount <= 0)
+            {
+                throw new InvalidOperationException("The native terminal lifetime lease was released more than once.");
+            }
+
+            _nativeLeaseCount--;
+            if (_nativeLeaseCount == 0 && _disposeRequested && _handle != nint.Zero)
+            {
+                handleToFree = _handle;
+                _handle = nint.Zero;
+                _disposeRequested = false;
+            }
         }
 
-        _handle = nint.Zero;
+        if (handleToFree != nint.Zero)
+        {
+            GhosttyVtNative.TerminalFree(handleToFree);
+        }
+    }
+
+    internal sealed class NativeLifetimeLease : IDisposable
+    {
+        private GhosttyTerminal? _terminal;
+
+        internal NativeLifetimeLease(GhosttyTerminal terminal)
+        {
+            _terminal = terminal;
+        }
+
+        public void Dispose()
+        {
+            GhosttyTerminal? terminal = Interlocked.Exchange(ref _terminal, null);
+            terminal?.ReleaseNativeLifetimeLease();
+        }
     }
 
     private unsafe string GetBorrowedString(GhosttyVtNative.GhosttyTerminalData data)
@@ -917,7 +1287,10 @@ public sealed class GhosttyTerminal : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         color = value;
         return true;
     }
@@ -933,7 +1306,10 @@ public sealed class GhosttyTerminal : IDisposable
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         value = copy;
         return true;
     }
@@ -975,7 +1351,10 @@ public sealed class GhosttyTerminal : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         T value = default;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalGet(_handle, data, &value);
-        ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        if (result != GhosttyVtNative.GhosttyResult.Success)
+        {
+            ThrowIfFailed(result, $"ghostty_terminal_get({data})");
+        }
         return value;
     }
 

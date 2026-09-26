@@ -3,12 +3,13 @@
 // RoyalTerminal.Terminal — VT processor using Ghostty's official libghostty-vt C API.
 
 using System.Buffers;
-using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using RoyalTerminal.Terminal.Glyphs;
 using RoyalTerminal.Terminal.Theming;
 
 namespace RoyalTerminal.Terminal;
@@ -17,27 +18,46 @@ namespace RoyalTerminal.Terminal;
 /// VT processor that wraps Ghostty's official <c>GhosttyTerminal</c> and
 /// <c>GhosttyRenderState</c> libghostty-vt APIs.
 /// </summary>
-public sealed class GhosttyVtProcessor : IVtProcessor,
+public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalThemeSink,
+    ITerminalModeDefaults,
     ITerminalShellIntegrationEventSource,
     IKittyKeyboardStateSource,
     ITerminalCursorStyleSource,
+    ITerminalCursorDefaults,
+    ITerminalMetadata,
     ITerminalFocusEventModeSource,
     ITerminalKeySequenceEncoderSource,
+    ITerminalKeyEncodingPolicy,
     ITerminalPasteSequenceEncoderSource,
     ITerminalPointerSequenceEncoderSource,
-    ITerminalMouseReportingStateSource,
+    ITerminalMouseModeStateSource,
+    ITerminalMouseShiftCaptureState,
+    ITerminalMouseShapeSource,
+    ITerminalModifyOtherKeysStateSource,
+    ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
     ITerminalScreenSnapshotSource,
     ITerminalSnapshotExportSource,
     ITerminalSearchSource,
+    ITerminalGlyphCoverageSink,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
-    ITerminalUnicodeWidthProvider
+    ITerminalNotificationSource,
+    ITerminalDragDropTarget,
+    ITerminalUnicodeWidthProvider,
+    ITerminalPromptStateSource,
+    ITerminalTimedRefreshSource
 {
+    /// <inheritdoc />
+    public ITerminalGlyphCoverageSource? GlyphCoverageSource { get; set; }
+
+    /// <inheritdoc />
+    public TerminalPromptState PromptState => _terminal.GetPromptState();
+
     private const int MaxShellIntegrationOscBufferBytes = 4096;
 
     private static readonly GhosttyVtNative.GhosttyMode s_wraparoundMode =
@@ -78,7 +98,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         GhosttyVtNative.CreateMode(2026, ansi: false),
         GhosttyVtNative.CreateMode(2027, ansi: false),
         GhosttyVtNative.ModeColorSchemeReport,
+        GhosttyVtNative.ModeVisibilityReport,
         GhosttyVtNative.ModeInBandResize,
+        GhosttyVtNative.ModePasteEvents,
     ];
     private static readonly GhosttyVtNative.GhosttyMode[] s_preserveScrollbackResetEnabledModes =
     [
@@ -98,7 +120,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         "\u001b[?40;45;47;66;67;69l" +
         "\u001b[?1000;1002;1003;1004;1005;1006;1015;1016l" +
         "\u001b[?1039;1045;1047;1048;1049l" +
-        "\u001b[?2004;2026;2027;2031;2048;9001l" +
+        "\u001b[?2004;2026;2027;2031;2033;2048;5522;9001l" +
         "\u001b[?7;25;1007;1035;1036h" +
         "\u001b[<8u" +
         "\u001b[=0u" +
@@ -115,11 +137,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         Encoding.ASCII.GetBytes("\u001b[?1047;47l");
 
     private readonly TerminalScreen _screen;
+    private readonly TimeProvider _timeProvider;
     private GhosttyTerminal _terminal;
     private GhosttyRenderState _renderState;
     private readonly GhosttyKeyEncoder _keyEncoder;
     private readonly GhosttyKeyEvent _keyEvent;
     private readonly GhosttyMouseEncoder _mouseEncoder;
+    private TerminalMouseModeState _mouseEncoderModes;
+    private TerminalPointerEncodingContext? _mouseEncoderContext;
     private readonly GhosttyMouseEvent _mouseEvent;
     private bool _disposed;
     private TerminalTheme _theme;
@@ -135,7 +160,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private bool _backarrowKeyMode;
     private bool _alternateScreen;
     private bool _bracketedPaste;
-    private bool _mouseReportingEnabled;
+    private TerminalMouseModeState _mouseModeState;
     private bool _win32InputMode;
     private bool _focusEventMode;
     private int _kittyKeyboardFlags;
@@ -149,13 +174,26 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private GhosttyVtNative.GhosttyTerminalScrollbar _scrollbar;
     private readonly bool _kittyGraphicsSupported;
     private readonly GhosttyKittyGraphicsPlacementIterator? _kittyPlacementIterator;
-    private readonly List<int> _searchRowColumnMapScratch = [];
+    private Dictionary<int, CachedKittyImage> _kittyImageCache = [];
+    private Dictionary<int, CachedKittyImage> _kittyNextImageCache = [];
+    private readonly List<TerminalKittyImageSource> _kittyImageSources = [];
+    private readonly List<TerminalKittyImagePlacement> _kittyPlacements = [];
+    private readonly List<TerminalKittyPlaceholderTarget> _kittyPlaceholderTargets = [];
+    private readonly List<TerminalKittyRelativePlacement> _kittyVirtualRelatives = [];
+    private ulong _kittyGraphicsGeneration;
+    private bool _kittyGraphicsSynchronized;
+    private GhosttySearch? _search;
+    private ArrayBufferWriter<byte>? _pasteCapture;
     private bool _sixelGraphicsEnabled;
     private TerminalScreen? _sixelOverlayScreen;
     private BasicVtProcessor? _sixelOverlayProcessor;
-    private bool _trimTrailingWhitespaceAfterResize;
     private bool _forceFullScreenSyncAfterResize;
     private bool _localReflowOnResize = true;
+    private bool _renderHeld;
+    private long _renderHoldStartedTimestamp;
+    private long _animationTickTimestamp;
+    private TimeSpan? _animationNextTickDelay;
+    private static readonly TimeSpan RenderHoldTimeout = TimeSpan.FromSeconds(1);
 
     private readonly TerminalWin32InputModeTracker _win32InputModeTracker = new();
     private readonly TerminalUnsupportedWindowsSequenceSanitizer _unsupportedWindowsSequenceSanitizer = new();
@@ -175,6 +213,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     private GhosttyVtNative.GhosttyTerminalDeviceAttributesCallback? _deviceAttributesDelegate;
     private GhosttyVtNative.GhosttyTerminalPwdChangedCallback? _pwdChangedDelegate;
     private GhosttyVtNative.GhosttyTerminalClipboardWriteCallback? _clipboardWriteDelegate;
+    private GhosttyVtNative.GhosttyTerminalClipboardReadCallback? _clipboardReadDelegate;
+    private GhosttyVtNative.GhosttyTerminalUnknownSequenceCallback? _unknownSequenceDelegate;
+    private GhosttyVtNative.GhosttyTerminalRenderHoldCallback? _renderHoldDelegate;
     private GhosttyVtNative.GhosttyTerminalDesktopNotificationCallback? _desktopNotificationDelegate;
     private GhosttyVtNative.GhosttyTerminalProgressReportCallback? _progressReportDelegate;
     private static readonly byte[] s_answerbackBytes = "RoyalTerminal"u8.ToArray();
@@ -284,7 +325,29 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     }
 
     /// <inheritdoc />
-    public bool MouseReportingEnabled => _mouseReportingEnabled;
+    public bool MouseReportingEnabled => _mouseModeState.IsMouseReportingEnabled;
+
+    /// <inheritdoc />
+    public TerminalMouseModeState MouseModeState => _mouseModeState;
+
+    /// <inheritdoc />
+    public TerminalMouseShape MouseShape { get; private set; } = TerminalMouseShape.Text;
+
+    /// <inheritdoc />
+    public bool ModifyOtherKeys2 { get; private set; }
+
+    private bool? _mouseShiftCaptureOverride;
+
+    /// <inheritdoc />
+    public bool? MouseShiftCaptureOverride
+    {
+        get => _mouseShiftCaptureOverride;
+        set
+        {
+            _terminal.SetMouseShiftCapture(value);
+            _mouseShiftCaptureOverride = value;
+        }
+    }
 
     /// <inheritdoc />
     public TerminalModeState ModeState => new(
@@ -319,6 +382,15 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     public Func<TerminalClipboardWrite, TerminalClipboardWriteResult>? ClipboardWriteCallback { get; set; }
 
     /// <inheritdoc />
+    public Func<TerminalClipboardWrite, TerminalClipboardWriteReply>? ClipboardWriteRequestCallback { get; set; }
+
+    /// <inheritdoc />
+    public Func<TerminalClipboardRead, TerminalClipboardReadReply>? ClipboardReadCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalUnknownSequence>? UnknownSequenceCallback { get; set; }
+
+    /// <inheritdoc />
     public Action<TerminalDesktopNotification>? DesktopNotificationCallback { get; set; }
 
     /// <inheritdoc />
@@ -338,8 +410,17 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     /// Creates a new Ghostty VT processor backed by the official libghostty-vt C API.
     /// </summary>
     public GhosttyVtProcessor(TerminalScreen screen)
+        : this(screen, TimeProvider.System)
     {
+    }
+
+    /// <summary>Creates a Ghostty processor with a monotonic clock for timed presentation.</summary>
+    public GhosttyVtProcessor(TerminalScreen screen, TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(screen);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _screen = screen;
+        _timeProvider = timeProvider;
         _theme = screen.Theme;
         _terminal = new GhosttyTerminal(
             (ushort)screen.Columns,
@@ -702,6 +783,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _notifications?.ResetParser();
 
         TerminalModeState before = ModeState;
         ResetSessionInputState();
@@ -720,6 +802,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     public void PrepareForNewSession(bool preserveScrollback)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ClearSessionNotifications();
+        _terminal.SendDragDropEvent(5);
 
         if (!preserveScrollback)
         {
@@ -730,7 +814,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         TerminalModeState before = ModeState;
         ResetSessionInputState();
         bool wasAlternateScreenSave = _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
-        bool wasAlternateScreen = IsNativeAlternateScreenActive(wasAlternateScreenSave);
+        bool wasAlternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
+        // Resetting DEC 3 in the cleanup sequence must not resize a user's
+        // current grid merely because their previous process enabled DEC 40.
+        _terminal.SetMode(GhosttyVtNative.CreateMode(40, ansi: false), false);
 
         if (wasAlternateScreen)
         {
@@ -754,6 +841,14 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         ResetProcessVisibleNativeModes();
+        _terminal.SetTitleBytes([]);
+        _terminal.SetWorkingDirectoryBytes([]);
+        _terminal.SetMouseShiftCapture(null);
+        _terminal.PasswordInput = false;
+        ApplyConfiguredModeDefaultsAfterSessionReset();
+        // Mode reset above clears mode 12; reselect the retained cursor policy
+        // afterwards, matching native fullReset without discarding history.
+        _terminal.Write("\u001b[0 q\u001b[0$}\u001b[>m"u8);
         ConfigureOptionalNativeFeatures();
         ApplyThemeToNative(_theme);
         SetupTerminalEffects();
@@ -762,14 +857,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         RefreshStateAndScreenFromNative();
         SyncSixelOverlayRasterGraphics();
         RaiseModeChangedIfNeeded(before);
-    }
-
-    private bool IsNativeAlternateScreenActive(bool altScreenSave)
-    {
-        return _alternateScreen ||
-            _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
-            altScreenSave;
     }
 
     private static byte[] BuildAlternateScreenRestartResetSequence(int cursorRow, int cursorColumn)
@@ -905,6 +992,10 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
 
         _disposed = true;
+        ClearSessionNotifications();
+        _notificationHost = null;
+        _search?.Dispose();
+        _search = null;
         _kittyPlacementIterator?.Dispose();
         DisposeSixelOverlay();
         _mouseEvent.Dispose();
@@ -914,7 +1005,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _renderState.Dispose();
         _terminal.Dispose();
         _unsupportedWindowsSequenceSanitizer.Reset();
-        _trimTrailingWhitespaceAfterResize = false;
         _forceFullScreenSyncAfterResize = false;
         ResetManagedState();
     }
@@ -1040,42 +1130,46 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         destination.Clear();
         if (string.IsNullOrEmpty(needle))
         {
+            _search?.SetNeedle(null);
             return;
         }
 
-        using GhosttyFormatter formatter = new(
-            _terminal,
-            GhosttyVtNative.GhosttyFormatterFormat.Plain,
-            unwrap: false,
-            trim: false);
-        string fullBuffer = formatter.FormatToString();
+        _search ??= new GhosttySearch(_terminal);
+        _search.SetNeedle(needle);
+        _search.Run();
+
         ViewportScrollMapping mapping = GetViewportScrollMapping();
-
-        int rowStart = 0;
-        ulong nativeAbsoluteRow = 0;
-        while (rowStart <= fullBuffer.Length)
+        GhosttyVtNative.GhosttySelectionRange[] matches = _search.GetMatches();
+        for (int index = matches.Length - 1; index >= 0; index--)
         {
-            int lineBreak = fullBuffer.IndexOf('\n', rowStart);
-            ReadOnlySpan<char> rowSpan = lineBreak >= 0
-                ? fullBuffer.AsSpan(rowStart, lineBreak - rowStart)
-                : fullBuffer.AsSpan(rowStart);
-            if (!rowSpan.IsEmpty && rowSpan[^1] == '\r')
+            ref readonly GhosttyVtNative.GhosttySelectionRange match = ref matches[index];
+            if (!_terminal.TryGetPointFromGridReference(
+                    in match.Start,
+                    GhosttyVtNative.GhosttyPointTag.Screen,
+                    out GhosttyVtNative.GhosttyPointCoordinate first) ||
+                !_terminal.TryGetPointFromGridReference(
+                    in match.End,
+                    GhosttyVtNative.GhosttyPointTag.Screen,
+                    out GhosttyVtNative.GhosttyPointCoordinate second))
             {
-                rowSpan = rowSpan[..^1];
+                continue;
             }
 
-            if (TryMapNativeAbsoluteRowToEffective(mapping, nativeAbsoluteRow, out int effectiveAbsoluteRow))
+            if (first.Y > second.Y || (first.Y == second.Y && first.X > second.X))
             {
-                PopulateSearchMatchesFromFormattedRow(rowSpan, effectiveAbsoluteRow, needle, destination);
+                (first, second) = (second, first);
             }
 
-            if (lineBreak < 0)
+            ulong firstVisibleRow = Math.Max(first.Y, mapping.EffectiveBaseOffsetRows);
+            if (firstVisibleRow <= second.Y &&
+                TryMapNativeAbsoluteRowToEffective(mapping, firstVisibleRow, out int startRow) &&
+                TryMapNativeAbsoluteRowToEffective(mapping, second.Y, out int endRow))
             {
-                break;
+                destination.Add(new TerminalSearchMatch(startRow, firstVisibleRow == first.Y ? first.X : 0, second.X)
+                {
+                    EndAbsoluteRow = endRow,
+                });
             }
-
-            nativeAbsoluteRow++;
-            rowStart = lineBreak + 1;
         }
     }
 
@@ -1135,6 +1229,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             DefaultForeground = _screen.DefaultForeground,
             DefaultBackground = _screen.DefaultBackground,
         };
+        Span<GhosttyVtNative.GhosttyColorRgb> palette = stackalloc GhosttyVtNative.GhosttyColorRgb[256];
+        _terminal.GetPalette(palette);
 
         for (int row = 0; row < snapshotRows; row++)
         {
@@ -1144,7 +1240,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 break;
             }
 
-            PopulateSnapshotRow(result.GetRow(row), (int)nativeAbsoluteRow);
+            PopulateSnapshotRow(result, result.GetRow(row), (int)nativeAbsoluteRow, palette);
         }
 
         snapshot = result;
@@ -1171,8 +1267,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             return false;
         }
 
-        sequence = GhosttyPaste.Encode(text, bracketedPaste);
-        return sequence.Length > 0;
+        if (bracketedPaste != _bracketedPaste)
+        {
+            sequence = GhosttyPaste.Encode(text, bracketedPaste);
+            return sequence.Length > 0;
+        }
+
+        ArrayBufferWriter<byte> capture = new(Math.Max(256, Encoding.UTF8.GetByteCount(text) + 16));
+        _pasteCapture = capture;
+        try
+        {
+            bool written = GhosttyPaste.PasteText(_terminal, text, allowUnsafe: true);
+            sequence = capture.WrittenSpan.ToArray();
+            return written && sequence.Length > 0;
+        }
+        finally
+        {
+            _pasteCapture = null;
+        }
     }
 
     /// <inheritdoc />
@@ -1222,7 +1334,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 TerminalSnapshotExportFormat.Html => GhosttyVtNative.GhosttyFormatterFormat.Html,
                 _ => GhosttyVtNative.GhosttyFormatterFormat.Plain,
             },
-            Unwrap: options.Unwrap,
+            Unwrap: options.Unwrap && options.Selection?.Rectangle != true,
             Trim: options.TrimTrailingWhitespace,
             Extra: new GhosttyFormatterExtraOptions(
                 IncludePalette: options.Extras.IncludePalette,
@@ -1247,6 +1359,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
+        _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;
         _bellDelegate ??= OnNativeBell;
         _titleChangedDelegate ??= OnNativeTitleChanged;
@@ -1257,6 +1370,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _deviceAttributesDelegate ??= OnNativeDeviceAttributes;
         _pwdChangedDelegate ??= OnNativePwdChanged;
         _clipboardWriteDelegate ??= OnNativeClipboardWrite;
+        _clipboardReadDelegate ??= OnNativeClipboardRead;
+        _unknownSequenceDelegate ??= OnNativeUnknownSequence;
+        _renderHoldDelegate ??= OnNativeRenderHold;
         _desktopNotificationDelegate ??= OnNativeDesktopNotification;
         _progressReportDelegate ??= OnNativeProgressReport;
 
@@ -1270,12 +1386,22 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetDeviceAttributesCallback(Marshal.GetFunctionPointerForDelegate(_deviceAttributesDelegate));
         _terminal.SetPwdChangedCallback(Marshal.GetFunctionPointerForDelegate(_pwdChangedDelegate));
         _terminal.SetClipboardWriteCallback(Marshal.GetFunctionPointerForDelegate(_clipboardWriteDelegate));
+        _terminal.SetClipboardReadCallback(Marshal.GetFunctionPointerForDelegate(_clipboardReadDelegate));
+        _terminal.SetUnknownSequenceCallback(Marshal.GetFunctionPointerForDelegate(_unknownSequenceDelegate));
+        _terminal.SetRenderHoldCallback(Marshal.GetFunctionPointerForDelegate(_renderHoldDelegate));
         _terminal.SetDesktopNotificationCallback(Marshal.GetFunctionPointerForDelegate(_desktopNotificationDelegate));
         _terminal.SetProgressReportCallback(Marshal.GetFunctionPointerForDelegate(_progressReportDelegate));
     }
 
     private void ConfigureOptionalNativeFeatures()
     {
+        _terminal.SetContinuationMaxBytes(64 * 1024);
+        _terminal.SetTitleReport(_titleReportEnabled);
+        _terminal.SetUnknownSequenceMaxBytes(4 * 1024);
+        _terminal.SetTerminfoName("xterm-ghostty");
+        _terminal.SetClipboardWriteMaxBytes(16 * 1024 * 1024);
+        _terminal.SetResizePullScrollback(OperatingSystem.IsWindows());
+
         if (!_kittyGraphicsSupported)
         {
             return;
@@ -1306,14 +1432,114 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private void RefreshStateAndScreenFromNative()
     {
+        // Terminal-owned resize (e.g. DECCOLM) clears the native hold without
+        // passing through the mode-set callback. Observe that committed state.
+        if (_renderHeld && !_terminal.GetMode(GhosttyVtNative.ModeSynchronizedOutput)) _renderHeld = false;
+        if (_renderHeld)
+        {
+            TimeSpan elapsed = _timeProvider.GetElapsedTime(_renderHoldStartedTimestamp);
+            if (elapsed < RenderHoldTimeout)
+            {
+                RefreshStateFromNative();
+                return;
+            }
+
+            _terminal.SetMode(GhosttyVtNative.ModeSynchronizedOutput, value: false);
+            _renderHeld = false;
+        }
+
+        AdvanceKittyAnimations();
+        SyncGlyphGlossaryFromNative();
         _renderState.Update(_terminal);
         RefreshStateFromNative();
         SyncScreenFromNative();
     }
 
+    /// <inheritdoc />
+    public TimeSpan? NextTimedRefreshDelay
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            TimeSpan? next = NextPresentationRefreshDelay;
+            if (_notifications?.NextRefreshDelay is TimeSpan notification && (next is null || notification < next))
+                next = notification;
+            return next;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool RefreshTimedState()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _notifications?.Refresh();
+        if (_disposed) return false;
+        if (NextPresentationRefreshDelay is not TimeSpan delay || delay > TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        bool holdExpired = _renderHeld;
+        ulong previousGeneration = _kittyGraphicsGeneration;
+        RefreshStateAndScreenFromNative();
+        return holdExpired || previousGeneration != _kittyGraphicsGeneration;
+    }
+
+    // Notification effects must not release a synchronized-output hold early.
+    private TimeSpan? NextPresentationRefreshDelay => _renderHeld
+        ? ClampRefreshDelay(RenderHoldTimeout - _timeProvider.GetElapsedTime(_renderHoldStartedTimestamp))
+        : _animationNextTickDelay is TimeSpan delay
+            ? ClampRefreshDelay(delay - _timeProvider.GetElapsedTime(_animationTickTimestamp)) : null;
+
+    private static TimeSpan ClampRefreshDelay(TimeSpan delay)
+        => delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
+
+    private void AdvanceKittyAnimations()
+    {
+        _animationNextTickDelay = null;
+        if (!_kittyGraphicsSupported ||
+            !_terminal.TryGetKittyGraphics(out GhosttyKittyGraphics? graphics) || graphics is null)
+        {
+            return;
+        }
+
+        long now = _timeProvider.GetTimestamp();
+        ulong nowMilliseconds = checked((ulong)Math.Max(0, _timeProvider.GetElapsedTime(0, now).TotalMilliseconds));
+        ulong? delay = graphics.AdvanceAnimations(nowMilliseconds);
+        _animationTickTimestamp = now;
+        _animationNextTickDelay = delay.HasValue ? TimeSpan.FromMilliseconds(delay.Value) : null;
+    }
+
+    private void OnNativeRenderHold(nint terminal, nint userdata, bool held)
+    {
+        try
+        {
+            if (held)
+            {
+                // Start/advance the animation clock for the completed prefix,
+                // even if its control command and DECSET arrive in one write.
+                AdvanceKittyAnimations();
+                SyncGlyphGlossaryFromNative();
+                _renderState.Update(_terminal);
+                // A single write may finish a frame before starting the hold.
+                // Publish it now, while hyperlinks and graphics still refer to
+                // the same terminal state as the captured render snapshot.
+                RefreshStateFromNative();
+                SyncScreenFromNative();
+                _renderHoldStartedTimestamp = _timeProvider.GetTimestamp();
+            }
+
+            _renderHeld = held;
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+            _renderHeld = false;
+        }
+    }
+
     private void PrepareResizeSync()
     {
-        _trimTrailingWhitespaceAfterResize = true;
         _forceFullScreenSyncAfterResize = true;
     }
 
@@ -1352,6 +1578,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             reflowOnResize: false);
 
         _sixelOverlayScreen = overlayScreen;
+        ConfigureOverlayModeDefaults(overlayProcessor);
         _sixelOverlayProcessor = overlayProcessor;
         return overlayProcessor;
     }
@@ -1406,21 +1633,25 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private void RefreshStateFromNative()
     {
-        _cursorVisible = _renderState.GetCursorVisible();
-        _cursorInViewport = _renderState.TryGetCursorViewport(out ushort cursorX, out ushort cursorY, out _);
-        _cursorCol = _cursorInViewport ? cursorX : _terminal.GetCursorX();
-        _cursorRow = _cursorInViewport ? cursorY : _terminal.GetCursorY();
-        _cursorStyle = ConvertCursorStyle(_renderState.GetCursorVisualStyle());
-        _cursorBlinking = _renderState.GetCursorBlinking();
+        GhosttyVtNative.GhosttyRenderStateCursor cursor = _renderState.GetCursor();
+        _cursorVisible = cursor.Visible;
+        _cursorInViewport = cursor.ViewportHasValue;
+        _cursorCol = _cursorInViewport ? cursor.ViewportX : _terminal.GetCursorX();
+        _cursorRow = _cursorInViewport ? cursor.ViewportY : _terminal.GetCursorY();
+        _cursorStyle = ConvertCursorStyle(cursor.VisualStyle);
+        _cursorBlinking = cursor.Blinking;
         _applicationCursorKeys = _terminal.GetMode(GhosttyVtNative.ModeDecckm);
         _applicationKeypad = _terminal.GetMode(GhosttyVtNative.ModeKeypadKeys);
         _backarrowKeyMode = _terminal.GetMode(GhosttyVtNative.ModeBackarrowKeyMode);
-        _alternateScreen =
-            _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreen) ||
-            _terminal.GetMode(GhosttyVtNative.ModeAltScreenSave);
+        // DEC 47/1047/1049 are independent saved protocol bits, not a
+        // substitute for the actual active-screen key after mixed switches.
+        _alternateScreen = _terminal.GetActiveScreen() == GhosttyVtNative.GhosttyTerminalScreen.Alternate;
         _bracketedPaste = _terminal.GetMode(GhosttyVtNative.ModeBracketedPaste);
-        _mouseReportingEnabled = _terminal.GetMouseTracking();
+        TerminalMouseInputState mouse = _terminal.GetMouseInputState();
+        _mouseModeState = mouse.Modes;
+        _mouseShiftCaptureOverride = mouse.ShiftCaptureOverride;
+        MouseShape = mouse.Shape;
+        ModifyOtherKeys2 = _terminal.GetModifyOtherKeys2();
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();
         _scrollbar = _terminal.GetScrollbar();
@@ -1439,7 +1670,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _backarrowKeyMode = false;
         _alternateScreen = false;
         _bracketedPaste = false;
-        _mouseReportingEnabled = false;
+        _mouseModeState = default;
+        _mouseShiftCaptureOverride = null;
+        ModifyOtherKeys2 = false;
         _win32InputMode = false;
         _focusEventMode = false;
         _kittyKeyboardFlags = 0;
@@ -1457,7 +1690,6 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
-        _trimTrailingWhitespaceAfterResize = false;
         _forceFullScreenSyncAfterResize = false;
         _win32InputMode = false;
         _pressedMouseButtons = 0;
@@ -1465,21 +1697,24 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SyncScreenFromNative()
     {
+        int nativeColumns = _renderState.GetColumns();
+        int nativeRows = _renderState.GetRows();
+        bool gridChanged = nativeColumns != _screen.Columns || nativeRows != _screen.ViewportRows;
+        if (gridChanged)
+        {
+            // DECCOLM can change native geometry without a host NotifyResize.
+            // Resize the mirror before copying so right-hand cells aren't clipped.
+            _screen.Resize(nativeColumns, nativeRows, reflowOnResize: false);
+        }
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
-        bool trimTrailingWhitespaceAfterResize = _trimTrailingWhitespaceAfterResize;
         bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
-        bool fullRefresh = forceFullScreenSyncAfterResize ||
+        bool fullRefresh = gridChanged || forceFullScreenSyncAfterResize ||
             dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
             _renderState.GetRows() != _screen.ViewportRows;
         bool syncKittyGraphics = _kittyGraphicsSupported;
         if (!fullRefresh && dirty == GhosttyVtNative.GhosttyRenderStateDirty.False && !syncKittyGraphics)
         {
-            if (trimTrailingWhitespaceAfterResize)
-            {
-                _trimTrailingWhitespaceAfterResize = false;
-            }
-
             if (forceFullScreenSyncAfterResize)
             {
                 _forceFullScreenSyncAfterResize = false;
@@ -1498,55 +1733,71 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         int rows = _renderState.GetRows();
         _renderState.BeginRows();
 
-        int rowIndex = 0;
-        while (rowIndex < rows && rowIndex < _screen.ViewportRows && _renderState.MoveNextRow())
+        int renderedRows = Math.Min(rows, _screen.ViewportRows);
+        if (fullRefresh)
         {
-            TerminalRow row = _screen.GetViewportRow(rowIndex);
-            bool rowDirty = fullRefresh || _renderState.GetCurrentRowDirty();
-            if (rowDirty)
+            int rowIndex = 0;
+            while (rowIndex < renderedRows && _renderState.MoveNextRow())
             {
-                row.WrapsToNext = _renderState.GetCurrentRowWrap();
-                _renderState.BeginCurrentRowCells();
-
-                int colIndex = 0;
-                while (colIndex < row.Columns && _renderState.MoveNextCell())
-                {
-                    PopulateCell(ref row[colIndex], rowIndex, colIndex, colors, palette);
-                    colIndex++;
-                }
-
-                for (; colIndex < row.Columns; colIndex++)
-                {
-                    ClearCell(ref row[colIndex]);
-                }
-
-                if (trimTrailingWhitespaceAfterResize && !row.WrapsToNext)
-                {
-                    TrimTrailingWhitespaceForReflow(row);
-                }
-
-                row.IsDirty = true;
-                _renderState.SetCurrentRowDirty(false);
+                PopulateCurrentRenderRow(rowIndex, colors, palette);
+                rowIndex++;
             }
-            rowIndex++;
-        }
 
-        for (; fullRefresh && rowIndex < _screen.ViewportRows; rowIndex++)
+            for (; rowIndex < _screen.ViewportRows; rowIndex++)
+            {
+                _screen.GetViewportRow(rowIndex).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+            }
+        }
+        else
         {
-            _screen.GetViewportRow(rowIndex).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+            while (_renderState.MoveNextDirtyRow(out ushort dirtyRow))
+            {
+                if (dirtyRow < renderedRows)
+                {
+                    PopulateCurrentRenderRow(dirtyRow, colors, palette);
+                }
+            }
         }
 
-        SyncKittyGraphicsFromNative();
-        _renderState.SetDirty(GhosttyVtNative.GhosttyRenderStateDirty.False);
-        if (trimTrailingWhitespaceAfterResize)
-        {
-            _trimTrailingWhitespaceAfterResize = false;
-        }
-
+        SyncKittyGraphicsFromNative(fullRefresh || dirty != GhosttyVtNative.GhosttyRenderStateDirty.False);
+        _renderState.Clean();
         if (forceFullScreenSyncAfterResize)
         {
             _forceFullScreenSyncAfterResize = false;
         }
+    }
+
+    private unsafe void PopulateCurrentRenderRow(
+        int rowIndex,
+        in GhosttyVtNative.GhosttyRenderStateColors colors,
+        ReadOnlySpan<GhosttyVtNative.GhosttyColorRgb> palette)
+    {
+        TerminalRow row = _screen.GetViewportRow(rowIndex);
+        row.WrapsToNext = _renderState.GetCurrentRowWrap();
+        PopulateRowSemantics(row, _renderState.GetCurrentRowRaw());
+        ReadOnlySpan<ulong> rawCells = _renderState.GetCurrentRowRawCells();
+        _renderState.BeginCurrentRowCells();
+
+        int columnCount = Math.Min(row.Columns, rawCells.Length);
+        int columnIndex = 0;
+        while (columnIndex < columnCount && _renderState.MoveNextCell())
+        {
+            PopulateCell(
+                ref row[columnIndex],
+                rowIndex,
+                columnIndex,
+                rawCells[columnIndex],
+                colors,
+                palette);
+            columnIndex++;
+        }
+
+        for (; columnIndex < row.Columns; columnIndex++)
+        {
+            ClearCell(ref row[columnIndex]);
+        }
+
+        row.IsDirty = true;
     }
 
     private bool TryCreateNativeSelection(
@@ -1578,7 +1829,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         return true;
     }
 
-    private unsafe void PopulateSnapshotRow(TerminalRow target, int absoluteRow)
+    private unsafe void PopulateSnapshotRow(TerminalScreen snapshot, TerminalRow target, int absoluteRow,
+        ReadOnlySpan<GhosttyVtNative.GhosttyColorRgb> palette)
     {
         target.Clear(_screen.DefaultForeground, _screen.DefaultBackground);
         bool rowWrapResolved = false;
@@ -1593,7 +1845,13 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
             if (!rowWrapResolved)
             {
-                target.WrapsToNext = TryGetGridReferenceRowWrap(reference, out bool wrapsToNext) && wrapsToNext;
+                if (GhosttyVtNative.GridRefRow(in reference, out ulong rawRow) == GhosttyVtNative.GhosttyResult.Success)
+                {
+                    bool wrapsToNext = false;
+                    GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.Wrap, &wrapsToNext);
+                    target.WrapsToNext = wrapsToNext;
+                    PopulateRowSemantics(target, rawRow);
+                }
                 rowWrapResolved = true;
             }
 
@@ -1622,45 +1880,112 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 GhosttyVtNative.GhosttyCellWide.SpacerHead or GhosttyVtNative.GhosttyCellWide.SpacerTail => 0,
                 _ => 1,
             };
+            targetCell.IsWideSpacerHead = wide == GhosttyVtNative.GhosttyCellWide.SpacerHead;
+            bool isProtected = false;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
+            targetCell.IsProtected = isProtected;
+            targetCell.SemanticContent = GetCellSemanticContent(rawCell);
+
+            targetCell.Grapheme = BuildGridReferenceGrapheme(in reference);
+            if (GhosttyVtNative.GridRefStyle(in reference, out GhosttyVtNative.GhosttyStyle style) ==
+                GhosttyVtNative.GhosttyResult.Success)
+            {
+                if (TryResolveUnderlineColor(style.ForegroundColor, palette, out uint foreground))
+                    targetCell.Foreground = foreground;
+                targetCell.HasBackground = TryResolveUnderlineColor(style.BackgroundColor, palette, out uint background);
+                if (targetCell.HasBackground) targetCell.Background = background;
+                targetCell.Attributes = MapAttributesFromStyle(style);
+                targetCell.UnderlineStyle = MapUnderlineStyleFromStyle(style);
+                targetCell.HasUnderlineColor = TryResolveUnderlineColor(style.UnderlineColor, palette, out uint underline);
+                targetCell.UnderlineColor = underline;
+                targetCell.ForegroundIdentity = MapColorIdentity(style.ForegroundColor);
+                targetCell.BackgroundIdentity = MapColorIdentity(style.BackgroundColor);
+                targetCell.UnderlineIdentity = MapColorIdentity(style.UnderlineColor);
+                targetCell.Decorations = MapDecorationsFromStyle(style);
+            }
+
+            // Erased cells can store their background directly in the raw cell
+            // instead of a style record, just as the render-state API does.
+            GhosttyVtNative.GhosttyCellContentTag content = default;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ContentTag, &content);
+            if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorPalette)
+            {
+                byte index = 0;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorPalette, &index);
+                targetCell.Background = GhosttyTerminal.ToArgb(palette[index]);
+                targetCell.BackgroundIdentity = TerminalColorIdentity.Palette(index);
+                targetCell.HasBackground = true;
+            }
+            else if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorRgb)
+            {
+                GhosttyVtNative.GhosttyColorRgb background = default;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorRgb, &background);
+                targetCell.Background = GhosttyTerminal.ToArgb(background);
+                targetCell.BackgroundIdentity = TerminalColorIdentity.Rgb(targetCell.Background);
+                targetCell.HasBackground = true;
+            }
+
+            bool hasHyperlink = false;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.HasHyperlink, &hasHyperlink);
+            if (hasHyperlink)
+                targetCell.HyperlinkId = RegisterNativeHyperlink(snapshot, in reference);
         }
     }
 
-    private static unsafe bool TryGetGridReferenceRowWrap(
-        GhosttyVtNative.GhosttyGridRef reference,
-        out bool wrapsToNext)
+    private static unsafe string? BuildGridReferenceGrapheme(in GhosttyVtNative.GhosttyGridRef reference)
     {
-        wrapsToNext = false;
-        if (GhosttyVtNative.GridRefRow(in reference, out ulong rawRow) != GhosttyVtNative.GhosttyResult.Success)
+        Span<uint> small = stackalloc uint[16];
+        fixed (uint* buffer = small)
         {
-            return false;
+            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.GridRefGraphemes(in reference, buffer, 16, out nuint needed);
+            if (result == GhosttyVtNative.GhosttyResult.Success)
+                return needed > 1 ? BuildGrapheme(small[..checked((int)needed)]) : null;
+            if (result != GhosttyVtNative.GhosttyResult.OutOfSpace || needed > int.MaxValue) return null;
+            uint[] rented = ArrayPool<uint>.Shared.Rent((int)needed);
+            try
+            {
+                fixed (uint* large = rented)
+                    return GhosttyVtNative.GridRefGraphemes(in reference, large, needed, out nuint written) == GhosttyVtNative.GhosttyResult.Success
+                        ? BuildGrapheme(rented.AsSpan(0, checked((int)written))) : null;
+            }
+            finally
+            {
+                ArrayPool<uint>.Shared.Return(rented);
+            }
         }
+    }
 
-        bool value = false;
-        if (GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.Wrap, &value) !=
-            GhosttyVtNative.GhosttyResult.Success)
-        {
-            return false;
-        }
+    private static unsafe void PopulateRowSemantics(TerminalRow target, ulong rawRow)
+    {
+        bool continuation = false;
+        GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.WrapContinuation, &continuation);
+        target.IsWrapContinuation = continuation;
+        GhosttyVtNative.GhosttyRowSemanticPrompt prompt = default;
+        GhosttyVtNative.RowGet(rawRow, GhosttyVtNative.GhosttyRowData.SemanticPrompt, &prompt);
+        target.SemanticPrompt = (TerminalSemanticPrompt)prompt;
+    }
 
-        wrapsToNext = value;
-        return true;
+    private static unsafe TerminalSemanticContent GetCellSemanticContent(ulong rawCell)
+    {
+        GhosttyVtNative.GhosttyCellSemanticContent content = default;
+        GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.SemanticContent, &content);
+        return (TerminalSemanticContent)content;
     }
 
     private unsafe void PopulateCell(
         ref TerminalCell target,
         int rowIndex,
         int columnIndex,
+        ulong rawCell,
         in GhosttyVtNative.GhosttyRenderStateColors colors,
         ReadOnlySpan<GhosttyVtNative.GhosttyColorRgb> palette)
     {
-        ulong rawCell = _renderState.GetCurrentCellRaw();
-        GhosttyVtNative.GhosttyStyle style = _renderState.GetCurrentCellStyle();
+        _renderState.GetCurrentCellMetadata(out GhosttyVtNative.GhosttyStyle style, out uint graphemeLength);
 
         uint codepoint = 0;
         GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Codepoint, &codepoint);
         target.Codepoint = checked((int)codepoint);
 
-        uint graphemeLength = _renderState.GetCurrentCellGraphemeLength();
         target.Grapheme = graphemeLength > 1 ? BuildCellGrapheme(graphemeLength) : null;
 
         GhosttyVtNative.GhosttyCellWide wide = default;
@@ -1671,6 +1996,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             GhosttyVtNative.GhosttyCellWide.SpacerHead or GhosttyVtNative.GhosttyCellWide.SpacerTail => 0,
             _ => 1,
         };
+        target.IsWideSpacerHead = wide == GhosttyVtNative.GhosttyCellWide.SpacerHead;
+        bool isProtected = false;
+        GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.Protected, &isProtected);
+        target.IsProtected = isProtected;
+        target.SemanticContent = GetCellSemanticContent(rawCell);
 
         if (_renderState.TryGetCurrentCellForegroundColor(out GhosttyVtNative.GhosttyColorRgb foreground))
         {
@@ -1696,6 +2026,27 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.UnderlineStyle = MapUnderlineStyleFromStyle(style);
         target.HasUnderlineColor = TryResolveUnderlineColor(style.UnderlineColor, palette, out uint underlineColor);
         target.UnderlineColor = underlineColor;
+        target.ForegroundIdentity = MapColorIdentity(style.ForegroundColor);
+        target.BackgroundIdentity = MapColorIdentity(style.BackgroundColor);
+        target.UnderlineIdentity = MapColorIdentity(style.UnderlineColor);
+        // Erased cells may encode the background in their raw content instead of a style.
+        if (codepoint == 0 && target.HasBackground && target.BackgroundIdentity.Kind == TerminalColorKind.Default)
+        {
+            GhosttyVtNative.GhosttyCellContentTag content = default;
+            GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ContentTag, &content);
+            if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorPalette)
+            {
+                byte index = 0;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorPalette, &index);
+                target.BackgroundIdentity = TerminalColorIdentity.Palette(index);
+            }
+            else if (content == GhosttyVtNative.GhosttyCellContentTag.BackgroundColorRgb)
+            {
+                GhosttyVtNative.GhosttyColorRgb rgb = default;
+                GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.ColorRgb, &rgb);
+                target.BackgroundIdentity = TerminalColorIdentity.Rgb(GhosttyTerminal.ToArgb(rgb));
+            }
+        }
         target.Decorations = MapDecorationsFromStyle(style);
         target.HyperlinkId = TryResolveHyperlinkId(rowIndex, columnIndex, rawCell, target.Width);
     }
@@ -1706,6 +2057,9 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.Grapheme = null;
         target.Foreground = _screen.DefaultForeground;
         target.Background = _screen.DefaultBackground;
+        target.ForegroundIdentity = default;
+        target.BackgroundIdentity = default;
+        target.UnderlineIdentity = default;
         target.Attributes = CellAttributes.None;
         target.UnderlineStyle = TerminalUnderlineStyle.None;
         target.UnderlineColor = 0;
@@ -1714,56 +2068,21 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         target.HasBackground = true;
         target.HyperlinkId = 0;
         target.Width = 1;
+        target.IsWideSpacerHead = false;
+        target.IsProtected = false;
+        target.SemanticContent = TerminalSemanticContent.Output;
     }
 
-    private void TrimTrailingWhitespaceForReflow(TerminalRow row)
-    {
-        for (int column = row.Columns - 1; column >= 0; column--)
+    private static TerminalColorIdentity MapColorIdentity(in GhosttyVtNative.GhosttyStyleColor color)
+        => color.Tag switch
         {
-            if (!IsTrailingReflowWhitespace(in row[column]))
-            {
-                return;
-            }
-
-            ClearCell(ref row[column]);
-        }
-    }
-
-    private static bool IsTrailingReflowWhitespace(ref readonly TerminalCell cell)
-    {
-        if (cell.Width == 0)
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return IsAsciiWhitespaceGrapheme(cell.Grapheme);
-        }
-
-        return cell.Codepoint is 0 or ' ';
-    }
-
-    private static bool IsAsciiWhitespaceGrapheme(string grapheme)
-    {
-        for (int i = 0; i < grapheme.Length; i++)
-        {
-            if (grapheme[i] != ' ')
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+            GhosttyVtNative.GhosttyStyleColorTag.Palette => TerminalColorIdentity.Palette(color.Value.Palette),
+            GhosttyVtNative.GhosttyStyleColorTag.Rgb => TerminalColorIdentity.Rgb(GhosttyTerminal.ToArgb(color.Value.Rgb)),
+            _ => default,
+        };
 
     private unsafe int TryResolveHyperlinkId(int rowIndex, int columnIndex, ulong rawCell, int width)
     {
-        if (width <= 0)
-        {
-            return 0;
-        }
-
         bool hasHyperlink = false;
         GhosttyVtNative.CellGet(rawCell, GhosttyVtNative.GhosttyCellData.HasHyperlink, &hasHyperlink);
         if (!hasHyperlink)
@@ -1778,16 +2097,29 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             return 0;
         }
 
-        string? uri = _terminal.GetHyperlinkUri(in reference);
-        if (string.IsNullOrWhiteSpace(uri))
-        {
-            return 0;
-        }
-
-        return _screen.RegisterHyperlink(uri);
+        return RegisterNativeHyperlink(_screen, in reference);
     }
 
-    private void SyncKittyGraphicsFromNative()
+    private int RegisterNativeHyperlink(TerminalScreen screen, in GhosttyVtNative.GhosttyGridRef reference)
+    {
+        Span<byte> uri = stackalloc byte[512];
+        Span<byte> id = stackalloc byte[128];
+        if (_terminal.TryReadHyperlink(in reference, uri, id, out int uriLength, out int idLength, out uint implicitId))
+            return uriLength == 0 ? 0 : screen.RegisterHyperlink(uri[..uriLength], id[..idLength], implicitId);
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(checked(uriLength + idLength));
+        try
+        {
+            uri = buffer.AsSpan(0, uriLength);
+            id = buffer.AsSpan(uriLength, idLength);
+            if (!_terminal.TryReadHyperlink(in reference, uri, id, out int writtenUri, out int writtenId, out implicitId))
+                throw new InvalidOperationException("A grid hyperlink changed during extraction.");
+            return writtenUri == 0 ? 0 : screen.RegisterHyperlink(uri[..writtenUri], id[..writtenId], implicitId);
+        }
+        finally { ArrayPool<byte>.Shared.Return(buffer); }
+    }
+
+    private void SyncKittyGraphicsFromNative(bool geometryDirty)
     {
         if (!_kittyGraphicsSupported || _kittyPlacementIterator is null)
         {
@@ -1798,11 +2130,26 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         if (!_terminal.TryGetKittyGraphics(out GhosttyKittyGraphics? graphics) || graphics is null)
         {
             _screen.ClearKittyGraphics();
+            _kittyImageCache.Clear();
+            _kittyNextImageCache.Clear();
+            _kittyGraphicsSynchronized = false;
             return;
         }
 
-        Dictionary<int, TerminalKittyImageSource> images = new();
-        List<TerminalKittyImagePlacement> placements = new();
+        ulong generation = graphics.GetGeneration();
+        bool contentUnchanged = _kittyGraphicsSynchronized && generation == _kittyGraphicsGeneration;
+        if (contentUnchanged && !geometryDirty)
+        {
+            return;
+        }
+
+        _kittyNextImageCache.Clear();
+        _kittyImageSources.Clear();
+        _kittyPlacements.Clear();
+        _kittyPlaceholderTargets.Clear();
+        _kittyVirtualRelatives.Clear();
+        bool hasVirtual = false;
+        bool imagesChanged = false;
 
         _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
         graphics.Populate(_kittyPlacementIterator);
@@ -1821,28 +2168,39 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 continue;
             }
 
-            if (!images.TryGetValue(imageId, out TerminalKittyImageSource? imageSource))
-            {
-                if (!TryCreateKittyImageSource(imageId, image, out imageSource) || imageSource is null)
-                {
-                    continue;
-                }
-
-                images[imageId] = imageSource;
-            }
+            GhosttyVtNative.RoyalKittyPlacementMetadata metadata = _kittyPlacementIterator.GetMetadata(graphics);
+            bool virtualPlacement = (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.Virtual) != 0;
+            bool virtualRoot = (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.VirtualRoot) != 0;
+            hasVirtual |= virtualPlacement || virtualRoot;
+            uint requestedColumns = _kittyPlacementIterator.GetColumns();
+            uint requestedRows = _kittyPlacementIterator.GetRows();
+            _kittyPlaceholderTargets.Add(new(
+                new(metadata.ImageId, metadata.PlacementId, (metadata.Flags & GhosttyVtNative.RoyalKittyPlacementFlags.InternalId) != 0),
+                virtualPlacement, requestedColumns, requestedRows));
+            if (virtualPlacement) continue;
 
             if (!_kittyPlacementIterator.TryGetRenderInfo(
                     image,
                     _terminal,
                     out GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo renderInfo) ||
-                !renderInfo.ViewportVisible)
+                !renderInfo.ViewportVisible && !virtualRoot)
             {
                 continue;
             }
 
-            TerminalKittyImageLayer layer = ClassifyKittyLayer(_kittyPlacementIterator.GetZIndex());
-            uint requestedColumns = _kittyPlacementIterator.GetColumns();
-            uint requestedRows = _kittyPlacementIterator.GetRows();
+            // The C API reports grid visibility even for empty source crops
+            // and zero-sized destinations. Skia cannot draw either; omit them
+            // before decoding/caching pixels, as the managed publisher does.
+            // Keep the storage placement and placeholder target above intact:
+            // later replacement, deletion and cursor movement still use them.
+            if (renderInfo.SourceWidth == 0 || renderInfo.SourceHeight == 0 ||
+                renderInfo.PixelWidth == 0 || renderInfo.PixelHeight == 0)
+                continue;
+
+            if (!CacheKittyImage(imageId, image, contentUnchanged, ref imagesChanged)) continue;
+
+            int zIndex = _kittyPlacementIterator.GetZIndex();
+            TerminalKittyImageLayer layer = ClassifyKittyLayer(zIndex);
             TerminalKittyImagePlacementScaleMode scaleMode = GetKittyScaleMode(requestedColumns, requestedRows);
             int cellWidthPx = scaleMode is TerminalKittyImagePlacementScaleMode.Columns or TerminalKittyImagePlacementScaleMode.ColumnsAndRows
                 ? Math.Max(0, _nativeCellWidthPx)
@@ -1851,31 +2209,108 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
                 ? Math.Max(0, _nativeCellHeightPx)
                 : 0;
 
-            placements.Add(new TerminalKittyImagePlacement(
+            TerminalKittyImagePlacement geometry = new(
                 imageId,
                 layer,
                 renderInfo.ViewportColumn,
                 renderInfo.ViewportRow,
-                checked((int)_kittyPlacementIterator.GetXOffset()),
-                checked((int)_kittyPlacementIterator.GetYOffset()),
-                checked((int)renderInfo.PixelWidth),
-                checked((int)renderInfo.PixelHeight),
+                (int)Math.Min(int.MaxValue, _kittyPlacementIterator.GetXOffset()),
+                (int)Math.Min(int.MaxValue, _kittyPlacementIterator.GetYOffset()),
+                (int)Math.Min(int.MaxValue, renderInfo.PixelWidth),
+                (int)Math.Min(int.MaxValue, renderInfo.PixelHeight),
                 checked((int)renderInfo.SourceX),
                 checked((int)renderInfo.SourceY),
                 checked((int)renderInfo.SourceWidth),
                 checked((int)renderInfo.SourceHeight),
                 cellWidthPx,
                 cellHeightPx,
-                scaleMode));
+                scaleMode, zIndex);
+            if (virtualRoot)
+                _kittyVirtualRelatives.Add(new(new(metadata.RootImageId, metadata.RootPlacementId, metadata.RootInternal != 0),
+                    metadata.HorizontalOffset, metadata.VerticalOffset, renderInfo.GridColumns, renderInfo.GridRows, geometry));
+            else
+                _kittyPlacements.Add(geometry);
         }
 
-        if (placements.Count == 0)
+        // Explicit placeholder IDs may target ordinary placements too. Retain
+        // those image payloads while any virtual placement enables the scan.
+        if (hasVirtual)
+        {
+            foreach (TerminalKittyPlaceholderTarget target in _kittyPlaceholderTargets)
+            {
+                int id = unchecked((int)target.Key.ImageId);
+                if (!_kittyNextImageCache.ContainsKey(id) && graphics.TryGetImage(target.Key.ImageId, out var image) && image.IsValid)
+                    CacheKittyImage(id, image, contentUnchanged, ref imagesChanged);
+            }
+        }
+
+        imagesChanged |= _kittyImageCache.Count != _kittyNextImageCache.Count;
+        (_kittyImageCache, _kittyNextImageCache) = (_kittyNextImageCache, _kittyImageCache);
+        _kittyNextImageCache.Clear();
+        _kittyGraphicsGeneration = generation;
+        _kittyGraphicsSynchronized = true;
+        _kittyPlacements.Sort(static (left, right) =>
+        {
+            int order = left.ZIndex.CompareTo(right.ZIndex);
+            return order != 0 ? order : unchecked((uint)left.ImageId).CompareTo(unchecked((uint)right.ImageId));
+        });
+
+        if (_kittyPlacements.Count == 0 && !hasVirtual)
         {
             _screen.ClearKittyGraphics();
             return;
         }
 
-        _screen.ReplaceKittyGraphics(images.Values.ToArray(), placements);
+        uint placeholderCellWidth = (uint)Math.Max(0, _nativeCellWidthPx);
+        uint placeholderCellHeight = (uint)Math.Max(0, _nativeCellHeightPx);
+        if (imagesChanged || !_screen.MatchesKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
+                placeholderCellWidth, placeholderCellHeight) || !KittyPlacementsEqual(
+                _screen.GetFixedKittyPlacements(), CollectionsMarshal.AsSpan(_kittyPlacements)))
+        {
+            _screen.ReplaceKittyGraphics(_kittyImageSources, _kittyPlacements);
+            _screen.SetKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
+                placeholderCellWidth, placeholderCellHeight);
+        }
+    }
+
+    private bool CacheKittyImage(int imageId, GhosttyKittyGraphicsImage image, bool contentUnchanged, ref bool imagesChanged)
+    {
+        if (_kittyNextImageCache.ContainsKey(imageId)) return true;
+        bool cached = _kittyImageCache.TryGetValue(imageId, out CachedKittyImage cachedImage);
+        ulong generation = contentUnchanged && cached ? cachedImage.Generation : image.GetGeneration();
+        if (!cached || generation != cachedImage.Generation)
+        {
+            if (!TryCreateKittyImageSource(imageId, image, out TerminalKittyImageSource? source) || source is null) return false;
+            cachedImage = new(generation, source);
+            imagesChanged = true;
+        }
+        _kittyNextImageCache.Add(imageId, cachedImage);
+        _kittyImageSources.Add(cachedImage.Source);
+        return true;
+    }
+
+    private readonly record struct CachedKittyImage(ulong Generation, TerminalKittyImageSource Source);
+
+    private static bool KittyPlacementsEqual(
+        ReadOnlySpan<TerminalKittyImagePlacement> previous,
+        ReadOnlySpan<TerminalKittyImagePlacement> current)
+    {
+        if (previous.Length != current.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < previous.Length; i++)
+        {
+            TerminalKittyImagePlacement left = previous[i];
+            TerminalKittyImagePlacement right = current[i];
+            if (!TerminalKittyImagePlacement.GeometryEquals(left, right))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static int ToManagedKittyImageId(uint imageId)
@@ -1955,8 +2390,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         GhosttyKittyGraphicsImage image,
         out TerminalKittyImageSource? source)
     {
-        byte[] raw = image.CopyData();
-        if (raw.Length == 0)
+        byte[] rgba = image.CopyRgbaData();
+        if (rgba.Length == 0)
         {
             source = null;
             return false;
@@ -1964,147 +2399,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
         int width = checked((int)image.GetWidth());
         int height = checked((int)image.GetHeight());
-        byte[] rgba = image.GetFormat() switch
-        {
-            GhosttyVtNative.GhosttyKittyImageFormat.Rgba => raw,
-            GhosttyVtNative.GhosttyKittyImageFormat.Rgb => ExpandRgbToRgba(raw, width, height),
-            GhosttyVtNative.GhosttyKittyImageFormat.Gray => ExpandGrayToRgba(raw, width, height),
-            GhosttyVtNative.GhosttyKittyImageFormat.GrayAlpha => ExpandGrayAlphaToRgba(raw, width, height),
-            _ => Array.Empty<byte>(),
-        };
-
-        if (rgba.Length == 0)
-        {
-            source = null;
-            return false;
-        }
-
         source = new TerminalKittyImageSource(imageId, width, height, rgba);
         return true;
-    }
-
-    private static byte[] ExpandRgbToRgba(byte[] rgb, int width, int height)
-    {
-        int pixelCount = checked(width * height);
-        if (rgb.Length < pixelCount * 3)
-        {
-            return [];
-        }
-
-        byte[] rgba = new byte[pixelCount * 4];
-        int sourceIndex = 0;
-        int destinationIndex = 0;
-        for (int i = 0; i < pixelCount; i++)
-        {
-            rgba[destinationIndex++] = rgb[sourceIndex++];
-            rgba[destinationIndex++] = rgb[sourceIndex++];
-            rgba[destinationIndex++] = rgb[sourceIndex++];
-            rgba[destinationIndex++] = 0xFF;
-        }
-
-        return rgba;
-    }
-
-    private static byte[] ExpandGrayToRgba(byte[] grayscale, int width, int height)
-    {
-        int pixelCount = checked(width * height);
-        if (grayscale.Length < pixelCount)
-        {
-            return [];
-        }
-
-        byte[] rgba = new byte[pixelCount * 4];
-        int sourceIndex = 0;
-        int destinationIndex = 0;
-        for (int i = 0; i < pixelCount; i++)
-        {
-            byte luminance = grayscale[sourceIndex++];
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = 0xFF;
-        }
-
-        return rgba;
-    }
-
-    private static byte[] ExpandGrayAlphaToRgba(byte[] grayscaleAlpha, int width, int height)
-    {
-        int pixelCount = checked(width * height);
-        if (grayscaleAlpha.Length < pixelCount * 2)
-        {
-            return [];
-        }
-
-        byte[] rgba = new byte[pixelCount * 4];
-        int sourceIndex = 0;
-        int destinationIndex = 0;
-        for (int i = 0; i < pixelCount; i++)
-        {
-            byte luminance = grayscaleAlpha[sourceIndex++];
-            byte alpha = grayscaleAlpha[sourceIndex++];
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = luminance;
-            rgba[destinationIndex++] = alpha;
-        }
-
-        return rgba;
-    }
-
-    private void PopulateSearchMatchesFromFormattedRow(
-        ReadOnlySpan<char> rowSpan,
-        int absoluteRow,
-        string needle,
-        List<TerminalSearchMatch> destination)
-    {
-        _searchRowColumnMapScratch.Clear();
-        if (rowSpan.IsEmpty)
-        {
-            return;
-        }
-
-        string rowText = rowSpan.ToString();
-        int[] textElementStarts = StringInfo.ParseCombiningCharacters(rowText);
-        if (textElementStarts.Length == 0)
-        {
-            return;
-        }
-
-        for (int column = 0; column < textElementStarts.Length; column++)
-        {
-            int start = textElementStarts[column];
-            int endExclusive = column + 1 < textElementStarts.Length
-                ? textElementStarts[column + 1]
-                : rowText.Length;
-            for (int i = start; i < endExclusive; i++)
-            {
-                _searchRowColumnMapScratch.Add(column);
-            }
-        }
-
-        int searchFrom = 0;
-        while (searchFrom <= rowText.Length - needle.Length)
-        {
-            int found = rowText.IndexOf(needle, searchFrom, StringComparison.Ordinal);
-            if (found < 0)
-            {
-                break;
-            }
-
-            int mapEnd = found + needle.Length - 1;
-            if ((uint)found < (uint)_searchRowColumnMapScratch.Count &&
-                (uint)mapEnd < (uint)_searchRowColumnMapScratch.Count)
-            {
-                destination.Add(
-                    new TerminalSearchMatch(
-                        absoluteRow,
-                        _searchRowColumnMapScratch[found],
-                        _searchRowColumnMapScratch[mapEnd]));
-            }
-
-            searchFrom = found + Math.Max(needle.Length, 1);
-        }
     }
 
     private string? BuildCellGrapheme(uint graphemeLength)
@@ -2123,20 +2419,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         try
         {
             _renderState.GetCurrentCellGraphemes(buffer);
-
-            StringBuilder builder = new(length * 2);
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                uint codepoint = buffer[i];
-                if (!Rune.IsValid((int)codepoint))
-                {
-                    return null;
-                }
-
-                builder.Append(char.ConvertFromUtf32((int)codepoint));
-            }
-
-            return builder.ToString();
+            return BuildGrapheme(buffer);
         }
         finally
         {
@@ -2144,6 +2427,28 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             {
                 ArrayPool<uint>.Shared.Return(rented);
             }
+        }
+    }
+
+    private static string? BuildGrapheme(ReadOnlySpan<uint> codepoints)
+    {
+        int length = 0;
+        foreach (uint codepoint in codepoints)
+        {
+            if (!Rune.TryCreate(codepoint, out Rune rune)) return null;
+            length = checked(length + rune.Utf16SequenceLength);
+        }
+        char[]? rented = null;
+        Span<char> text = length <= 64 ? stackalloc char[length] : (rented = ArrayPool<char>.Shared.Rent(length)).AsSpan(0, length);
+        try
+        {
+            int offset = 0;
+            foreach (uint codepoint in codepoints) offset += new Rune(codepoint).EncodeToUtf16(text[offset..]);
+            return new string(text);
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<char>.Shared.Return(rented);
         }
     }
 
@@ -2157,11 +2462,16 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     }
 
     /// <inheritdoc />
+    public bool IsKeyEncodingAuthoritative => true;
+
+    /// <inheritdoc />
     public bool TryEncodeKey(in TerminalKeyEncodingRequest request, out byte[] sequence)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (string.IsNullOrEmpty(request.KeyId) ||
+        if (request.Action is not (TerminalInputAction.Press or TerminalInputAction.Repeat or TerminalInputAction.Release) ||
+            request.UnshiftedCodepoint != 0 && !Rune.IsValid(request.UnshiftedCodepoint) ||
+            string.IsNullOrEmpty(request.KeyId) ||
             !TryMapKeyId(request.KeyId, out GhosttyVtNative.GhosttyVtKey key))
         {
             sequence = [];
@@ -2172,10 +2482,11 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _keyEvent.SetAction(MapKeyAction(request.Action));
         _keyEvent.SetKey(key);
         _keyEvent.SetModifiers(MapModifiers(request.Modifiers));
-        _keyEvent.SetConsumedModifiers(GhosttyVtNative.GhosttyVtMods.None);
+        _keyEvent.SetConsumedModifiers(MapModifiers(request.ConsumedModifiers));
         _keyEvent.SetComposing(request.IsComposing);
         _keyEvent.SetText(request.Text);
-        _keyEvent.SetUnshiftedCodepoint(TryGetUnshiftedCodepoint(request.KeyId, out uint codepoint) ? codepoint : 0);
+        _keyEvent.SetUnshiftedCodepoint(request.UnshiftedCodepoint != 0 ? request.UnshiftedCodepoint :
+            TryGetUnshiftedCodepoint(request.KeyId, out uint codepoint) ? codepoint : 0);
 
         sequence = _keyEncoder.Encode(_keyEvent);
         return sequence.Length > 0;
@@ -2189,28 +2500,38 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (context.ScreenWidthPx <= 0 ||
-            context.ScreenHeightPx <= 0 ||
-            context.CellWidthPx <= 0 ||
-            context.CellHeightPx <= 0)
+        if (!TerminalPointerGeometry.TryCreate(pointerEvent, context, _mouseModeState.Encoding, out TerminalPointerGeometry geometry) ||
+            (_mouseModeState.Encoding == TerminalMouseEncoding.Utf8 &&
+             (!Rune.IsValid(geometry.Column + 32) || !Rune.IsValid(geometry.Row + 32))))
         {
             sequence = [];
             return false;
         }
 
-        _mouseEncoder.SetFromTerminal(_terminal);
-        _mouseEncoder.SetSize(new GhosttyVtNative.GhosttyMouseEncoderSize
+        // Both native setters clear last-cell tracking. Reconfigure only when
+        // effective modes/geometry change, preserving deduplication across events.
+        if (_mouseEncoderModes != _mouseModeState)
         {
-            Size = (nuint)Marshal.SizeOf<GhosttyVtNative.GhosttyMouseEncoderSize>(),
-            ScreenWidth = checked((uint)context.ScreenWidthPx),
-            ScreenHeight = checked((uint)context.ScreenHeightPx),
-            CellWidth = checked((uint)context.CellWidthPx),
-            CellHeight = checked((uint)context.CellHeightPx),
-            PaddingTop = checked((uint)Math.Max(0, context.PaddingTopPx)),
-            PaddingBottom = checked((uint)Math.Max(0, context.PaddingBottomPx)),
-            PaddingRight = checked((uint)Math.Max(0, context.PaddingRightPx)),
-            PaddingLeft = checked((uint)Math.Max(0, context.PaddingLeftPx)),
-        });
+            _mouseEncoder.SetFromTerminal(_terminal);
+            _mouseEncoderModes = _mouseModeState;
+        }
+        if (_mouseEncoderContext != geometry.Context)
+        {
+            TerminalPointerEncodingContext normalized = geometry.Context;
+            _mouseEncoder.SetSize(new GhosttyVtNative.GhosttyMouseEncoderSize
+            {
+                Size = (nuint)Unsafe.SizeOf<GhosttyVtNative.GhosttyMouseEncoderSize>(),
+                ScreenWidth = (uint)normalized.ScreenWidthPx,
+                ScreenHeight = (uint)normalized.ScreenHeightPx,
+                CellWidth = (uint)normalized.CellWidthPx,
+                CellHeight = (uint)normalized.CellHeightPx,
+                PaddingTop = (uint)normalized.PaddingTopPx,
+                PaddingBottom = (uint)normalized.PaddingBottomPx,
+                PaddingRight = (uint)normalized.PaddingRightPx,
+                PaddingLeft = (uint)normalized.PaddingLeftPx,
+            });
+            _mouseEncoderContext = normalized;
+        }
         _mouseEncoder.SetAnyButtonPressed(IsAnyMouseButtonPressed(pointerEvent));
         _mouseEncoder.SetTrackLastCell(true);
 
@@ -2267,31 +2588,75 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         return sequence.Length > 0;
     }
 
-    private void OnNativeWritePty(nint terminal, nint userdata, nint data, nuint len)
+    private unsafe void OnNativeWritePty(nint terminal, nint userdata, nint data, nuint len)
     {
-        if (ResponseCallback is null || len == 0)
+        try
         {
-            return;
-        }
+            if (len == 0 || len > int.MaxValue)
+            {
+                return;
+            }
 
-        byte[] response = new byte[(int)len];
-        Marshal.Copy(data, response, 0, response.Length);
-        ResponseCallback(response);
+            int length = checked((int)len);
+            if (_pasteCapture is not null)
+            {
+                ReadOnlySpan<byte> source = new((void*)data, length);
+                source.CopyTo(_pasteCapture.GetSpan(length));
+                _pasteCapture.Advance(length);
+                return;
+            }
+
+            if (ResponseCallback is null)
+            {
+                return;
+            }
+
+            ReadOnlySpan<byte> nativeReply = new((void*)data, length);
+            if (TerminalGlyphCoverageResponse.Augment(nativeReply, GlyphCoverageSource) is { } glyphReply)
+            {
+                ResponseCallback(glyphReply);
+                return;
+            }
+            bool eightBit = _theme.OscColorReportFormat == TerminalOscColorReportFormat.Bit8;
+            int responseLength = eightBit ? GhosttyOscColorReports.GetEightBitLength(nativeReply) : length;
+            byte[] response = new byte[responseLength];
+            if (responseLength != length) GhosttyOscColorReports.WriteEightBit(nativeReply, response);
+            else nativeReply.CopyTo(response);
+            ResponseCallback(response);
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
     }
 
     private void OnNativeBell(nint terminal, nint userdata)
     {
-        BellCallback?.Invoke();
+        try
+        {
+            BellCallback?.Invoke();
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
     }
 
     private void OnNativeTitleChanged(nint terminal, nint userdata)
     {
-        if (TitleCallback is null)
+        try
         {
-            return;
-        }
+            if (TitleCallback is null)
+            {
+                return;
+            }
 
-        TitleCallback(_terminal.GetTitle());
+            TitleCallback(_terminal.GetTitle());
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+        }
     }
 
     private void OnNativePwdChanged(nint terminal, nint userdata)
@@ -2306,16 +2671,18 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         }
     }
 
-    private unsafe GhosttyVtNative.GhosttyClipboardWriteResult OnNativeClipboardWrite(
+    private unsafe void OnNativeClipboardWrite(
         nint terminal,
         nint userdata,
         GhosttyVtNative.GhosttyClipboardWrite* write)
     {
-        if (ClipboardWriteCallback is null ||
+        TerminalClipboardWriteReply managedReply = new(TerminalClipboardWriteResult.Unsupported);
+        if ((ClipboardWriteRequestCallback is null && ClipboardWriteCallback is null) ||
             write is null ||
             write->Size < (nuint)sizeof(GhosttyVtNative.GhosttyClipboardWrite))
         {
-            return GhosttyVtNative.GhosttyClipboardWriteResult.Unsupported;
+            ReplyToClipboardWrite(write, managedReply);
+            return;
         }
 
         try
@@ -2332,12 +2699,199 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
             TerminalClipboardWrite request = new(
                 ConvertClipboardLocation(write->Location),
-                contents);
-            return ConvertClipboardWriteResult(ClipboardWriteCallback(request));
+                contents,
+                write->Name.ToUtf8String(),
+                write->Granted,
+                write->CanRemember);
+            managedReply = ClipboardWriteRequestCallback is not null
+                ? ClipboardWriteRequestCallback(request)
+                : new TerminalClipboardWriteReply(ClipboardWriteCallback!(request));
         }
         catch
         {
-            return GhosttyVtNative.GhosttyClipboardWriteResult.IoError;
+            managedReply = new TerminalClipboardWriteReply(TerminalClipboardWriteResult.IoError);
+        }
+
+        ReplyToClipboardWrite(write, managedReply);
+    }
+
+    private static unsafe void ReplyToClipboardWrite(
+        GhosttyVtNative.GhosttyClipboardWrite* write,
+        TerminalClipboardWriteReply managedReply)
+    {
+        if (write is null || write->Reply == nint.Zero)
+        {
+            return;
+        }
+
+        GhosttyVtNative.GhosttyClipboardWriteReply reply =
+            GhosttyVtNative.GhosttyClipboardWriteReply.CreateSized(
+                ConvertClipboardWriteResult(managedReply.Result));
+        reply.Remember = managedReply.Remember && write->CanRemember;
+        delegate* unmanaged[Cdecl]<GhosttyVtNative.GhosttyClipboardWrite*,
+            GhosttyVtNative.GhosttyClipboardWriteReply*, void> callback =
+            (delegate* unmanaged[Cdecl]<GhosttyVtNative.GhosttyClipboardWrite*,
+                GhosttyVtNative.GhosttyClipboardWriteReply*, void>)write->Reply;
+        callback(write, &reply);
+    }
+
+    private unsafe void OnNativeClipboardRead(
+        nint terminal,
+        nint userdata,
+        GhosttyVtNative.GhosttyClipboardRead* read)
+    {
+        TerminalClipboardReadReply managedReply = new(
+            TerminalClipboardReadResult.Unsupported,
+            []);
+        if (ClipboardReadCallback is not null &&
+            read is not null &&
+            read->Size >= (nuint)sizeof(GhosttyVtNative.GhosttyClipboardRead))
+        {
+            try
+            {
+                string[] mimeTypes = new string[checked((int)read->MimesLength)];
+                for (int index = 0; index < mimeTypes.Length; index++)
+                {
+                    mimeTypes[index] = read->Mimes[index].ToUtf8String();
+                }
+
+                managedReply = ClipboardReadCallback(
+                    new TerminalClipboardRead(
+                        ConvertClipboardLocation(read->Location),
+                        mimeTypes,
+                        read->List,
+                        read->Name.ToUtf8String(),
+                        read->Granted,
+                        read->CanRemember));
+            }
+            catch
+            {
+                managedReply = new TerminalClipboardReadReply(TerminalClipboardReadResult.IoError, []);
+            }
+        }
+
+        try
+        {
+            ReplyToClipboardRead(read, managedReply);
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
+            try
+            {
+                ReplyToClipboardRead(
+                    read,
+                    new TerminalClipboardReadReply(TerminalClipboardReadResult.IoError, []));
+            }
+            catch
+            {
+                // A failed failure reply must also remain within the callback boundary.
+            }
+        }
+    }
+
+    private static unsafe void ReplyToClipboardRead(
+        GhosttyVtNative.GhosttyClipboardRead* read,
+        TerminalClipboardReadReply managedReply)
+    {
+        if (read is null || read->Reply == nint.Zero)
+        {
+            return;
+        }
+
+        List<nint> allocations = [];
+        try
+        {
+            GhosttyVtNative.GhosttyClipboardContent[] contents =
+                new GhosttyVtNative.GhosttyClipboardContent[managedReply.Contents.Count];
+            for (int index = 0; index < contents.Length; index++)
+            {
+                TerminalClipboardContent content = managedReply.Contents[index];
+                contents[index] = new GhosttyVtNative.GhosttyClipboardContent
+                {
+                    Mime = AllocateNativeString(Encoding.UTF8.GetBytes(content.MimeType), allocations),
+                    Data = AllocateNativeString(content.Data, allocations),
+                };
+            }
+
+            IReadOnlyList<string> availableMimeTypes = managedReply.AvailableMimeTypes ?? [];
+            GhosttyVtNative.GhosttyString[] available =
+                new GhosttyVtNative.GhosttyString[availableMimeTypes.Count];
+            for (int index = 0; index < available.Length; index++)
+            {
+                available[index] = AllocateNativeString(
+                    Encoding.UTF8.GetBytes(availableMimeTypes[index]),
+                    allocations);
+            }
+
+            fixed (GhosttyVtNative.GhosttyClipboardContent* contentsPointer = contents)
+            fixed (GhosttyVtNative.GhosttyString* availablePointer = available)
+            {
+                GhosttyVtNative.GhosttyClipboardReadReply reply =
+                    GhosttyVtNative.GhosttyClipboardReadReply.CreateSized(
+                        ConvertClipboardReadResult(managedReply.Result));
+                reply.Contents = contentsPointer;
+                reply.ContentsLength = (nuint)contents.Length;
+                reply.Available = availablePointer;
+                reply.AvailableLength = (nuint)available.Length;
+                reply.Remember = managedReply.Remember && read->CanRemember;
+
+                delegate* unmanaged[Cdecl]<GhosttyVtNative.GhosttyClipboardRead*,
+                    GhosttyVtNative.GhosttyClipboardReadReply*, void> callback =
+                    (delegate* unmanaged[Cdecl]<GhosttyVtNative.GhosttyClipboardRead*,
+                        GhosttyVtNative.GhosttyClipboardReadReply*, void>)read->Reply;
+                callback(read, &reply);
+            }
+        }
+        finally
+        {
+            for (int index = 0; index < allocations.Count; index++)
+            {
+                Marshal.FreeHGlobal(allocations[index]);
+            }
+        }
+    }
+
+    private static unsafe GhosttyVtNative.GhosttyString AllocateNativeString(
+        ReadOnlySpan<byte> bytes,
+        List<nint> allocations)
+    {
+        if (bytes.IsEmpty)
+        {
+            return default;
+        }
+
+        nint pointer = Marshal.AllocHGlobal(bytes.Length);
+        allocations.Add(pointer);
+        bytes.CopyTo(new Span<byte>((void*)pointer, bytes.Length));
+        return new GhosttyVtNative.GhosttyString(pointer, (nuint)bytes.Length);
+    }
+
+    private unsafe void OnNativeUnknownSequence(
+        nint terminal,
+        nint userdata,
+        GhosttyVtNative.GhosttyTerminalUnknownSequence* sequence)
+    {
+        if (sequence is null || UnknownSequenceCallback is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (sequence->Tag == GhosttyVtNative.GhosttyTerminalUnknownSequenceTag.Apc)
+            {
+                GhosttyVtNative.GhosttyTerminalUnknownStringSequence apc = sequence->Value.Apc;
+                UnknownSequenceCallback(
+                    new TerminalUnknownSequence(
+                        TerminalUnknownSequenceType.Apc,
+                        apc.Content.ToArray(),
+                        apc.Truncated));
+            }
+        }
+        catch
+        {
+            // Exceptions must never cross the unmanaged callback boundary.
         }
     }
 
@@ -2405,23 +2959,47 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe byte OnNativeSize(nint terminal, nint userdata, GhosttyVtNative.GhosttySizeReportSize* size)
     {
-        *size = new GhosttyVtNative.GhosttySizeReportSize
+        try
         {
-            Rows = checked((ushort)_screen.ViewportRows),
-            Columns = checked((ushort)_screen.Columns),
-            CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
-            CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
-        };
+            if (size is null)
+            {
+                return 0;
+            }
 
-        return 1;
+            *size = new GhosttyVtNative.GhosttySizeReportSize
+            {
+                Rows = _terminal.GetRows(),
+                Columns = _terminal.GetColumns(),
+                CellWidth = checked((uint)Math.Max(_sizeReportCellWidthPx, 0)),
+                CellHeight = checked((uint)Math.Max(_sizeReportCellHeightPx, 0)),
+            };
+
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private unsafe byte OnNativeColorScheme(nint terminal, nint userdata, GhosttyColorScheme* scheme)
     {
-        *scheme = IsPerceivedLightColor(_theme.DefaultBackground)
-            ? GhosttyColorScheme.Light
-            : GhosttyColorScheme.Dark;
-        return 1;
+        try
+        {
+            if (scheme is null)
+            {
+                return 0;
+            }
+
+            *scheme = IsPerceivedLightColor(_theme.DefaultBackground)
+                ? GhosttyColorScheme.Light
+                : GhosttyColorScheme.Dark;
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private unsafe byte OnNativeDeviceAttributes(
@@ -2429,23 +3007,35 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyDeviceAttributes* attributes)
     {
-        *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
-        attributes->Primary.ConformanceLevel = 62;
-        int featureCount = 0;
-        attributes->Primary.SetFeature(featureCount++, 1);
-        if (_sixelGraphicsEnabled)
+        try
         {
-            attributes->Primary.SetFeature(featureCount++, 4);
-        }
+            if (attributes is null)
+            {
+                return 0;
+            }
 
-        attributes->Primary.SetFeature(featureCount++, 6);
-        attributes->Primary.SetFeature(featureCount++, 22);
-        attributes->Primary.NumFeatures = (nuint)featureCount;
-        attributes->Secondary.DeviceType = 1;
-        attributes->Secondary.FirmwareVersion = 10;
-        attributes->Secondary.RomCartridge = 0;
-        attributes->Tertiary.UnitId = 0x00464F4F;
-        return 1;
+            *attributes = GhosttyVtNative.GhosttyDeviceAttributes.Create();
+            attributes->Primary.ConformanceLevel = 62;
+            int featureCount = 0;
+            attributes->Primary.SetFeature(featureCount++, 1);
+            if (_sixelGraphicsEnabled)
+            {
+                attributes->Primary.SetFeature(featureCount++, 4);
+            }
+
+            attributes->Primary.SetFeature(featureCount++, 6);
+            attributes->Primary.SetFeature(featureCount++, 22);
+            attributes->Primary.NumFeatures = (nuint)featureCount;
+            attributes->Secondary.DeviceType = 1;
+            attributes->Secondary.FirmwareVersion = 10;
+            attributes->Secondary.RomCartridge = 0;
+            attributes->Tertiary.UnitId = 0x00464F4F;
+            return 1;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static bool IsPerceivedLightColor(uint argb)
@@ -2479,6 +3069,19 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             TerminalClipboardWriteResult.InvalidData => GhosttyVtNative.GhosttyClipboardWriteResult.InvalidData,
             TerminalClipboardWriteResult.IoError => GhosttyVtNative.GhosttyClipboardWriteResult.IoError,
             _ => GhosttyVtNative.GhosttyClipboardWriteResult.Unsupported,
+        };
+    }
+
+    private static GhosttyVtNative.GhosttyClipboardReadResult ConvertClipboardReadResult(
+        TerminalClipboardReadResult result)
+    {
+        return result switch
+        {
+            TerminalClipboardReadResult.Success => GhosttyVtNative.GhosttyClipboardReadResult.Success,
+            TerminalClipboardReadResult.Denied => GhosttyVtNative.GhosttyClipboardReadResult.Denied,
+            TerminalClipboardReadResult.Busy => GhosttyVtNative.GhosttyClipboardReadResult.Busy,
+            TerminalClipboardReadResult.IoError => GhosttyVtNative.GhosttyClipboardReadResult.IoError,
+            _ => GhosttyVtNative.GhosttyClipboardReadResult.Unsupported,
         };
     }
 
@@ -2640,8 +3243,18 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         _pressedMouseButtons = (byte)(_pressedMouseButtons | mask);
     }
 
+    /// <inheritdoc />
+    public void ObservePointerButton(in TerminalPointerEvent pointerEvent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        UpdatePressedMouseButtons(pointerEvent);
+    }
+
     private bool IsAnyMouseButtonPressed(in TerminalPointerEvent pointerEvent)
     {
+        // A drag may enter the surface without its initial press being routed
+        // here. Its current button is still authoritative for viewport filtering.
+        if (pointerEvent.Kind == TerminalPointerEventKind.Move && GetMouseButtonMask(pointerEvent.Button) != 0) return true;
         if (pointerEvent.Kind != TerminalPointerEventKind.Button)
         {
             return _pressedMouseButtons != 0;
@@ -2671,9 +3284,12 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
 
     private static GhosttyVtNative.GhosttyVtKeyAction MapKeyAction(TerminalInputAction action)
     {
-        return action == TerminalInputAction.Release
-            ? GhosttyVtNative.GhosttyVtKeyAction.Release
-            : GhosttyVtNative.GhosttyVtKeyAction.Press;
+        return action switch
+        {
+            TerminalInputAction.Release => GhosttyVtNative.GhosttyVtKeyAction.Release,
+            TerminalInputAction.Repeat => GhosttyVtNative.GhosttyVtKeyAction.Repeat,
+            _ => GhosttyVtNative.GhosttyVtKeyAction.Press,
+        };
     }
 
     private static GhosttyVtNative.GhosttyVtMods MapModifiers(TerminalModifiers modifiers)
@@ -2683,6 +3299,8 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
         if ((modifiers & TerminalModifiers.Control) != 0) result |= GhosttyVtNative.GhosttyVtMods.Ctrl;
         if ((modifiers & TerminalModifiers.Alt) != 0) result |= GhosttyVtNative.GhosttyVtMods.Alt;
         if ((modifiers & TerminalModifiers.Meta) != 0) result |= GhosttyVtNative.GhosttyVtMods.Super;
+        if ((modifiers & TerminalModifiers.CapsLock) != 0) result |= GhosttyVtNative.GhosttyVtMods.CapsLock;
+        if ((modifiers & TerminalModifiers.NumLock) != 0) result |= GhosttyVtNative.GhosttyVtMods.NumLock;
         return result;
     }
 
@@ -2821,6 +3439,20 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             "Multiply" => GhosttyVtNative.GhosttyVtKey.NumpadMultiply,
             "Subtract" => GhosttyVtNative.GhosttyVtKey.NumpadSubtract,
             "Add" => GhosttyVtNative.GhosttyVtKey.NumpadAdd,
+            "NumPadEnter" => GhosttyVtNative.GhosttyVtKey.NumpadEnter,
+            "NumPadEqual" => GhosttyVtNative.GhosttyVtKey.NumpadEqual,
+            "Separator" => GhosttyVtNative.GhosttyVtKey.NumpadSeparator,
+            "NumPadLeft" => GhosttyVtNative.GhosttyVtKey.NumpadLeft,
+            "NumPadRight" => GhosttyVtNative.GhosttyVtKey.NumpadRight,
+            "NumPadUp" => GhosttyVtNative.GhosttyVtKey.NumpadUp,
+            "NumPadDown" => GhosttyVtNative.GhosttyVtKey.NumpadDown,
+            "NumPadPageUp" => GhosttyVtNative.GhosttyVtKey.NumpadPageUp,
+            "NumPadPageDown" => GhosttyVtNative.GhosttyVtKey.NumpadPageDown,
+            "NumPadHome" => GhosttyVtNative.GhosttyVtKey.NumpadHome,
+            "NumPadEnd" => GhosttyVtNative.GhosttyVtKey.NumpadEnd,
+            "NumPadInsert" => GhosttyVtNative.GhosttyVtKey.NumpadInsert,
+            "NumPadDelete" => GhosttyVtNative.GhosttyVtKey.NumpadDelete,
+            "NumPadBegin" => GhosttyVtNative.GhosttyVtKey.NumpadBegin,
             "LeftShift" => GhosttyVtNative.GhosttyVtKey.ShiftLeft,
             "RightShift" => GhosttyVtNative.GhosttyVtKey.ShiftRight,
             "LeftCtrl" => GhosttyVtNative.GhosttyVtKey.ControlLeft,
@@ -2852,6 +3484,41 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             "F18" => GhosttyVtNative.GhosttyVtKey.F18,
             "F19" => GhosttyVtNative.GhosttyVtKey.F19,
             "F20" => GhosttyVtNative.GhosttyVtKey.F20,
+            "F21" => GhosttyVtNative.GhosttyVtKey.F21,
+            "F22" => GhosttyVtNative.GhosttyVtKey.F22,
+            "F23" => GhosttyVtNative.GhosttyVtKey.F23,
+            "F24" => GhosttyVtNative.GhosttyVtKey.F24,
+            "F25" => GhosttyVtNative.GhosttyVtKey.F25,
+            "Fn" => GhosttyVtNative.GhosttyVtKey.Fn,
+            "FnLock" => GhosttyVtNative.GhosttyVtKey.FnLock,
+            "PrintScreen" => GhosttyVtNative.GhosttyVtKey.PrintScreen,
+            "Scroll" or "ScrollLock" => GhosttyVtNative.GhosttyVtKey.ScrollLock,
+            "Pause" => GhosttyVtNative.GhosttyVtKey.Pause,
+            "BrowserBack" => GhosttyVtNative.GhosttyVtKey.BrowserBack,
+            "BrowserFavorites" => GhosttyVtNative.GhosttyVtKey.BrowserFavorites,
+            "BrowserForward" => GhosttyVtNative.GhosttyVtKey.BrowserForward,
+            "BrowserHome" => GhosttyVtNative.GhosttyVtKey.BrowserHome,
+            "BrowserRefresh" => GhosttyVtNative.GhosttyVtKey.BrowserRefresh,
+            "BrowserSearch" => GhosttyVtNative.GhosttyVtKey.BrowserSearch,
+            "BrowserStop" => GhosttyVtNative.GhosttyVtKey.BrowserStop,
+            "Eject" => GhosttyVtNative.GhosttyVtKey.Eject,
+            "LaunchApplication1" or "LaunchApp1" => GhosttyVtNative.GhosttyVtKey.LaunchApp1,
+            "LaunchApplication2" or "LaunchApp2" => GhosttyVtNative.GhosttyVtKey.LaunchApp2,
+            "LaunchMail" => GhosttyVtNative.GhosttyVtKey.LaunchMail,
+            "MediaPlayPause" => GhosttyVtNative.GhosttyVtKey.MediaPlayPause,
+            "SelectMedia" or "MediaSelect" => GhosttyVtNative.GhosttyVtKey.MediaSelect,
+            "MediaStop" => GhosttyVtNative.GhosttyVtKey.MediaStop,
+            "MediaNextTrack" or "MediaTrackNext" => GhosttyVtNative.GhosttyVtKey.MediaTrackNext,
+            "MediaPreviousTrack" or "MediaTrackPrevious" => GhosttyVtNative.GhosttyVtKey.MediaTrackPrevious,
+            "Power" => GhosttyVtNative.GhosttyVtKey.Power,
+            "Sleep" => GhosttyVtNative.GhosttyVtKey.Sleep,
+            "VolumeDown" or "AudioVolumeDown" => GhosttyVtNative.GhosttyVtKey.AudioVolumeDown,
+            "VolumeMute" or "AudioVolumeMute" => GhosttyVtNative.GhosttyVtKey.AudioVolumeMute,
+            "VolumeUp" or "AudioVolumeUp" => GhosttyVtNative.GhosttyVtKey.AudioVolumeUp,
+            "WakeUp" => GhosttyVtNative.GhosttyVtKey.WakeUp,
+            "Copy" => GhosttyVtNative.GhosttyVtKey.Copy,
+            "Cut" => GhosttyVtNative.GhosttyVtKey.Cut,
+            "Paste" => GhosttyVtNative.GhosttyVtKey.Paste,
             _ => GhosttyVtNative.GhosttyVtKey.Unidentified,
         };
 
@@ -2916,6 +3583,7 @@ public sealed class GhosttyVtProcessor : IVtProcessor,
             "Multiply" => '*',
             "Subtract" => '-',
             "Add" => '+',
+            "NumPadEqual" => '=',
             "NumPad0" => '0',
             "NumPad1" => '1',
             "NumPad2" => '2',

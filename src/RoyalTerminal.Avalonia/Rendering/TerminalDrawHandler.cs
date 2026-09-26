@@ -140,7 +140,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             SKColor background = default;
             GRContext? grContext = lease.GrContext;
 
-            lock (screen.SyncRoot)
+            using (screen.Synchronization.AcquireDemand())
             {
                 background = new SKColor(screen.DefaultBackground);
                 if (!EnsureTerminalSurface(width, height, renderScale, grContext))
@@ -633,7 +633,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         bool Visible,
         CursorStyle Style,
         SKColor Color,
-        SKColor TextColor)
+        SKColor TextColor,
+        TerminalPreedit? Preedit)
     {
         public static TerminalCursorRenderSnapshot From(SkiaTerminalRenderer renderer)
             => new(
@@ -642,6 +643,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 renderer.CursorVisible,
                 renderer.CursorStyle,
                 renderer.CursorColor,
-                renderer.CursorTextColor);
+                renderer.CursorTextColor,
+                renderer.Preedit);
     }
 }

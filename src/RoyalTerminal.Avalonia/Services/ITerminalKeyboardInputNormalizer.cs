@@ -12,6 +12,8 @@ internal interface ITerminalKeyboardInputNormalizer
     TerminalKeyboardInputAction HandleKeyDown(KeyEventArgs e, in TerminalModeState modeState);
 
     TerminalKeyboardInputAction HandleKeyUp(KeyEventArgs e, in TerminalModeState modeState);
+
+    void ResetInputState();
 }
 
 internal enum TerminalKeyboardInputAction

@@ -14,6 +14,12 @@ internal sealed class WindowsTerminalKeyboardInputNormalizer : DefaultTerminalKe
     private readonly IWindowsKeyboardLayoutTextInputProbe _textInputProbe;
     private bool _rightAltDown;
 
+    public override void ResetInputState()
+    {
+        _rightAltDown = false;
+        _suppressedAltGrTextKeys.Clear();
+    }
+
     public WindowsTerminalKeyboardInputNormalizer()
         : this(new WindowsKeyboardLayoutTextInputProbe())
     {

@@ -45,6 +45,7 @@ public readonly record struct GhosttyFormatterOptions(
 /// </summary>
 public sealed class GhosttyFormatter : IDisposable
 {
+    private readonly GhosttyTerminal.NativeLifetimeLease _terminalLease;
     private nint _handle;
     private bool _disposed;
 
@@ -74,13 +75,22 @@ public sealed class GhosttyFormatter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(terminal);
         NativeLibraryLoader.Initialize();
+        _terminalLease = terminal.AcquireNativeLifetimeLease();
 
-        unsafe
+        try
         {
-            GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
-            GhosttyVtNative.GhosttyFormatterTerminalOptions nativeOptions =
-                CreateNativeOptions(in options, &nativeSelection);
-            Initialize(terminal, nativeOptions);
+            unsafe
+            {
+                GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
+                GhosttyVtNative.GhosttyFormatterTerminalOptions nativeOptions =
+                    CreateNativeOptions(in options, &nativeSelection);
+                Initialize(terminal, nativeOptions);
+            }
+        }
+        catch
+        {
+            _terminalLease.Dispose();
+            throw;
         }
     }
 
@@ -93,7 +103,16 @@ public sealed class GhosttyFormatter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(terminal);
         NativeLibraryLoader.Initialize();
-        Initialize(terminal, options);
+        _terminalLease = terminal.AcquireNativeLifetimeLease();
+        try
+        {
+            Initialize(terminal, options);
+        }
+        catch
+        {
+            _terminalLease.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Returns true when the native formatter handle is valid.</summary>
@@ -132,6 +151,16 @@ public sealed class GhosttyFormatter : IDisposable
         return data.Length == 0 ? string.Empty : Encoding.UTF8.GetString(data);
     }
 
+    /// <summary>Streams the current terminal snapshot without building an intermediate native buffer.</summary>
+    public void WriteTo(Stream destination)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyStreamWriter.Write(
+            destination,
+            writer => GhosttyVtNative.FormatterFormat(_handle, writer),
+            "ghostty_formatter_format");
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -146,6 +175,8 @@ public sealed class GhosttyFormatter : IDisposable
             GhosttyVtNative.FormatterFree(_handle);
             _handle = nint.Zero;
         }
+
+        _terminalLease.Dispose();
     }
 
     private void Initialize(
@@ -205,4 +236,5 @@ public sealed class GhosttyFormatter : IDisposable
 
         throw new InvalidOperationException($"{operation} failed with {result}.");
     }
+
 }
