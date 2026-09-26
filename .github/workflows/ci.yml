@@ -75,6 +75,13 @@ jobs:
           name: native-win-x64
           path: src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-x64/native/
 
+      - name: Download Windows notification bridge
+        if: matrix.os == 'windows-latest'
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-x64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-x64/native/
+
       - name: Stage native artifacts for managed interop (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -360,6 +367,22 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build Windows notification bridge
+        shell: pwsh
+        run: ./scripts/build-windows-notifications.ps1 -Arch ${{ matrix.arch }}
+
+      - name: Test Windows notification lifecycle without desktop delivery
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: ./scripts/build-windows-notifications.ps1 -Arch x64 -Test
+
+      - name: Upload Windows notification bridge
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-notifications-${{ matrix.arch }}
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-${{ matrix.arch }}/native/royalterminal-notifications.dll
+          if-no-files-found: error
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
@@ -502,6 +525,18 @@ jobs:
         with:
           name: macos-notifications
           path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/
+
+      - name: Download Windows x64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-x64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-x64/native/
+
+      - name: Download Windows arm64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-arm64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-arm64/native/
 
       - name: Download macOS arm64 native
         uses: actions/download-artifact@v4

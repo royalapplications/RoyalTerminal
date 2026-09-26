@@ -39,6 +39,7 @@
 
   <!-- Universal macOS host bridge, independent of which VT engine is selected. -->
   <ItemGroup>
+    <None Remove="runtimes/osx/native/libroyalterminal-notifications.dylib" />
     <None Include="runtimes/osx/native/libroyalterminal-notifications.dylib" Pack="true" PackagePath="runtimes/osx/native/"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="libroyalterminal-notifications.dylib"
           Condition="$([MSBuild]::IsOSPlatform('OSX')) Or Exists('runtimes/osx/native/libroyalterminal-notifications.dylib')" />
@@ -52,5 +53,34 @@
   <Target Name="RequireMacOsNotificationBridgeForPack" BeforeTargets="GenerateNuspec">
     <Error Condition="!Exists('$(MSBuildProjectDirectory)/runtimes/osx/native/libroyalterminal-notifications.dylib')"
            Text="Build the macOS notification bridge with scripts/build-macos-notifications.sh on macOS (or download its CI artifact) before packing." />
+  </Target>
+  <PropertyGroup>
+    <NotificationBridgeArch Condition="'$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$(PROCESSOR_ARCHITECTURE)' == 'ARM64')">arm64</NotificationBridgeArch>
+    <NotificationBridgeArch Condition="'$(NotificationBridgeArch)' == ''">x64</NotificationBridgeArch>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="runtimes/win-x64/native/royalterminal-notifications.dll;runtimes/win-arm64/native/royalterminal-notifications.dll" />
+    <None Include="runtimes/win-x64/native/royalterminal-notifications.dll" Pack="true" PackagePath="runtimes/win-x64/native/"
+          Condition="Exists('runtimes/win-x64/native/royalterminal-notifications.dll') Or ($([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'x64')">
+      <TargetPath>royalterminal-notifications.dll</TargetPath>
+      <CopyToOutputDirectory Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'x64'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'x64'">PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Include="runtimes/win-arm64/native/royalterminal-notifications.dll" Pack="true" PackagePath="runtimes/win-arm64/native/"
+          Condition="Exists('runtimes/win-arm64/native/royalterminal-notifications.dll') Or ($([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'arm64')">
+      <TargetPath>royalterminal-notifications.dll</TargetPath>
+      <CopyToOutputDirectory Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'arm64'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'arm64'">PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+  <Target Name="BuildWindowsNotificationBridge" BeforeTargets="PrepareForBuild"
+          Inputs="$(MSBuildProjectDirectory)/../../native/windows-notifications/notifications.cpp;$(MSBuildProjectDirectory)/../../native/windows-notifications/notification-platform.h;$(MSBuildProjectDirectory)/../../scripts/build-windows-notifications.ps1"
+          Outputs="$(MSBuildProjectDirectory)/runtimes/win-$(NotificationBridgeArch)/native/royalterminal-notifications.dll"
+          Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)/../../scripts/build-windows-notifications.ps1&quot; -Arch $(NotificationBridgeArch)" />
+  </Target>
+  <Target Name="RequireWindowsNotificationBridgeForPack" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/runtimes/win-x64/native/royalterminal-notifications.dll') Or !Exists('$(MSBuildProjectDirectory)/runtimes/win-arm64/native/royalterminal-notifications.dll')"
+           Text="Build both Windows notification bridges with scripts/build-windows-notifications.ps1 -Arch x64/arm64 (or download CI artifacts) before packing." />
   </Target>
 </Project>

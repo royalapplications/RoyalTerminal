@@ -58,9 +58,9 @@ Both VT adapters implement `ITerminalNotificationSource`; embedders can configur
 `TerminalControl.NotificationHost` with a nonblocking `ITerminalNotificationHost`.
 OSC 99 queries advertise only the backend's actual capabilities. Without a host,
 notifications and support queries are silently ignored. The default application
-now installs Linux freedesktop and macOS UserNotifications backends for live sessions,
-shared by both engines; capture replay never installs a desktop presenter. The Windows
-presenter remains unfinished. New platform implementations await runtime sign-off;
+now installs Linux freedesktop, macOS UserNotifications and Windows toast backends
+for live sessions, shared by both engines; capture replay never installs a desktop
+presenter. New platform implementations await runtime sign-off;
 this is not a claim of verified desktop delivery.
 
 The shared protocol implements chunked title/body/buttons/icon assembly, strict
@@ -179,6 +179,54 @@ managed tests use a fake transport. The universal bridge build and native tests 
 wired into macOS CI and its artifact into cross-platform NuGet packaging. Build,
 test execution, package inspection and real permission/activation sign-off remain
 pending until the full validation phase.
+
+The Windows presenter uses a separate C++/WinRT host bridge for x64 and arm64,
+sharing the source-generated command transport, managed ownership and cancellation
+with macOS. Its native actor owns the COM apartment, notification objects, event
+subscriptions and local image files. No managed callbacks, reflection, PowerShell,
+Windows App SDK runtime, shell execution or remote image URLs are used. Disabled
+notification settings and unavailable native assets suppress advertised support.
+
+Packaged hosts use their package identity. Unpackaged hosts register a per-user
+Start Menu shortcut with a stable executable-path-derived AUMID, following the
+[desktop toast identity contract](https://learn.microsoft.com/windows/win32/shell/enable-desktop-toast-with-appusermodelid).
+The shortcut points only to the actual host executable, never to terminal data;
+an existing nonmatching shortcut is not overwritten. Generic `dotnet`/test hosts
+are excluded. The registration persists for Windows notification settings. It does
+not install a COM activator or URI protocol handler, and does not alter taskbar pins
+or the host's process-wide AppUserModelID. Installer-managed identity and interactive
+desktop behavior require platform sign-off.
+
+The design follows Windows Terminal's `DesktopNotification.cpp`: activation
+callbacks belong to live toast objects, and tag/group identities support replacement.
+Each native client owns a unique group, so windows do not clear each other's toasts.
+Retired tokens cannot focus replacement sessions. XML is built through DOM text and
+attribute setters; opaque button arguments cannot contain terminal-provided commands.
+Windows supports at most five buttons; the first five retain their original indices.
+Ordered stock/application icon names use a fixed local shell namespace, followed by
+bounded normalized PNG input. Private, generated image files live only as long as the
+native toast lease. No arbitrary caller path is opened. System/silent sounds are
+supported; named sound support is not advertised. Low urgency suppresses the popup,
+normal uses default priority, and high requests high priority without bypassing Focus
+Assist or system notification policy.
+
+Because Windows can launch a second host instance in addition to delivering an
+in-process activation, embedders should call
+`TerminalNotificationLaunch.IsInertActivation(args)` before creating their desktop
+lifetime, and exit for this inert sentinel. The demo entry point does this. Closing
+a notification cannot reopen a terminal or replay a command. Delivered-history polling
+maintains an eventually refreshed alive cache; full close-event support is not claimed.
+Shutdown revokes handlers, removes owned toasts and releases images. A stalled OS RPC
+can outlive the bounded managed wait under native-only ownership; the bridge remains
+loaded so eventual cleanup is safe.
+
+Windows bridge source builds require Visual C++ build tools (x64 and ARM64) and the
+Windows SDK, via `scripts/build-windows-notifications.ps1`. CI builds both architectures
+and has a fake-platform native lifecycle harness plus cross-platform managed tests;
+these tests do not register shortcuts or show desktop notifications. CI and release
+packaging include both Windows DLLs and the universal macOS dylib. All new build,
+test, packaging and real Windows activation/sign-off work awaits the full validation
+phase; source implementation is not evidence of platform success.
 
 ## Ghostty-compatible shaders
 

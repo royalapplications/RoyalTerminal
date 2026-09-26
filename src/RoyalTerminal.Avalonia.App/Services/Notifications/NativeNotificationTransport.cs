@@ -6,25 +6,25 @@ using System.Text.Json.Serialization;
 
 namespace RoyalTerminal.Avalonia.App.Services.Notifications;
 
-internal interface IMacNotificationTransport : IDisposable
+internal interface INativeNotificationTransport : IDisposable
 {
     void Send(ReadOnlySpan<byte> command);
     byte[]? Poll();
 }
 
-// No managed callback pointers or Objective-C blocks cross the boundary. Native
+// No managed callback pointers or platform callback blocks cross the boundary. Native
 // completion blocks own their cleanup even when a managed session has ended.
-internal sealed partial class MacNotificationTransport : IMacNotificationTransport
+internal sealed partial class NativeNotificationTransport : INativeNotificationTransport
 {
     private readonly object _sync = new();
-    private readonly MacNotificationHandle _handle;
+    private readonly NativeNotificationHandle _handle;
     private const string Library = "royalterminal-notifications";
 
-    internal MacNotificationTransport()
+    internal NativeNotificationTransport()
     {
-        if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException();
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         _handle = new(Create());
-        if (_handle.IsInvalid) { _handle.Dispose(); throw new InvalidOperationException("macOS notifications require an application bundle."); }
+        if (_handle.IsInvalid) { _handle.Dispose(); throw new InvalidOperationException("The native notification host is unavailable."); }
     }
 
     public unsafe void Send(ReadOnlySpan<byte> command)
@@ -63,21 +63,21 @@ internal sealed partial class MacNotificationTransport : IMacNotificationTranspo
     }
 
     [LibraryImport(Library, EntryPoint = "rt_notifications_create")] private static partial nint Create();
-    [LibraryImport(Library, EntryPoint = "rt_notifications_command")] private static unsafe partial int Command(MacNotificationHandle handle, byte* bytes, nuint count);
-    [LibraryImport(Library, EntryPoint = "rt_notifications_poll")] private static partial nint PollNative(MacNotificationHandle handle, out nuint count);
+    [LibraryImport(Library, EntryPoint = "rt_notifications_command")] private static unsafe partial int Command(NativeNotificationHandle handle, byte* bytes, nuint count);
+    [LibraryImport(Library, EntryPoint = "rt_notifications_poll")] private static partial nint PollNative(NativeNotificationHandle handle, out nuint count);
     [LibraryImport(Library, EntryPoint = "rt_notifications_free")] private static partial void Free(nint bytes);
     [LibraryImport(Library, EntryPoint = "rt_notifications_destroy")] private static partial void Destroy(nint handle);
 
-    private sealed class MacNotificationHandle : SafeHandle
+    private sealed class NativeNotificationHandle : SafeHandle
     {
-        public MacNotificationHandle() : base(0, ownsHandle: true) { }
-        internal MacNotificationHandle(nint value) : this() => SetHandle(value);
+        public NativeNotificationHandle() : base(0, ownsHandle: true) { }
+        internal NativeNotificationHandle(nint value) : this() => SetHandle(value);
         public override bool IsInvalid => handle == 0;
         protected override bool ReleaseHandle() { Destroy(handle); return true; }
     }
 }
 
-internal sealed class MacNotificationCommand
+internal sealed class NativeNotificationCommand
 {
     public string Op { get; set; } = string.Empty;
     public long Sequence { get; set; }
@@ -93,14 +93,14 @@ internal sealed class MacNotificationCommand
     public int Urgency { get; set; } = 1;
 }
 
-internal sealed class MacNotificationState
+internal sealed class NativeNotificationState
 {
     public bool Ready { get; set; }
     public int Capabilities { get; set; }
-    public MacNotificationEvent[] Events { get; set; } = [];
+    public NativeNotificationEvent[] Events { get; set; } = [];
 }
 
-internal sealed class MacNotificationEvent
+internal sealed class NativeNotificationEvent
 {
     public string Kind { get; set; } = string.Empty;
     public string Token { get; set; } = string.Empty;
@@ -111,6 +111,6 @@ internal sealed class MacNotificationEvent
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(MacNotificationCommand))]
-[JsonSerializable(typeof(MacNotificationState))]
-internal partial class MacNotificationJsonContext : JsonSerializerContext { }
+[JsonSerializable(typeof(NativeNotificationCommand))]
+[JsonSerializable(typeof(NativeNotificationState))]
+internal partial class NativeNotificationJsonContext : JsonSerializerContext { }

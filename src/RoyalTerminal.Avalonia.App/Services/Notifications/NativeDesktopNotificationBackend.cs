@@ -8,13 +8,16 @@ using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.App.Services.Notifications;
 
-internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTransport> createTransport)
+internal enum NativeNotificationPlatform { MacOS, Windows }
+
+internal sealed class NativeDesktopNotificationBackend(Func<INativeNotificationTransport> createTransport,
+    NativeNotificationPlatform platform = NativeNotificationPlatform.MacOS)
     : IDesktopNotificationBackend, IDesktopNotificationCancellation
 {
     private readonly object _sync = new();
     private readonly Dictionary<long, TaskCompletionSource> _operations = new();
     private readonly Dictionary<Guid, Entry> _entries = new();
-    private IMacNotificationTransport? _transport;
+    private INativeNotificationTransport? _transport;
     private CancellationTokenSource? _pollStop, _deliveryStop;
     private SemaphoreSlim? _wake;
     private Task? _poll;
@@ -37,13 +40,13 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
     public async ValueTask ShowAsync(TerminalNotificationRequest request, Action<TerminalNotificationFeedback> feedback, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        MacNotificationCommand command = Convert(request);
+        NativeNotificationCommand command = Convert(request, platform);
         using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _deliveryStop!.Token);
         linked.Token.ThrowIfCancellationRequested();
         lock (_sync)
         {
             if (_entries.Count >= 128) throw new InvalidOperationException("Notification ownership limit reached.");
-            _entries.Add(request.Token, new(feedback, request.Buttons.Count));
+            _entries.Add(request.Token, new(feedback, command.Buttons.Length));
             if (request.ReplacesToken is Guid previous) _entries.Remove(previous);
         }
         try { await ExecuteAsync(command, TimeSpan.FromSeconds(30), linked.Token).ConfigureAwait(false); }
@@ -52,7 +55,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
             lock (_sync) _entries.Remove(request.Token);
             // Cancel an authorization-pending or in-flight native request. A late
             // add completion removes its own OS request after cancellation.
-            try { _transport?.Send(JsonSerializer.SerializeToUtf8Bytes(new MacNotificationCommand { Op = "close", Token = request.Token.ToString("N") }, MacNotificationJsonContext.Default.MacNotificationCommand)); }
+            try { _transport?.Send(JsonSerializer.SerializeToUtf8Bytes(new NativeNotificationCommand { Op = "close", Token = request.Token.ToString("N") }, NativeNotificationJsonContext.Default.NativeNotificationCommand)); }
             catch (Exception) { }
             throw;
         }
@@ -70,7 +73,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
         { try { _deliveryStop?.Cancel(); } catch (ObjectDisposedException) { } }
     }
 
-    private async Task ExecuteAsync(MacNotificationCommand command, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task ExecuteAsync(NativeNotificationCommand command, TimeSpan timeout, CancellationToken cancellationToken)
     {
         TaskCompletionSource completion = NewCompletion();
         lock (_sync)
@@ -81,7 +84,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
         }
         try
         {
-            _transport.Send(JsonSerializer.SerializeToUtf8Bytes(command, MacNotificationJsonContext.Default.MacNotificationCommand));
+            _transport.Send(JsonSerializer.SerializeToUtf8Bytes(command, NativeNotificationJsonContext.Default.NativeNotificationCommand));
             try { _wake?.Release(); } catch (SemaphoreFullException) { }
             await completion.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
         }
@@ -97,7 +100,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
                 cancellationToken.ThrowIfCancellationRequested();
                 if (_transport!.Poll() is { } bytes)
                 {
-                    MacNotificationState state = JsonSerializer.Deserialize(bytes, MacNotificationJsonContext.Default.MacNotificationState)
+                    NativeNotificationState state = JsonSerializer.Deserialize(bytes, NativeNotificationJsonContext.Default.NativeNotificationState)
                         ?? throw new InvalidOperationException("Invalid notification state.");
                     Apply(state);
                 }
@@ -121,14 +124,15 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
         }
     }
 
-    private void Apply(MacNotificationState state)
+    private void Apply(NativeNotificationState state)
     {
-        const TerminalNotificationCapabilities supported = TerminalNotificationCapabilities.Display | TerminalNotificationCapabilities.Activation |
+        TerminalNotificationCapabilities supported = TerminalNotificationCapabilities.Display | TerminalNotificationCapabilities.Activation |
             TerminalNotificationCapabilities.Close | TerminalNotificationCapabilities.Alive | TerminalNotificationCapabilities.Icons |
             TerminalNotificationCapabilities.Buttons | TerminalNotificationCapabilities.Sound;
+        if (platform == NativeNotificationPlatform.Windows) supported |= TerminalNotificationCapabilities.Urgency;
         Volatile.Write(ref _capabilities, state.Ready ? state.Capabilities & (int)supported : 0);
         if (state.Ready) _ready.TrySetResult();
-        foreach (MacNotificationEvent value in state.Events)
+        foreach (NativeNotificationEvent value in state.Events)
         {
             if (value.Kind == "operation")
             {
@@ -136,7 +140,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
                     if (_operations.TryGetValue(value.Sequence, out TaskCompletionSource? operation))
                     {
                         if (value.Success) operation.TrySetResult();
-                        else operation.TrySetException(new InvalidOperationException("macOS notification operation failed."));
+                        else operation.TrySetException(new InvalidOperationException("Native notification operation failed."));
                     }
                 continue;
             }
@@ -170,7 +174,7 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
         Volatile.Write(ref _capabilities, 0);
     }
 
-    internal static MacNotificationCommand Convert(TerminalNotificationRequest request)
+    internal static NativeNotificationCommand Convert(TerminalNotificationRequest request, NativeNotificationPlatform platform = NativeNotificationPlatform.MacOS)
     {
         byte[]? png = null;
         if (NotificationImageDecoder.Decode(request.IconData) is { } decoded)
@@ -184,14 +188,14 @@ internal sealed class MacOsDesktopNotificationBackend(Func<IMacNotificationTrans
         return new()
         {
             Op = "show", Token = request.Token.ToString("N"), Replaces = request.ReplacesToken?.ToString("N"),
-            Title = request.Title, Body = request.Body.Length == 0 ? " " : request.Body, Application = request.ApplicationName,
-            Icons = Copy(request.IconNames), Image = png, Buttons = Copy(request.Buttons),
+            Title = request.Title, Body = platform == NativeNotificationPlatform.MacOS && request.Body.Length == 0 ? " " : request.Body, Application = request.ApplicationName,
+            Icons = Copy(request.IconNames), Image = png, Buttons = Copy(request.Buttons, platform == NativeNotificationPlatform.Windows ? 5 : 32),
             Sound = request.Sound == "silent" ? "silent" : "system", Urgency = request.Urgency,
         };
     }
 
-    private static string[] Copy(IReadOnlyList<string> values)
-    { string[] result = new string[Math.Min(32, values.Count)]; for (int i = 0; i < result.Length; i++) result[i] = values[i]; return result; }
+    private static string[] Copy(IReadOnlyList<string> values, int limit = 32)
+    { string[] result = new string[Math.Min(limit, values.Count)]; for (int i = 0; i < result.Length; i++) result[i] = values[i]; return result; }
     private static TaskCompletionSource NewCompletion() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static void Report(Entry entry, TerminalNotificationFeedback feedback) { try { entry.Callback(feedback); } catch (Exception) { } }
     private sealed record Entry(Action<TerminalNotificationFeedback> Callback, int Buttons);

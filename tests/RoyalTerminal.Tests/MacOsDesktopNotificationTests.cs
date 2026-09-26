@@ -20,7 +20,7 @@ public sealed class MacOsDesktopNotificationTests
     public async Task NegotiationMasksFeaturesNotSupportedByTheMacOsPresenter()
     {
         Transport transport = new();
-        await using MacOsDesktopNotificationBackend backend = new(() => transport);
+        await using NativeDesktopNotificationBackend backend = new(() => transport);
         await backend.InitializeAsync(default);
         Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Display));
         Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Icons));
@@ -35,14 +35,14 @@ public sealed class MacOsDesktopNotificationTests
     public async Task ReplacementsUseRevisionTokensAndIgnoreStaleOrInvalidActions()
     {
         Transport transport = new();
-        await using MacOsDesktopNotificationBackend backend = new(() => transport);
+        await using NativeDesktopNotificationBackend backend = new(() => transport);
         await backend.InitializeAsync(default);
         TerminalNotificationRequest first = Request(), second = Request() with { ReplacesToken = first.Token, Buttons = ["Yes", "No"] };
         List<TerminalNotificationFeedback> old = new();
         TaskCompletionSource<TerminalNotificationFeedback> activated = new(TaskCreationOptions.RunContinuationsAsynchronously);
         await backend.ShowAsync(first, old.Add, default);
         await backend.ShowAsync(second, value => activated.TrySetResult(value), default);
-        MacNotificationCommand sent = transport.Sent[1];
+        NativeNotificationCommand sent = transport.Sent[1];
         Assert.Equal(second.Token.ToString("N"), sent.Token);
         Assert.Equal(first.Token.ToString("N"), sent.Replaces);
         transport.Event(first.Token, "activated", 0);
@@ -58,14 +58,14 @@ public sealed class MacOsDesktopNotificationTests
     public async Task CancellationInterruptsPendingPermissionAndQueuesNativeCleanup()
     {
         Transport transport = new() { HoldShows = true };
-        await using MacOsDesktopNotificationBackend backend = new(() => transport);
+        await using NativeDesktopNotificationBackend backend = new(() => transport);
         await backend.InitializeAsync(default);
         TerminalNotificationRequest request = Request();
         Task show = backend.ShowAsync(request, _ => { }, default).AsTask();
         await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         backend.CancelPending();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => show);
-        MacNotificationCommand close = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        NativeNotificationCommand close = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("close", close.Op);
         Assert.Equal(request.Token.ToString("N"), close.Token);
         await backend.DisposeAsync();
@@ -78,7 +78,7 @@ public sealed class MacOsDesktopNotificationTests
     public async Task ServiceShutdownCancelsMacPermissionWithoutWaitingForTheUser()
     {
         Transport transport = new() { HoldShows = true };
-        MacOsDesktopNotificationBackend backend = new(() => transport);
+        NativeDesktopNotificationBackend backend = new(() => transport);
         using DesktopNotificationService service = new(backend);
         await service.Ready.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(service.Show(Request(), _ => { }));
@@ -93,14 +93,14 @@ public sealed class MacOsDesktopNotificationTests
     public async Task ClosingOnePaneCancelsItsPermissionWaitWithoutStoppingTheService()
     {
         Transport transport = new() { HoldShows = true };
-        using DesktopNotificationService service = new(new MacOsDesktopNotificationBackend(() => transport));
+        using DesktopNotificationService service = new(new NativeDesktopNotificationBackend(() => transport));
         await service.Ready.WaitAsync(TimeSpan.FromSeconds(5));
         TerminalNotificationRequest first = Request();
         Assert.True(service.Show(first, _ => { }));
-        MacNotificationCommand show = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        NativeNotificationCommand show = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("show", show.Op);
         service.Close(first.Token);
-        MacNotificationCommand close = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        NativeNotificationCommand close = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("close", close.Op);
         Assert.Equal(first.Token.ToString("N"), close.Token);
         Assert.False(service.IsAlive(first.Token));
@@ -108,7 +108,7 @@ public sealed class MacOsDesktopNotificationTests
         transport.HoldShows = false;
         TerminalNotificationRequest second = Request();
         Assert.True(service.Show(second, _ => { }));
-        MacNotificationCommand next = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        NativeNotificationCommand next = await transport.Commands.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("show", next.Op);
         Assert.Equal(second.Token.ToString("N"), next.Token);
         service.Dispose();
@@ -121,7 +121,7 @@ public sealed class MacOsDesktopNotificationTests
     {
         Transport first = new(), second = new();
         Queue<Transport> transports = new([first, second]);
-        await using MacOsDesktopNotificationBackend backend = new(() => transports.Dequeue());
+        await using NativeDesktopNotificationBackend backend = new(() => transports.Dequeue());
         await backend.InitializeAsync(default);
         TerminalNotificationRequest previous = Request();
         List<TerminalNotificationFeedback> stale = new();
@@ -141,7 +141,7 @@ public sealed class MacOsDesktopNotificationTests
     public async Task NativeFailureRejectsDeliveryAndClosesItsToken()
     {
         Transport transport = new() { FailShows = true };
-        await using MacOsDesktopNotificationBackend backend = new(() => transport);
+        await using NativeDesktopNotificationBackend backend = new(() => transport);
         await backend.InitializeAsync(default);
         TerminalNotificationRequest request = Request();
         await Assert.ThrowsAsync<InvalidOperationException>(() => backend.ShowAsync(request, _ => { }, default).AsTask());
@@ -153,7 +153,7 @@ public sealed class MacOsDesktopNotificationTests
     public async Task PermissionDeniedOrDelegateUnavailableDoesNotAdvertiseDisplay()
     {
         Transport transport = new(initialCapabilities: 0);
-        await using MacOsDesktopNotificationBackend backend = new(() => transport);
+        await using NativeDesktopNotificationBackend backend = new(() => transport);
         await backend.InitializeAsync(default);
         Assert.Equal(TerminalNotificationCapabilities.None, backend.Capabilities);
         Assert.Empty(transport.Sent); // Initialization cannot issue show/permission commands.
@@ -164,14 +164,14 @@ public sealed class MacOsDesktopNotificationTests
     {
         TerminalNotificationRequest request = Request() with
         { Title = "<title> 100%", Body = "", ApplicationName = "com.example.app", IconNames = ["/tmp/not-a-path", "info"], Sound = "unknown", Urgency = 2 };
-        MacNotificationCommand command = MacOsDesktopNotificationBackend.Convert(request);
+        NativeNotificationCommand command = NativeDesktopNotificationBackend.Convert(request);
         Assert.Equal("<title> 100%", command.Title);
         Assert.Equal(" ", command.Body); // Avoid macOS replacing an empty body with the title.
         Assert.Equal("system", command.Sound);
         Assert.Equal(2, command.Urgency);
         Assert.Null(command.Image);
-        byte[] json = JsonSerializer.SerializeToUtf8Bytes(command, MacNotificationJsonContext.Default.MacNotificationCommand);
-        MacNotificationCommand restored = JsonSerializer.Deserialize(json, MacNotificationJsonContext.Default.MacNotificationCommand)!;
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(command, NativeNotificationJsonContext.Default.NativeNotificationCommand);
+        NativeNotificationCommand restored = JsonSerializer.Deserialize(json, NativeNotificationJsonContext.Default.NativeNotificationCommand)!;
         Assert.Equal(command.Title, restored.Title);
         Assert.Equal(command.Icons, restored.Icons); // Native lookup rejects paths rather than opening them.
         Assert.DoesNotContain("path", restored.Op, StringComparison.OrdinalIgnoreCase);
@@ -184,26 +184,26 @@ public sealed class MacOsDesktopNotificationTests
         bitmap.Erase(SKColors.Red);
         using SKImage image = SKImage.FromBitmap(bitmap);
         using SKData encoded = image.Encode(SKEncodedImageFormat.Jpeg, 95);
-        MacNotificationCommand command = MacOsDesktopNotificationBackend.Convert(Request() with { IconData = encoded.ToArray() });
+        NativeNotificationCommand command = NativeDesktopNotificationBackend.Convert(Request() with { IconData = encoded.ToArray() });
         Assert.NotNull(command.Image);
         Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, command.Image![..8]);
         NotificationImage decoded = Assert.IsType<NotificationImage>(NotificationImageDecoder.Decode(command.Image));
         Assert.Equal((2, 1), (decoded.Width, decoded.Height));
-        Assert.Null(MacOsDesktopNotificationBackend.Convert(Request() with { IconData = new byte[1024 * 1024 + 1] }).Image);
+        Assert.Null(NativeDesktopNotificationBackend.Convert(Request() with { IconData = new byte[1024 * 1024 + 1] }).Image);
     }
 
     private static TerminalNotificationRequest Request() => new(Guid.NewGuid(), null, "title", "body", null, [], [], default, [], "system", 1, -1);
 
-    private sealed class Transport : IMacNotificationTransport
+    private sealed class Transport : INativeNotificationTransport
     {
         private readonly ConcurrentQueue<byte[]> _states = new();
-        internal readonly List<MacNotificationCommand> Sent = new();
-        internal readonly Channel<MacNotificationCommand> Commands = Channel.CreateUnbounded<MacNotificationCommand>();
+        internal readonly List<NativeNotificationCommand> Sent = new();
+        internal readonly Channel<NativeNotificationCommand> Commands = Channel.CreateUnbounded<NativeNotificationCommand>();
         internal bool HoldShows, FailShows, Disposed;
         internal Transport(int initialCapabilities = int.MaxValue) => State(new() { Ready = true, Capabilities = initialCapabilities });
         public void Send(ReadOnlySpan<byte> json)
         {
-            MacNotificationCommand command = JsonSerializer.Deserialize(json, MacNotificationJsonContext.Default.MacNotificationCommand)!;
+            NativeNotificationCommand command = JsonSerializer.Deserialize(json, NativeNotificationJsonContext.Default.NativeNotificationCommand)!;
             Sent.Add(command); Commands.Writer.TryWrite(command);
             if (command.Op == "show" && HoldShows) return;
             State(new() { Ready = true, Capabilities = int.MaxValue, Events = [new() { Kind = "operation", Sequence = command.Sequence, Success = !(command.Op == "show" && FailShows) }] });
@@ -212,6 +212,6 @@ public sealed class MacOsDesktopNotificationTests
         public void Dispose() => Disposed = true;
         internal void Event(Guid token, string kind, int button)
             => State(new() { Ready = true, Capabilities = int.MaxValue, Events = [new() { Kind = kind, Token = token.ToString("N"), Button = button }] });
-        private void State(MacNotificationState state) => _states.Enqueue(JsonSerializer.SerializeToUtf8Bytes(state, MacNotificationJsonContext.Default.MacNotificationState));
+        private void State(NativeNotificationState state) => _states.Enqueue(JsonSerializer.SerializeToUtf8Bytes(state, NativeNotificationJsonContext.Default.NativeNotificationState));
     }
 }

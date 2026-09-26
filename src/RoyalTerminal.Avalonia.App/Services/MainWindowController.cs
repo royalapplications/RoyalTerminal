@@ -3139,12 +3139,13 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
-        if (notificationsEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+        if (notificationsEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
         {
             if (_desktopNotifications is null)
             {
-                if (OperatingSystem.IsMacOS())
-                    _desktopNotifications = new(new MacOsDesktopNotificationBackend(static () => new MacNotificationTransport()));
+                if (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows())
+                    _desktopNotifications = new(new NativeDesktopNotificationBackend(static () => new NativeNotificationTransport(),
+                        OperatingSystem.IsWindows() ? NativeNotificationPlatform.Windows : NativeNotificationPlatform.MacOS));
                 else
                 {
                     DesktopThemeFiles files = new();

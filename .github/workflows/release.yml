@@ -38,6 +38,18 @@ jobs:
         if: matrix.arch == 'arm64'
         run: bash scripts/build-unix-pty.sh
 
+      - name: Build macOS notification bridge
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-macos-notifications.sh
+
+      - name: Upload macOS notification bridge
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/libroyalterminal-notifications.dylib
+          if-no-files-found: error
+
       - name: Upload macOS PTY launcher
         if: matrix.arch == 'arm64'
         uses: actions/upload-artifact@v7
@@ -209,6 +221,17 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      - name: Build Windows notification bridge
+        shell: pwsh
+        run: ./scripts/build-windows-notifications.ps1 -Arch ${{ matrix.arch }}
+
+      - name: Upload Windows notification bridge
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-notifications-${{ matrix.arch }}
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-${{ matrix.arch }}/native/royalterminal-notifications.dll
+          if-no-files-found: error
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -399,6 +422,24 @@ jobs:
         with:
           name: unix-pty-launcher
           path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/
+
+      - name: Download macOS notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/
+
+      - name: Download Windows x64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-x64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-x64/native/
+
+      - name: Download Windows arm64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-arm64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-arm64/native/
 
       - name: Download macOS arm64
         uses: actions/download-artifact@v8
