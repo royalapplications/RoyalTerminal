@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Terminal;
 
@@ -121,6 +122,8 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
             ClearPreservedCellsForMutation(row);
             // Native resize temporarily detaches the cursor pen before this
             // clear, so prompt blanks use default colors, not the active SGR.
+            using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+            styles.Clear(0, row.Columns);
             row.Cells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
             row.IsDirty = true;
         }

@@ -193,6 +193,86 @@ public sealed class GhosttySnapshotStyleStorageTests
     }
 
     [Fact]
+    public void GroupedClearCrossesChunkBoundariesWithoutDroppingTheCursorOrOtherCells()
+    {
+        GhosttySnapshotStyleStorage storage = new(4);
+        storage.ChangeCursor(Bold);
+        for (int i = 250; i < 270; i++) storage.WriteCursorToCell(i);
+        storage.ChangeCursor(Italic); storage.WriteCursorToCell(270);
+        GhosttySnapshotStyleStorage retained = storage.Copy();
+        storage.ClearCells(251, 20);
+        Assert.Equal(1, storage.CellCount);
+        Assert.Equal(Bold, storage.CellStyle(250));
+        Assert.Equal(Italic, storage.Cursor);
+        Assert.Equal(2, storage.Count);
+        storage.ClearCells(0, 251);
+        Assert.Equal(0, storage.CellCount);
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(21, retained.CellCount);
+    }
+
+    [Fact]
+    public void SwappingCellOwnershipPreservesReferencesAndInlineBackgroundObservations()
+    {
+        GhosttySnapshotStyleStorage storage = new(4);
+        storage.ChangeCursor(Bold); storage.WriteCursorToCell(0);
+        storage.ChangeCursor(Italic); storage.WriteCursorToCell(256);
+        storage.ObserveInlineBackground(0, new(1, 2, 0, 0));
+        storage.SwapCells(0, 256);
+        Assert.Equal(Italic, storage.CellStyle(0));
+        Assert.Equal(Bold, storage.CellStyle(256));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ObserveCell(256,
+            Bold with { Background = new(1, 2, 0, 0) }, empty: true));
+        Assert.Equal(Bold, storage.CellStyle(256));
+        storage.SwapCells(256, 512);
+        Assert.Equal(default, storage.CellStyle(256));
+        Assert.Equal(2, storage.CellCount);
+        storage.ClearCells(0, 513);
+        Assert.Equal(0, storage.CellCount);
+        Assert.Equal(1, storage.Count); // Only italic's cursor reference remains.
+    }
+
+    [Fact]
+    public void CrossPageCopiesReusePreferredDeadIdsAndRetainInlineStyleIdentity()
+    {
+        GhosttySnapshotStyleStorage source = new(4), destination = new(4);
+        source.ChangeCursor(Faint); source.WriteCursorToCell(0);
+        source.ObserveInlineBackground(0, new(1, 2, 0, 0));
+        destination.ChangeCursor(Bold); destination.WriteCursorToCell(0);
+        destination.ChangeCursor(Italic); destination.WriteCursorToCell(1);
+        destination.ChangeCursor(default);
+        destination.ClearCells(0, 2);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellFrom(0, source, 0));
+        Assert.Equal(Faint, destination.CellStyle(0));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.ObserveCell(0,
+            Faint with { Background = new(1, 2, 0, 0) }, empty: true));
+        Assert.Equal(Faint, destination.CellStyle(0));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellFrom(1, destination, 0));
+        destination.ClearCell(0);
+        Assert.Equal(Faint, destination.CellStyle(1));
+        destination.ClearCell(1);
+        Assert.Equal(0, destination.Count);
+        Assert.Equal(Faint, source.CellStyle(0));
+    }
+
+    [Fact]
+    public void ReplacingTheLastStyledCellReusesItsEmptyChunk()
+    {
+        GhosttySnapshotStyleStorage storage = new(4);
+        storage.ChangeCursor(Bold); storage.WriteCursorToCell(0);
+        storage.ClearCell(0); storage.WriteCursorToCell(0);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++)
+        {
+            storage.ClearCell(0); storage.WriteCursorToCell(0);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(0, allocated);
+        Assert.Equal(1, storage.CellCount);
+        Assert.Equal(Bold, storage.CellStyle(0));
+    }
+
+    [Fact]
     public void BackgroundOnlyEraseDoesNotAllocateAStyleInAnEmptySet()
     {
         GhosttySnapshotStyleStorage storage = new(0);

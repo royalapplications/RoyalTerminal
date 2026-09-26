@@ -80,7 +80,7 @@ public sealed partial class BasicVtProcessor
     private void ResetProtectedRowWrap(TerminalRow row)
     {
         // A spacer head cannot survive removing its row's wrap marker.
-        if (row.ReadOnlyCells[^1].IsWideSpacerHead) row[row.Columns - 1] = CreateErasedCell();
+        if (row.ReadOnlyCells[^1].IsWideSpacerHead) EraseCells(row, row.Columns - 1, 1);
         ResetRowSoftWrap(row);
     }
 
@@ -102,7 +102,7 @@ public sealed partial class BasicVtProcessor
         if (_cursorRow <= 0) return;
         TerminalRow previous = _screen.GetViewportRow(_cursorRow - 1);
         if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
-        previous[previous.Columns - 1] = CreateErasedCell();
+        EraseCells(previous, previous.Columns - 1, 1);
         previous.IsDirty = true;
     }
 
@@ -117,8 +117,9 @@ public sealed partial class BasicVtProcessor
         {
             if (row.ReadOnlyCells[column].IsProtected) { column++; continue; }
             int first = column;
-            do { row[column++] = CreateErasedCell(); }
+            do { column++; }
             while (column < end && !row.ReadOnlyCells[column].IsProtected);
+            EraseCells(row, first, column - first);
             _screen.ClearRasterGraphicsInViewportRectangle(rowIndex, rowIndex, first, column - 1);
         }
         row.IsDirty = true;

@@ -9,6 +9,8 @@ namespace RoyalTerminal.Avalonia.Rendering;
 public sealed partial class TerminalScreen
 {
     private GhosttySnapshotStyleTracker? _snapshotStyleTracker;
+    private GhosttySnapshotAllocation? _snapshotStyleLayout;
+    private int _snapshotStyleAlignment;
 
     internal bool TracksSnapshotStyles => _snapshotScrollbackQuota is not null || _snapshotRowGeometry;
 
@@ -28,13 +30,34 @@ public sealed partial class TerminalScreen
         int index = rows.Count - ViewportRows + cursorRow;
         TerminalRow row = rows[index];
         if (_snapshotStyleTracker?.IsCurrent(key, row, current) == true) return;
-        int alignment = _snapshotScrollbackQuota?.PageAlignment ??
-            (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
-        GhosttySnapshotAllocation layout = new(alignment);
+        GhosttySnapshotAllocation layout = SnapshotStyleLayout();
         GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
         if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout))
             _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
         if (!tracker.IsCurrent(key, row, current)) tracker.ChangeCursor(rows, key, row, previous, current, layout);
+    }
+
+    internal GhosttySnapshotStyleTracker.RowEdit EditSnapshotRowStyles(TerminalRow row)
+    {
+        if (!TracksSnapshotStyles) return default;
+        GhosttySnapshotAllocation layout = SnapshotStyleLayout();
+        GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
+        if (row.SnapshotAllocation is null &&
+            !(_rows.Count > 0 && ReferenceEquals(_rows[_rows.Count - 1], row) && tracker.AssignTailRow(_rows, _rows.Count - 1, layout)))
+            _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
+        return tracker.EditRow(_rows, row, layout);
+    }
+
+    private GhosttySnapshotAllocation SnapshotStyleLayout()
+    {
+        int alignment = _snapshotScrollbackQuota?.PageAlignment ??
+            (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
+        if (_snapshotStyleLayout is null || _snapshotStyleAlignment != alignment)
+        {
+            _snapshotStyleAlignment = alignment;
+            _snapshotStyleLayout = new(alignment);
+        }
+        return _snapshotStyleLayout;
     }
 
     internal void SnapshotStyleAllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)

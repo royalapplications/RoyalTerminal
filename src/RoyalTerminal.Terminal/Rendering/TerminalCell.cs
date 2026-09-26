@@ -371,6 +371,25 @@ public sealed class TerminalRow
         IsDirty = true;
     }
 
+    /// <summary>Swaps equal-width active cell-array ownership for an in-page row shift.</summary>
+    internal void SwapActiveStorage(TerminalRow other)
+    {
+        if (_columns != other._columns || _cells.Length != _columns || other._cells.Length != other._columns)
+            throw new InvalidOperationException("Active storage swaps require equal, unhidden widths.");
+        // Swap ownership, not payload. Each retained COW reader keeps its arrays;
+        // swapping the shared flags with them avoids a copy until a later write.
+        (_cells, other._cells) = (other._cells, _cells);
+        bool shared = CellsAreShared;
+        CellsAreShared = other.CellsAreShared;
+        other.CellsAreShared = shared;
+        (SemanticPrompt, other.SemanticPrompt) = (other.SemanticPrompt, SemanticPrompt);
+        (IsTransientResizeRow, other.IsTransientResizeRow) = (other.IsTransientResizeRow, IsTransientResizeRow);
+        SnapshotAllocationUnmodified = other.SnapshotAllocationUnmodified = false;
+        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
+        other.SnapshotStyleRevision = unchecked(other.SnapshotStyleRevision + 1);
+        IsDirty = other.IsDirty = true;
+    }
+
     /// <summary>Clears cells retained outside the active width after this row is edited while narrow.</summary>
     public void ClearPreservedCellsFrom(int column, uint fg = 0xFFD4D4D4, uint bg = 0xFF1E1E1E)
     {

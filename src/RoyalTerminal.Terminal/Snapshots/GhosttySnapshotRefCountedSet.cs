@@ -162,6 +162,16 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
         if (--item.References == 0) _living--;
     }
 
+    internal void ReleaseMultiple(int id, int count)
+    {
+        if (id == 0 || count == 0) return;
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        Item item = LiveItem(id);
+        if (count > item.References) throw new InvalidOperationException("Native snapshot set reference underflow.");
+        item.References -= count;
+        if (item.References == 0) _living--;
+    }
+
     internal void Use(int id)
     {
         Item item = LiveItem(id);

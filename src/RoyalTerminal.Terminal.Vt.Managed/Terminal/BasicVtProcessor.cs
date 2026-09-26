@@ -1286,7 +1286,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 ClearRasterGraphicsForTextMutation(_cursorRow, _cursorCol, 1);
                 ClearCellAndWideArtifacts(row, _cursorCol);
                 bool atScreenEdge = _cursorCol == _screen.Columns - 1;
-                WriteCellFromPen(ref row[_cursorCol], 0, atScreenEdge ? (byte)0 : (byte)1);
+                WriteCellFromPen(row, _cursorCol, 0, atScreenEdge ? (byte)0 : (byte)1);
                 row[_cursorCol].IsWideSpacerHead = atScreenEdge;
                 row.IsDirty = true;
                 ResetDelayedWrap();
@@ -1327,10 +1327,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ClearCellAndWideArtifacts(row, _cursorCol + 1);
         }
 
-        WriteCellFromPen(ref row[_cursorCol], codepoint, (byte)width);
+        WriteCellFromPen(row, _cursorCol, codepoint, (byte)width);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
-            WriteCellFromPen(ref row[_cursorCol + 1], 0, 0);
+            WriteCellFromPen(row, _cursorCol + 1, 0, 0);
         }
 
         row.IsDirty = true;
@@ -1479,7 +1479,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             bool atScreenEdge = targetColIndex == _screen.Columns - 1;
             spacerHead.Width = atScreenEdge ? (byte)0 : (byte)1;
             spacerHead.IsWideSpacerHead = atScreenEdge;
-            targetRow[targetColIndex] = spacerHead;
+            WriteStyledCell(targetRow, targetColIndex, in spacerHead);
             targetRow.IsDirty = true;
             _delayedWrap = false;
             LineFeed(wrapForced: atScreenEdge, softWrap: true);
@@ -1491,8 +1491,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
             ClearCellAndWideArtifacts(destination, _scrollLeft);
             ClearCellAndWideArtifacts(destination, _scrollLeft + 1);
-            destination[_scrollLeft] = moved;
-            WriteCellFromPen(ref destination[_scrollLeft + 1], 0, 0);
+            WriteStyledCell(destination, _scrollLeft, in moved);
+            WriteCellFromPen(destination, _scrollLeft + 1, 0, 0);
             destination.IsDirty = true;
             AdvanceCursorAfterGraphic(2);
             return true;
@@ -1511,8 +1511,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (newWidth == 2 && oldWidth == 1)
         {
-            ref TerminalCell spacer = ref targetRow[targetColIndex + 1];
-            WriteCellFromPen(ref spacer, 0, 0);
+            WriteCellFromPen(targetRow, targetColIndex + 1, 0, 0);
         }
 
         if (oldWidth == 2 && newWidth == 1 && targetColIndex + 1 < targetRow.Columns)
@@ -1579,24 +1578,28 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        TerminalCell existing = row[column];
+        using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+        TerminalCell existing = row.ReadOnlyCells[column];
         if (existing.Width == 0 && column > 0)
         {
-            ref TerminalCell left = ref row[column - 1];
+            TerminalCell left = row.ReadOnlyCells[column - 1];
             if (left.Width == 2)
             {
-                left = CreateErasedCell();
+                styles.Clear(column - 1, 1);
+                row[column - 1] = CreateErasedCell();
             }
         }
         else if (existing.Width == 2 && column + 1 < row.Columns)
         {
-            ref TerminalCell right = ref row[column + 1];
+            TerminalCell right = row.ReadOnlyCells[column + 1];
             if (right.Width == 0)
             {
-                right = CreateErasedCell();
+                styles.Clear(column + 1, 1);
+                row[column + 1] = CreateErasedCell();
             }
         }
 
+        styles.Clear(column, 1);
         row[column] = CreateErasedCell();
     }
 
@@ -1732,7 +1735,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
                 ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
             if (_currentBgKind != SgrColorKind.Default)
-                added.Clear(_screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
+                ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
             _screen.InvalidateViewport();
         }
         else
@@ -1749,7 +1752,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             if (_scrollBottom < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                ClearRow(_screen.GetViewportRow(_scrollBottom), _currentFg, _currentBg, CurrentBackgroundIdentity);
             }
             _screen.InvalidateViewport();
         }
@@ -1769,16 +1772,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         if (_scrollTop < _screen.ViewportRows)
         {
-            _screen.GetViewportRow(_scrollTop).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+            ClearRow(_screen.GetViewportRow(_scrollTop), _currentFg, _currentBg, CurrentBackgroundIdentity);
         }
         _screen.InvalidateViewport();
     }
 
     private void CopyRow(TerminalRow src, TerminalRow dst)
     {
+        ClearPreservedCellsForMutation(src);
+        ClearPreservedCellsForMutation(dst);
+        using GhosttySnapshotStyleTracker.RowEdit sourceStyles = _screen.EditSnapshotRowStyles(src);
+        using GhosttySnapshotStyleTracker.RowEdit destinationStyles = _screen.EditSnapshotRowStyles(dst);
+        bool swap = destinationStyles.ShiftFrom(sourceStyles, 0, Math.Min(src.Columns, dst.Columns));
+        destinationStyles.Clear(Math.Min(src.Columns, dst.Columns), dst.PreservedColumns - Math.Min(src.Columns, dst.Columns));
         src.WrapsToNext = false;
         src.IsWrapContinuation = false;
-        dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        if (swap) dst.SwapActiveStorage(src);
+        else dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
         dst.WrapsToNext = false;
         dst.IsWrapContinuation = false;
         if (dst.ReadOnlyCells[^1].IsWideSpacerHead)
@@ -4163,7 +4173,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ClearScreen()
     {
         for (var r = 0; r < _screen.ViewportRows; r++)
-            _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+            ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
         ResetDelayedWrap();
         _cursorCol = 0;
         _cursorRow = 0;
@@ -4185,7 +4195,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 0: // From cursor to end
                 EraseInLine(0);
                 for (var r = _cursorRow + 1; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow + 1 < _screen.ViewportRows)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4198,7 +4208,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 1: // From start to cursor
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow > 0)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4211,8 +4221,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     var rowToCursor = _screen.GetViewportRow(_cursorRow);
                     ClearPreservedCellsForMutation(rowToCursor);
-                    for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                        rowToCursor[c] = CreateErasedCell();
+                    EraseCells(rowToCursor, 0, Math.Min(_cursorCol + 1, _screen.Columns));
                     NormalizeRowWideCells(rowToCursor);
                     rowToCursor.IsDirty = true;
                 }
@@ -4224,12 +4233,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     _screen.MoveViewportToScrollbackAndClear();
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 }
                 else
                 {
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        _screen.GetViewportRow(r).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                     _screen.ClearRasterGraphics();
                 }
                 break;
@@ -4270,8 +4279,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         switch (mode)
         {
             case 0: // From cursor to end of line
-                for (var c = Math.Max(0, _cursorCol); c < _screen.Columns; c++)
-                    row[c] = CreateErasedCell();
+                EraseCells(row, _cursorCol, _screen.Columns - _cursorCol);
                 ResetRowSoftWrap(row);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
@@ -4281,8 +4289,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1: // From start to cursor
-                for (var c = 0; c <= _cursorCol && c < _screen.Columns; c++)
-                    row[c] = CreateErasedCell();
+                EraseCells(row, 0, Math.Min(_cursorCol + 1, _screen.Columns));
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -4294,7 +4301,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 TerminalSemanticPrompt prompt = row.SemanticPrompt;
                 bool continuation = row.IsWrapContinuation;
                 ResetRowSoftWrap(row);
-                row.Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                ClearRow(row, _currentFg, _currentBg, CurrentBackgroundIdentity);
                 row.SemanticPrompt = prompt;
                 row.IsWrapContinuation = continuation;
                 _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4354,7 +4361,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Clear the line at cursor
             if (_cursorRow < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_cursorRow).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                ClearRow(_screen.GetViewportRow(_cursorRow), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
@@ -4383,7 +4390,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Clear the bottom row of the scroll region
             if (_scrollBottom < _screen.ViewportRows)
             {
-                _screen.GetViewportRow(_scrollBottom).Clear(_currentFg, _currentBg, CurrentBackgroundIdentity);
+                ClearRow(_screen.GetViewportRow(_scrollBottom), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _scrollBottom,
                     _scrollBottom,
@@ -4403,10 +4410,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        for (var c = RightMargin; c >= _cursorCol + count; c--)
-            row[c] = row[c - count];
-        for (var c = _cursorCol; c < _cursorCol + count && c <= RightMargin; c++)
-            row[c] = CreateErasedCell();
+        using (GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row))
+        {
+            for (var c = RightMargin; c >= _cursorCol + count; c--)
+            {
+                styles.Swap(c, c - count);
+                row[c] = row[c - count];
+            }
+            styles.Clear(_cursorCol, count);
+            row.Cells.Slice(_cursorCol, count).Fill(CreateErasedCell());
+        }
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4427,13 +4440,20 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
-            row[row.Columns - 1] = CreateErasedCell();
+            EraseCells(row, row.Columns - 1, 1);
         ResetRowSoftWrap(row);
         ResetDelayedWrap();
-        for (var c = _cursorCol; c + count <= RightMargin; c++)
-            row[c] = row[c + count];
-        for (var c = Math.Max(_cursorCol, RightMargin + 1 - count); c <= RightMargin; c++)
-            row[c] = CreateErasedCell();
+        using (GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row))
+        {
+            for (var c = _cursorCol; c + count <= RightMargin; c++)
+            {
+                styles.Swap(c, c + count);
+                row[c] = row[c + count];
+            }
+            int start = Math.Max(_cursorCol, RightMargin + 1 - count);
+            styles.Clear(start, RightMargin + 1 - start);
+            row.Cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
+        }
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4457,11 +4477,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
         if (row.ReadOnlyCells[^1].IsWideSpacerHead)
-            row[row.Columns - 1] = CreateErasedCell();
+            EraseCells(row, row.Columns - 1, 1);
         ResetRowSoftWrap(row);
         ResetDelayedWrap();
-        for (var c = _cursorCol; c < _cursorCol + count && c < _screen.Columns; c++)
-            row[c] = CreateErasedCell();
+        EraseCells(row, _cursorCol, Math.Min(count, _screen.Columns - _cursorCol));
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4477,11 +4496,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (row.PreservedColumns > row.Columns)
         {
+            using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+            styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
             row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
         }
     }
 
-    private static void NormalizeRowWideCells(TerminalRow row)
+    private void NormalizeRowWideCells(TerminalRow row)
     {
         for (int col = 0; col < row.Columns; col++)
         {
@@ -4490,14 +4511,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             {
                 if (col + 1 >= row.Columns)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                     continue;
                 }
 
                 ref TerminalCell trailing = ref row[col + 1];
                 if (trailing.Width != 0 || trailing.HasContent)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                     continue;
                 }
 
@@ -4517,7 +4538,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 bool hasWideLeader = col > 0 && row[col - 1].Width == 2;
                 if (!hasWideLeader)
                 {
-                    row[col] = TerminalCell.Empty(cell.Foreground, cell.Background);
+                    EraseCell(row, col, TerminalCell.Empty(cell.Foreground, cell.Background));
                 }
 
                 continue;
@@ -4748,7 +4769,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             case SessionScreenResetMode.ClearViewport:
                 for (var r = 0; r < _screen.ViewportRows; r++)
-                    _screen.GetViewportRow(r).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+                    ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
                 _screen.ClearRasterGraphics();
                 break;
 

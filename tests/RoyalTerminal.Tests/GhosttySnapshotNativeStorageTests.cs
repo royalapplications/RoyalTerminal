@@ -262,6 +262,23 @@ public sealed class GhosttySnapshotNativeStorageTests
     }
 
     [Fact]
+    public void GroupedReleaseKeepsLiveCountsAndRejectsUnderflowWithoutMutation()
+    {
+        GhosttySnapshotRefCountedSet<Value> set = new(4, new Context());
+        int id = set.Add(new(1, 0));
+        set.Use(id); set.Use(id);
+        set.ReleaseMultiple(id, 2);
+        Assert.Equal(1, set.Count);
+        Assert.Equal(1, set.ReferenceCount(id));
+        Assert.Throws<InvalidOperationException>(() => set.ReleaseMultiple(id, 2));
+        Assert.Equal(1, set.ReferenceCount(id));
+        set.ReleaseMultiple(id, 1);
+        Assert.Equal(0, set.Count);
+        set.ReleaseMultiple(0, 20);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(2, 1), out _));
+    }
+
+    [Fact]
     public void LargeCapacityHintsDoNotAllocateDenseStorage()
     {
         Context context = new();

@@ -10,9 +10,9 @@ namespace RoyalTerminal.Terminal.Snapshots;
 // each buffer also owns its last observed cursor page until the next style event.
 // Copies share entries until a mutation forks them; capacity identities remain
 // immutable and replacement changes only the mutating screen's row set.
-internal sealed class GhosttySnapshotStyleTracker
+internal sealed partial class GhosttySnapshotStyleTracker
 {
-    private sealed class State(GhosttySnapshotStyleStorage storage)
+    internal sealed class State(GhosttySnapshotStyleStorage storage)
     {
         internal GhosttySnapshotStyleStorage Storage = storage;
         internal readonly Dictionary<int, ulong> Revisions = [];

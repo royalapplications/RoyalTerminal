@@ -27,6 +27,7 @@ internal sealed class GhosttySnapshotStyleStorage
     // about two bytes per cell, not one dictionary entry/object per character.
     private readonly Dictionary<int, CellChunk> _cells;
     private Dictionary<int, GhosttySnapshotStyle>? _observedInlineStyles;
+    private CellChunk? _spareChunk;
     private int _cursorId, _cellCount;
 
     internal GhosttySnapshotStyleStorage(ushort capacity)
@@ -89,14 +90,83 @@ internal sealed class GhosttySnapshotStyleStorage
 
     internal void ClearCell(int index)
     {
+        int id = RemoveCell(index);
+        _styles.Release(id);
+    }
+
+    // Screen.clearCells releases contiguous style runs in one refcount update.
+    internal void ClearCells(int start, int count)
+    {
+        int end = checked(start + count);
+        for (int index = start; index < end;)
+        {
+            int id = CellId(index), next = index + 1;
+            while (next < end && CellId(next) == id) next++;
+            _styles.ReleaseMultiple(id, next - index);
+            while (index < next) RemoveCell(index++);
+        }
+    }
+
+    // Native ICH/DCH swap cell ownership before clearing the vacated run;
+    // references must not be released and reinserted during that permutation.
+    internal void SwapCells(int left, int right)
+    {
+        if (left == right) return;
+        GhosttySnapshotStyle? leftInline = InlineStyle(left), rightInline = InlineStyle(right);
+        int leftId = CellId(left), rightId = CellId(right);
+        if (leftId != 0 && rightId != 0)
+        {
+            _cells[left >> ChunkShift].Ids[left & (ChunkSize - 1)] = (ushort)rightId;
+            _cells[right >> ChunkShift].Ids[right & (ChunkSize - 1)] = (ushort)leftId;
+        }
+        else
+        {
+            RemoveCell(left); RemoveCell(right);
+            if (rightId != 0) StoreCell(left, rightId);
+            if (leftId != 0) StoreCell(right, leftId);
+        }
+        _observedInlineStyles?.Remove(left);
+        _observedInlineStyles?.Remove(right);
+        if (rightInline is { } a) (_observedInlineStyles ??= [])[left] = a;
+        if (leftInline is { } b) (_observedInlineStyles ??= [])[right] = b;
+    }
+
+    // The owner clears the whole destination run before any insertions and
+    // retries that run after growth, matching Page.clonePartialRowFrom.
+    internal GhosttySnapshotSetAddResult CopyCellFrom(int destination, GhosttySnapshotStyleStorage source, int index)
+    {
+        int sourceId = source.CellId(index);
+        if (sourceId == 0) return GhosttySnapshotSetAddResult.Success;
+        int id = sourceId;
+        if (ReferenceEquals(this, source)) _styles.Use(id);
+        else
+        {
+            GhosttySnapshotSetAddResult result = _styles.TryAddWithId(source._styles.Get(sourceId), sourceId, out id);
+            if (result != GhosttySnapshotSetAddResult.Success) return result;
+        }
+        StoreCell(destination, id);
+        if (source.InlineStyle(index) is { } observed) (_observedInlineStyles ??= [])[destination] = observed;
+        return GhosttySnapshotSetAddResult.Success;
+    }
+
+    private GhosttySnapshotStyle? InlineStyle(int index)
+        => _observedInlineStyles is not null && _observedInlineStyles.TryGetValue(index, out GhosttySnapshotStyle value) ? value : null;
+
+    private int RemoveCell(int index)
+    {
         _observedInlineStyles?.Remove(index);
-        if (!_cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)) return;
+        if (!_cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)) return 0;
         ref ushort previous = ref chunk.Ids[index & (ChunkSize - 1)];
-        if (previous == 0) return;
-        _styles.Release(previous);
+        if (previous == 0) return 0;
+        int id = previous;
         previous = 0;
         _cellCount--;
-        if (--chunk.Count == 0) _cells.Remove(index >> ChunkShift);
+        if (--chunk.Count == 0)
+        {
+            _cells.Remove(index >> ChunkShift);
+            _spareChunk = chunk;
+        }
+        return id;
     }
 
     internal GhosttySnapshotSetAddResult ChangeCell(int index, GhosttySnapshotStyle value)
@@ -155,7 +225,11 @@ internal sealed class GhosttySnapshotStyleStorage
     {
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         if (!_cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk))
-            _cells.Add(index >> ChunkShift, chunk = new());
+        {
+            chunk = _spareChunk ?? new();
+            _spareChunk = null;
+            _cells.Add(index >> ChunkShift, chunk);
+        }
         ref ushort cell = ref chunk.Ids[index & (ChunkSize - 1)];
         if (cell != 0) throw new InvalidOperationException("Style cell already owns a reference.");
         cell = checked((ushort)id);

@@ -135,9 +135,28 @@ claim. Discarding alternate storage releases its retained cursor-page entry;
 clearing all storage drops the tracker. Movement, screen-switch, tail-slot,
 Sixel, host-clear and native capacity comparisons are added but unrun.
 
-This is not yet complete mutation-time parity: bulk-copy/erase operation
-ordering, snapshot-aware reflow and all other metadata
-allocators still need event integration. Pressure-driven page splitting is also
+Live row edits now update style references before their cell changes. Printing,
+wide-cell cleanup, ED/EL/ECH, protected erase runs, hidden-column removal, prompt
+redraw and full/partial row shifts use explicit write/clear/move operations.
+An erased background-only cell releases its native style even when its visible
+attributes do not change. Cross-page row copies clear the entire destination run
+first, insert using preferred source IDs and retry the whole run after capacity
+growth. Within a page, whole-row shifts exchange cell-array ownership and COW
+flags without copying arrays; partial-width shifts clear the destination and move
+the source run. ICH/DCH permute style references before releasing the vacated run.
+These distinctions follow Ghostty `Page.clonePartialRowFrom`/`moveCells`,
+`Screen.clearCells` and the terminal insert/delete implementations.
+
+Clear operations group equal style IDs into one reference-count update, and a
+single reusable empty 256-cell chunk avoids repeated allocations when replacing
+the last styled cell. Untracked screens do not allocate the style tracker. Added
+tests cover identical-background erasure, protected holes, transient copy growth,
+preferred IDs, same-page moves, COW storage, chunk reuse and native capacities;
+execution and performance measurement remain pending.
+
+This is not yet complete mutation-time parity: snapshot-aware reflow, host-level
+row recycling/eviction and all other metadata allocators still need event
+integration and a complete mutation-path audit. Pressure-driven page splitting is also
 unfinished; an unrepresentable tracked style state rejects additional history
 rather than wrapping a capacity or undercharging it. A subsequent representable
 content checkpoint can recover admission. Builds, native comparisons and allocation/

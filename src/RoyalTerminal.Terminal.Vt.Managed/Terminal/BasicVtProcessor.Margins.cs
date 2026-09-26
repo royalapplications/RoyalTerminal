@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Terminal;
 
@@ -65,10 +66,21 @@ public sealed partial class BasicVtProcessor
             int source = destination + (down ? -count : count);
             TerminalRow row = _screen.GetViewportRow(destination);
             ClearPreservedCellsForMutation(row);
-            Span<TerminalCell> cells = row.Cells.Slice(_scrollLeft, width);
             if (source >= top && source <= bottom)
-                _screen.GetViewportRow(source).ReadOnlyCells.Slice(_scrollLeft, width).CopyTo(cells);
-            else cells.Fill(CreateErasedCell());
+            {
+                TerminalRow sourceRow = _screen.GetViewportRow(source);
+                using GhosttySnapshotStyleTracker.RowEdit sourceStyles = _screen.EditSnapshotRowStyles(sourceRow);
+                using GhosttySnapshotStyleTracker.RowEdit destinationStyles = _screen.EditSnapshotRowStyles(row);
+                if (destinationStyles.ShiftFrom(sourceStyles, _scrollLeft, width, wholeRow: false))
+                {
+                    Span<TerminalCell> sourceCells = sourceRow.Cells.Slice(_scrollLeft, width);
+                    Span<TerminalCell> destinationCells = row.Cells.Slice(_scrollLeft, width);
+                    sourceCells.CopyTo(destinationCells);
+                    sourceCells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
+                }
+                else sourceRow.ReadOnlyCells.Slice(_scrollLeft, width).CopyTo(row.Cells.Slice(_scrollLeft, width));
+            }
+            else EraseCells(row, _scrollLeft, width);
             // Partial-width edits retain row metadata because content outside
             // the margins (including real-edge spacer heads) stays in place.
             NormalizeRowWideCells(row);
