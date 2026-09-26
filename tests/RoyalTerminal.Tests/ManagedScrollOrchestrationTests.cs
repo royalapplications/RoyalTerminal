@@ -304,12 +304,23 @@ public sealed class ManagedScrollOrchestrationTests
         if (expected.State.TryGetHyperlink(out _)) Assert.Equal(link.ImplicitId, actualLink.ImplicitId);
         TerminalRowBuffer rows = managed.Screen.GetSnapshotRows(key)!;
         TerminalScreen owner = new(8, 1);
-        int index = 0;
+        // READY omits wholly historical pages after primary SU. Compare the
+        // resident suffix, not the first row of the managed history buffer.
+        int residentRows = 0;
+        foreach (GhosttySnapshotPage page in expected.Pages) residentRows += page.Grid.Rows;
+        int index = rows.Count - residentRows;
+        Assert.True(index >= 0);
         foreach (GhosttySnapshotPage page in expected.Pages)
         foreach (TerminalRow row in GhosttySnapshotLivePage.Decode(page, owner))
         {
+            Assert.True(row.IsWrapContinuation == rows[index].IsWrapContinuation,
+                $"Row {index}: wrap continuation expected {row.IsWrapContinuation}, actual {rows[index].IsWrapContinuation}; cursor {cursor.CursorX},{cursor.CursorY}");
             AssertRow(row, rows[index]);
-            Assert.Equal(page.Capacity, rows[index].SnapshotAllocation!.Capacity);
+            // PAGE serializes logical row count, not a grown page's unused
+            // reserved row slots. Its metadata hints remain directly comparable.
+            GhosttySnapshotPageCapacity actualCapacity = rows[index].SnapshotAllocation!.Capacity;
+            Assert.True(actualCapacity.Rows >= page.Capacity.Rows);
+            Assert.Equal(page.Capacity with { Rows = actualCapacity.Rows }, actualCapacity);
             for (int column = 0; column < 8; column++)
             {
                 int expectedToken = row.ReadOnlyCells[column].HyperlinkId;

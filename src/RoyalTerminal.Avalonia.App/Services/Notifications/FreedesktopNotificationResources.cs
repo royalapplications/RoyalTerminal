@@ -116,7 +116,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
                     if (pass == 0 && (scale != 1 || distance != 0) || pass == 1 && distance >= bestDistance) continue;
                     foreach (string root in environment.IconRoots)
                     {
-                        string path = IconFile(Path.Combine(root, theme, directory), name);
+                        string path = IconFile(LinuxDesktopPath.Combine(root, theme, directory), name);
                         if (path.Length == 0) continue;
                         if (pass == 0) return path;
                         best = path; bestDistance = distance; break;
@@ -139,7 +139,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
     {
         foreach (string extension in new[] { ".png", ".svg", ".xpm" })
         {
-            string path = Path.Combine(directory, name + extension);
+            string path = LinuxDesktopPath.Combine(directory, name + extension);
             if (Exists(path)) return path;
         }
         return string.Empty;
@@ -158,7 +158,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
             string? Entry(string relative, int offset, int depth)
             {
                 if (_remainingProbes <= 0 || depth > 8 || !IsSubdirectory(relative)) return null;
-                string path = Path.Combine(root, relative);
+                string path = LinuxDesktopPath.Combine(root, relative);
                 if (Exists(path))
                 {
                     DesktopThemeDocument document = Document(path);
@@ -167,7 +167,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
                     if (IsName(icon)) return FindIcon(icon);
                     // Absolute paths are allowed ONLY from a local desktop file,
                     // never directly from OSC fields. The daemon handles decoding.
-                    if (Path.IsPathFullyQualified(icon) && Exists(icon)) return icon;
+                    if (LinuxDesktopPath.IsAbsolute(icon) && Exists(icon)) return icon;
                     return string.Empty;
                 }
                 // Desktop file IDs flatten subdirectories using '-'. Try the
@@ -223,7 +223,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
                     string directory = directories[i];
                     if (!IsSubdirectory(directory) || document.Get(directory, "OutputProfile") != profile) continue;
                     foreach (string root in environment.SoundRoots)
-                        if (SoundFile(Path.Combine(root, theme, directory)) is { Length: > 0 } found) return found;
+                        if (SoundFile(LinuxDesktopPath.Combine(root, theme, directory)) is { Length: > 0 } found) return found;
                 }
             foreach (string parent in document.List("Sound Theme", "Inherits"))
             {
@@ -242,7 +242,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
                 foreach (string locale in locales)
                     foreach (string extension in new[] { ".disabled", ".oga", ".ogg", ".wav" })
                     {
-                        string path = Path.Combine(directory, locale, candidate + extension);
+                        string path = LinuxDesktopPath.Combine(directory, locale, candidate + extension);
                         if (Exists(path)) return path;
                     }
                 int hyphen = candidate.LastIndexOf('-');
@@ -257,7 +257,7 @@ internal sealed class FreedesktopNotificationResources(IDesktopThemeFiles files,
     {
         foreach (string root in roots)
         {
-            string path = Path.Combine(root, theme, "index.theme");
+            string path = LinuxDesktopPath.Combine(root, theme, "index.theme");
             if (_documents.TryGetValue(path, out DesktopThemeDocument? cached)) return cached;
             if (Exists(path)) return Document(path);
         }

@@ -90,7 +90,24 @@ internal sealed class TerminalNotificationMetadata
     internal static byte[]? DecodeBase64(ReadOnlySpan<byte> bytes)
     {
         // Convert's whitespace tolerance is intentionally not used for protocol input.
-        if (bytes.Length % 4 != 0) return null;
+        int remainder = bytes.Length % 4;
+        if (remainder != 0)
+        {
+            // Kitty OSC 99 explicitly permits an unpadded final base64 chunk.
+            // Reject partial padding and impossible single-character groups.
+            if (remainder == 1 || bytes.Contains((byte)'=')) return null;
+            int paddedLength = checked(bytes.Length + 4 - remainder);
+            byte[]? rented = null;
+            Span<byte> padded = paddedLength <= 256 ? stackalloc byte[paddedLength]
+                : (rented = ArrayPool<byte>.Shared.Rent(paddedLength)).AsSpan(0, paddedLength);
+            try
+            {
+                bytes.CopyTo(padded);
+                padded[bytes.Length..].Fill((byte)'=');
+                return DecodeBase64(padded);
+            }
+            finally { if (rented is not null) ArrayPool<byte>.Shared.Return(rented); }
+        }
         foreach (byte b in bytes)
             if (!(b is >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z' or
                 >= (byte)'0' and <= (byte)'9' or (byte)'+' or (byte)'/' or (byte)'=')) return null;

@@ -261,6 +261,7 @@ public sealed partial class ManagedSnapshotPageSplitTests
     {
         TerminalScreen owner = new(columns, count);
         TerminalScreen screen = TerminalScreen.CreateSnapshotStorage(columns, count, 100, owner.Theme);
+        screen.SnapshotScrollbackQuota = new() { PageAlignment = 4096 };
         page = PressurePage(columns);
         TerminalRow[] rows = Rows(count, page).ToArray();
         foreach (TerminalRow row in rows) row.SnapshotAllocationUnmodified = true;

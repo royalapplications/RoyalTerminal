@@ -2239,6 +2239,11 @@ public sealed partial class TerminalScreen
             }
         }
 
+        // Reflow accounts its output before viewport padding is appended.
+        // Padding also occupies native page slots, even with unlimited quotas
+        // and before the cursor next visits those rows.
+        if (TracksSnapshotMetadata && HasNativeSnapshotGeometry)
+            _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, SnapshotPageLayout());
         removedRows += RemoveSnapshotQuotaRows(GhosttySnapshotQuotaCheckpoint.Resize);
 
         if (mappedAbsoluteRow >= 0)

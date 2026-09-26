@@ -170,7 +170,9 @@ public sealed class KittyAnimationSchedulingParityTests
         session.StartTwoFrames(run: false);
         List<byte[]> observed = [];
         session.Processor.ModeChanged += (_, _) => observed.Add(session.Image().RgbaPixels.ToArray());
-        session.Write(Session.Wire("a=a,i=1,s=3") + "\u001b[?1004h");
+        // Bracketed paste belongs to TerminalModeState; focus reporting is a
+        // separate capability and does not publish ModeChanged.
+        session.Write(Session.Wire("a=a,i=1,s=3") + "\u001b[?2004h");
         Assert.Equal(new byte[] { 0, 0, 255, 255 }, Assert.Single(observed));
     }
 

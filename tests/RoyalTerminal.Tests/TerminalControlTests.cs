@@ -5105,6 +5105,9 @@ public class TerminalControlTests
             [new TerminalSearchMatch(18, 0, 5)]) { SearchStatus = TerminalSearchStatus.Failed };
         TerminalControl control = CreateControlWithTransport(new FakeTransport(),
             new SingleProcessorFactory(processor), VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
         control.StartSearch("needle");
         Assert.Equal(1, control.SearchTotal);
         Assert.True(processor.SynchronousSearchCount > 0);

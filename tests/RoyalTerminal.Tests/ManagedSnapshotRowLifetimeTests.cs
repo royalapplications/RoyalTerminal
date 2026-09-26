@@ -61,7 +61,8 @@ public sealed class ManagedSnapshotRowLifetimeTests
         TerminalScreen retained = screen.CreateStateCopy();
         TerminalRow recycled = screen.AddRow();
         Assert.Same(oldHead, recycled);
-        Assert.Null(recycled.SnapshotAllocation);
+        Assert.NotSame(page, recycled.SnapshotAllocation);
+        Assert.Equal(0, recycled.SnapshotAllocationRow);
         Assert.Equal(0, recycled.ReadOnlyCells[0].Codepoint);
         WriteStyle(screen, survivor, 1, CellAttributes.Dim);
         Assert.Equal(4, Capacity(survivor));

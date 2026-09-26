@@ -67,7 +67,9 @@ public sealed class ManagedSnapshotMetadataFailureTests
         TerminalScreen screen = Screen(8, 4096, CeilingCapacity(GhosttySnapshotCapacityDimension.GraphemeBytes));
         TerminalRow row = screen.GetViewportRow(0);
         for (int i = 0; i < 4; i++) SetGrapheme(row, i, 64);
-        row[4].Codepoint = narrow ? 0x1F600 : 0x2764;
+        // Heart accepts both text and emoji variation selectors. U+1F600 is
+        // not a Unicode emoji-variation-sequence base and ignores VS15.
+        row[4].Codepoint = 0x2764;
         row[4].Width = narrow ? (byte)2 : (byte)1;
         row[5].Codepoint = narrow ? 0 : 'T';
         row[5].Width = narrow ? (byte)0 : (byte)1;
@@ -106,12 +108,17 @@ public sealed class ManagedSnapshotMetadataFailureTests
         string mark = supplementary ? "\U0001D185" : "\u0301";
         string prefix = "\u263a" + string.Concat(Enumerable.Repeat(mark, 62)) + "\u200d";
         Process(processor, "\u001b[?2027h\u001b[1;8H" + prefix);
+        // Observe the host-authored destination before publishing its COW
+        // state; usage queries intentionally do not mutate/reconcile rows.
+        using (screen.EditSnapshotRowMetadata(destination)) { }
         TerminalScreen retained = screen.CreateStateCopy();
         TerminalCell tail = destination.ReadOnlyCells[1];
 
         Process(processor, (remapped ? "\u001b(0" : "") + "\u2764");
 
-        Assert.Equal((remapped ? " " : "\u263a") + string.Concat(Enumerable.Repeat(mark, 60)), destination.ReadOnlyCells[0].Grapheme);
+        // First-fit replacement scratch fragments the free bitmap suffix;
+        // the 49th scalar cannot reserve 13 contiguous chunks before freeing 12.
+        Assert.Equal((remapped ? " " : "\u263a") + string.Concat(Enumerable.Repeat(mark, 48)), destination.ReadOnlyCells[0].Grapheme);
         Assert.Equal(remapped ? ' ' : 0x263A, destination.ReadOnlyCells[0].Codepoint);
         Assert.Equal((byte)2, destination.ReadOnlyCells[0].Width);
         Assert.Equal(tail.Grapheme, destination.ReadOnlyCells[1].Grapheme);
@@ -124,7 +131,7 @@ public sealed class ManagedSnapshotMetadataFailureTests
         Assert.False(source.SnapshotAllocation!.MetadataOverflow);
         Assert.False(destination.SnapshotAllocation!.MetadataOverflow);
         Assert.Equal((1UL, 256UL), GraphemeUsage(screen, source));
-        Assert.Equal((4UL, 784UL), GraphemeUsage(screen, destination));
+        Assert.Equal((4UL, 736UL), GraphemeUsage(screen, destination));
         Assert.Equal((3UL, 544UL), GraphemeUsage(retained, retained.GetViewportRow(1)));
         Assert.Equal(prefix, retained.GetViewportRow(0).ReadOnlyCells[7].Grapheme);
 

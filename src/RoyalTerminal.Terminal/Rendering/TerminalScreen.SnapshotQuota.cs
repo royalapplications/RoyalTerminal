@@ -41,7 +41,7 @@ public sealed partial class TerminalScreen
     // Return the prefix count so the caller adjusts anchors exactly once.
     private int RemoveSnapshotQuotaRowsAfterGrowth()
     {
-        if (!HasFiniteSnapshotQuota || _rows.Count < 2 || !HasNativeSnapshotGeometry) return 0;
+        if (!TracksSnapshotMetadata || _rows.Count < 2 || !HasNativeSnapshotGeometry) return 0;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         TerminalRow tail = _rows[_rows.Count - 1];
         if (tail.SnapshotAllocation is null && !(_snapshotPageTracker ??= new()).AssignTailRow(_rows, _rows.Count - 1, layout))

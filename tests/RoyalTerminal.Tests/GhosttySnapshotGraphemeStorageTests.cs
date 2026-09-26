@@ -102,7 +102,9 @@ public sealed class GhosttySnapshotGraphemeStorageTests
         Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, storage.AppendToLength(1, 64));
         Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, storage.AppendToLength(2, 8));
         Assert.Equal(GhosttySnapshotGraphemeAddResult.AllocatorFull, storage.AppendToLength(3, 61));
-        Assert.Equal(60, storage.SuffixLength(3));
+        // Earlier append/replacement cycles fragmented the first-fit bitmap.
+        // Total free bytes are insufficient evidence of a contiguous slice.
+        Assert.Equal(36, storage.SuffixLength(3));
         storage.Clear(3);
         Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, storage.Set(3, 61));
         Assert.Equal(61, storage.SuffixLength(3));

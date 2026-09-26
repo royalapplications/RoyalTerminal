@@ -160,7 +160,10 @@ public sealed class GhosttySnapshotMetadataGrowthTests
         {
             0 => "\u001b[1mA\u001b[0m",
             1 => "A" + new string('\u0301', 64),
-            _ => "\u001b]8;id=one;https://example.com/" + new string('x', 3000) + "\u001b\\A\u001b]8;;\u001b\\",
+            // Each OSC 8 must fit native's 2048-byte parser limit. Two
+            // distinct live links exercise string growth past 2048 bytes.
+            _ => "\u001b]8;id=one;" + new string('x', 1000) + "\u001b\\A\u001b]8;;\u001b\\" +
+                "\u001b]8;id=two;" + new string('x', 1000) + "\u001b\\B\u001b]8;;\u001b\\",
         });
         foreach (bool fits in new[] { false, true })
         {

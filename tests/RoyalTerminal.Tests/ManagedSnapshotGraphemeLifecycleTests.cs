@@ -23,7 +23,7 @@ public sealed class ManagedSnapshotGraphemeLifecycleTests
         using BasicVtProcessor processor = new(screen);
         Process(processor, "A\u0301");
         TerminalRow row = screen.GetViewportRow(0);
-        Assert.Equal(8192U, row.SnapshotAllocation!.Capacity.GraphemeBytes);
+        Assert.Equal(1024U, row.SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal((1UL, 16UL), Usage(screen, row));
         TerminalScreen retained = screen.CreateStateCopy();
         Process(processor, new string('\u0301', 4));
@@ -31,7 +31,7 @@ public sealed class ManagedSnapshotGraphemeLifecycleTests
         Assert.Equal((1UL, 16UL), Usage(retained, retained.GetViewportRow(0)));
         Process(processor, "\u001b[1;1HX");
         Assert.Equal((0UL, 0UL), Usage(screen, row));
-        Assert.Equal(8192U, row.SnapshotAllocation!.Capacity.GraphemeBytes);
+        Assert.Equal(1024U, row.SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal("A\u0301", retained.GetViewportRow(0).ReadOnlyCells[0].Grapheme);
     }
 
@@ -101,7 +101,7 @@ public sealed class ManagedSnapshotGraphemeLifecycleTests
         Process(processor, "\u001bM");
         Assert.Equal((0UL, 0UL), Usage(screen, rows[0]));
         Assert.Equal((1UL, 32UL), Usage(screen, rows[1]));
-        Assert.Equal(8192U, rows[1].SnapshotAllocation!.Capacity.GraphemeBytes);
+        Assert.Equal(1024U, rows[1].SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal("A" + new string('\u0301', 5), rows[1].ReadOnlyCells[0].Grapheme);
         Assert.Equal((1UL, 32UL), Usage(retained, retained.GetViewportRow(0)));
         Assert.Equal(0U, retained.GetViewportRow(1).SnapshotAllocation!.Capacity.GraphemeBytes);
@@ -135,6 +135,9 @@ public sealed class ManagedSnapshotGraphemeLifecycleTests
         // A host row can lack a normalized tail. Reflow synthesizes its payload.
         row[1].Codepoint = 'X'; row[1].Width = 1;
         screen.Resize(4, 2);
+        // Direct host resize pads a new blank row. Reconcile that host-owned
+        // row before asking the non-mutating exact-usage diagnostic.
+        using (screen.EditSnapshotRowMetadata(screen.GetViewportRow(1))) { }
         TerminalRow result = screen.GetSnapshotRows(0)![0];
         Assert.Equal((1UL, 16UL), Usage(screen, result));
         Assert.Null(result.ReadOnlyCells[1].Grapheme);

@@ -88,10 +88,18 @@ public sealed partial class BasicVtProcessor
                     sourceCells.CopyTo(destinationCells);
                     sourceCells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
                 }
-                else sourceRow.ReadOnlyCells.Slice(_scrollLeft, width).CopyTo(row.Cells.Slice(_scrollLeft, width));
+                else
+                {
+                    sourceRow.ReadOnlyCells.Slice(_scrollLeft, width).CopyTo(row.Cells.Slice(_scrollLeft, width));
+                    // Ghostty's cross-page clonePartialRowFrom copies semantic
+                    // prompt metadata even for a partial-width clone. Its
+                    // same-page moveCells path retains destination metadata.
+                    if (sourceRow.SnapshotAllocation is not null && row.SnapshotAllocation is not null)
+                        row.SemanticPrompt = sourceRow.SemanticPrompt;
+                }
             }
             else EraseCells(row, _scrollLeft, width);
-            // Partial-width edits retain row metadata because content outside
+            // Partial-width edits retain wrap metadata because content outside
             // the margins (including real-edge spacer heads) stays in place.
             NormalizeRowWideCells(row);
             row.IsDirty = true;

@@ -12,8 +12,8 @@ internal sealed class LinuxDesktopThemeEnvironment(IDesktopThemeFiles files,
     internal DesktopThemeEnvironment Read()
     {
         string home = Absolute(environment("HOME"), string.Empty);
-        string dataHome = Absolute(environment("XDG_DATA_HOME"), home.Length > 0 ? Path.Combine(home, ".local/share") : string.Empty);
-        string configHome = Absolute(environment("XDG_CONFIG_HOME"), home.Length > 0 ? Path.Combine(home, ".config") : string.Empty);
+        string dataHome = Absolute(environment("XDG_DATA_HOME"), home.Length > 0 ? LinuxDesktopPath.Combine(home, ".local/share") : string.Empty);
+        string configHome = Absolute(environment("XDG_CONFIG_HOME"), home.Length > 0 ? LinuxDesktopPath.Combine(home, ".config") : string.Empty);
         List<string> data = Roots(dataHome, environment("XDG_DATA_DIRS"), "/usr/local/share:/usr/share");
         List<string> configs = Roots(configHome, environment("XDG_CONFIG_DIRS"), "/etc/xdg");
         string desktop = environment("XDG_CURRENT_DESKTOP") ?? string.Empty;
@@ -33,10 +33,10 @@ internal sealed class LinuxDesktopThemeEnvironment(IDesktopThemeFiles files,
         string sound = schema is null ? string.Empty : settings(schema + ".sound", "theme-name") ?? string.Empty;
         if (sound.Length == 0) sound = Config(configs, "gtk-3.0/settings.ini", "Settings", "gtk-sound-theme-name");
         List<string> icons = new();
-        if (home.Length > 0) icons.Add(Path.Combine(home, ".icons"));
+        if (home.Length > 0) icons.Add(LinuxDesktopPath.Combine(home, ".icons"));
         List<string> sounds = new(), applications = new();
         foreach (string root in data)
-        { icons.Add(Path.Combine(root, "icons")); sounds.Add(Path.Combine(root, "sounds")); applications.Add(Path.Combine(root, "applications")); }
+        { icons.Add(LinuxDesktopPath.Combine(root, "icons")); sounds.Add(LinuxDesktopPath.Combine(root, "sounds")); applications.Add(LinuxDesktopPath.Combine(root, "applications")); }
         icons.Add("/usr/share/pixmaps");
         string locale = environment("LC_ALL") ?? string.Empty;
         if (locale.Length == 0) locale = environment("LC_MESSAGES") ?? string.Empty;
@@ -50,7 +50,7 @@ internal sealed class LinuxDesktopThemeEnvironment(IDesktopThemeFiles files,
     {
         foreach (string root in roots)
         {
-            string value = new DesktopThemeDocument(files.ReadText(Path.Combine(root, relative))).Get(section, key).Trim('"');
+            string value = new DesktopThemeDocument(files.ReadText(LinuxDesktopPath.Combine(root, relative))).Get(section, key).Trim('"');
             if (FreedesktopNotificationResources.IsName(value)) return value;
         }
         return string.Empty;
@@ -61,10 +61,10 @@ internal sealed class LinuxDesktopThemeEnvironment(IDesktopThemeFiles files,
         List<string> roots = new();
         if (first.Length > 0) roots.Add(first);
         foreach (string root in (string.IsNullOrEmpty(value) ? fallback : value).Split(':'))
-            if (roots.Count < 32 && Path.IsPathFullyQualified(root) && !roots.Contains(root, StringComparer.Ordinal)) roots.Add(root);
+            if (roots.Count < 32 && LinuxDesktopPath.IsAbsolute(root) && !roots.Contains(root, StringComparer.Ordinal)) roots.Add(root);
         return roots;
     }
 
     private static string Absolute(string? value, string fallback)
-        => !string.IsNullOrEmpty(value) && Path.IsPathFullyQualified(value) ? value : fallback;
+        => !string.IsNullOrEmpty(value) && LinuxDesktopPath.IsAbsolute(value) ? value : fallback;
 }

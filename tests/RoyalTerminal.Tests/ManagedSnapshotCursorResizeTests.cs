@@ -255,12 +255,13 @@ public sealed class ManagedSnapshotCursorResizeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void RepeatedResizeCursorStateAndCapacityMatchNativeForBothBuffers(bool alternateVisible)
+    public void RepeatedResizeCursorStateMatchesNativeWithoutRetainingOrphanedHyperlinks(bool alternateVisible)
     {
         RequireNative();
         byte[] snapshot = BothCursorSnapshot(alternateVisible);
         using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
         using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(snapshot);
+        bool nativeRetainedOrphan = false;
         foreach ((ushort columns, ushort rows) in new (ushort, ushort)[] { (8, 3), (16, 3), (8, 2), (8, 4), (4, 2) })
         {
             native.Resize(columns, rows);
@@ -281,9 +282,27 @@ public sealed class ManagedSnapshotCursorResizeTests
                 Assert.True(expectedLink.Uri.SequenceEqual(actualLink.Uri));
                 TerminalRowBuffer buffer = managed.Screen.GetSnapshotRows(state.Key)!;
                 TerminalRow cursor = buffer[buffer.Count - rows + state.CursorY];
-                GhosttySnapshotPageCapacity expectedCapacity = CursorPage(reference, rows).Capacity;
+                GhosttySnapshotPage nativePage = CursorPage(reference, rows);
+                GhosttySnapshotPageCapacity expectedCapacity = nativePage.Capacity;
                 Assert.Equal(expectedCapacity.Styles, cursor.SnapshotAllocation!.Capacity.Styles);
-                Assert.Equal(expectedCapacity.HyperlinkBytes, cursor.SnapshotAllocation.Capacity.HyperlinkBytes);
+                // Pinned Screen.resize saves node.serial, but eraseHistory's
+                // partial-row removal changes it without replacing storage.
+                // The native temporary link then survives the 8x2 shrink and
+                // forces growth on the next resize. Do not reproduce that leak:
+                // allocator identity, rather than row-layout identity, owns
+                // the managed temporary reference. Keep the divergence narrow
+                // and assert both implementations' exact state/capacity below.
+                if (state.Key == 1 && rows == 2)
+                {
+                    Assert.Equal(2, nativePage.HyperlinkCount);
+                    nativeRetainedOrphan = true;
+                }
+                else Assert.Equal(1, nativePage.HyperlinkCount);
+                Assert.Equal(1UL, Usage(managed.Screen, cursor, state.Key).Links);
+                Assert.Equal((ushort)192, cursor.SnapshotAllocation.Capacity.HyperlinkBytes);
+                bool afterNativeGrowth = state.Key == 1 && nativeRetainedOrphan &&
+                    (columns, rows) is (8, 4) or (4, 2);
+                Assert.Equal((ushort)(afterNativeGrowth ? 384 : 192), expectedCapacity.HyperlinkBytes);
                 Assert.Equal(expectedCapacity.StringBytes, cursor.SnapshotAllocation.Capacity.StringBytes);
             }
         }

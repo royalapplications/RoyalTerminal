@@ -58,14 +58,16 @@ public sealed class ManagedRichTextFormatterTests
     {
         using BasicVtProcessor processor = new(new(8, 4));
         processor.Process("\u001b[44mA\u001b[0m\r\n\r\n  B"u8);
-        Assert.True(processor.TryExportSnapshot(TerminalSnapshotExportFormat.StyledVt, new(), out string snapshot));
-        Assert.Contains("\u001b[0m\r\n\r\n  ", snapshot);
+        Assert.True(processor.TryExportSnapshot(TerminalSnapshotExportFormat.StyledVt,
+            new(Extras: new(IncludeStyle: true)), out string snapshot));
+        Assert.Contains("\u001b[0m\r\n\r\n", snapshot);
         foreach (bool native in new[] { false, true })
         {
             if (native && !GhosttyVtProcessor.IsAvailable()) continue;
             TerminalScreen screen = new(8, 4);
             using IVtProcessor replay = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
             replay.Process(Encoding.UTF8.GetBytes(snapshot));
+            Assert.Equal(TerminalColorIdentity.Palette(4), screen.GetRow(0).ReadOnlyCells[0].BackgroundIdentity);
             Assert.Equal(default, screen.GetRow(2).ReadOnlyCells[0].BackgroundIdentity);
             Assert.Equal((int)'B', screen.GetRow(2).ReadOnlyCells[2].Codepoint);
         }

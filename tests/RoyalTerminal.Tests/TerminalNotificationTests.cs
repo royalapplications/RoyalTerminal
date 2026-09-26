@@ -274,6 +274,21 @@ public sealed class TerminalNotificationTests
         Assert.Null(TerminalNotificationMetadata.DecodeBase64("Q==="u8));
     }
 
+    [Theory]
+    [InlineData("QQ", "A")]
+    [InlineData("QQ==", "A")]
+    [InlineData("QUI", "AB")]
+    [InlineData("QUI=", "AB")]
+    [InlineData("QUJD", "ABC")]
+    [InlineData("Q", null)]
+    [InlineData("QQ=", null)]
+    [InlineData("Q Q", null)]
+    public void Base64AcceptsOptionalFinalPaddingButNotMalformedGroups(string encoded, string? expected)
+    {
+        byte[]? decoded = TerminalNotificationMetadata.DecodeBase64(Encoding.ASCII.GetBytes(encoded));
+        Assert.Equal(expected, decoded is null ? null : Encoding.UTF8.GetString(decoded));
+    }
+
     [Fact]
     public void QuotasAndPendingResetAreBounded()
     {

@@ -143,6 +143,7 @@ public sealed partial class ManagedSnapshotPageSplitTests
     {
         TerminalScreen owner = new(1024, 4);
         TerminalScreen screen = TerminalScreen.CreateSnapshotStorage(1024, 4, 100, owner.Theme);
+        screen.SnapshotScrollbackQuota = new() { PageAlignment = 4096 };
         GhosttySnapshotPageAllocation pressure = PressurePage(1024);
         TerminalRow[] primary = Rows(4, new(new(1024, 4, 16, 192, 1024, 2048))).ToArray();
         TerminalRow[] alternate = Rows(4, pressure).ToArray();
