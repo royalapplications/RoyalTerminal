@@ -192,6 +192,7 @@ public readonly record struct TerminalHighlightSpan(
 public sealed class TerminalRow
 {
     internal RoyalTerminal.Terminal.Snapshots.GhosttySnapshotPageAllocation? SnapshotAllocation { get; set; }
+    internal int SnapshotAllocationRow { get; set; }
     internal bool SnapshotAllocationUnmodified { get; set; }
     private TerminalCell[] _cells;
     private int _columns;
@@ -279,6 +280,7 @@ public sealed class TerminalRow
     private TerminalRow(TerminalRow source)
     {
         SnapshotAllocation = source.SnapshotAllocation;
+        SnapshotAllocationRow = source.SnapshotAllocationRow;
         SnapshotAllocationUnmodified = source.SnapshotAllocationUnmodified;
         _cells = source._cells;
         _columns = source._columns;
@@ -1312,6 +1314,10 @@ public sealed partial class TerminalScreen
             // row. Clearing all metadata prevents stale wrap/resize state.
             row = _rows[0];
             _rows.RemoveFirst(Math.Min(removedRows, _rows.Count));
+            // Reusing the CLR array is not retaining the historical native page.
+            // Admission assigns the recycled row to the new tail's capacity.
+            row.SnapshotAllocation = null;
+            row.SnapshotAllocationRow = 0;
             row.Resize(Columns, DefaultForeground, DefaultBackground);
             row.Clear(DefaultForeground, DefaultBackground);
         }

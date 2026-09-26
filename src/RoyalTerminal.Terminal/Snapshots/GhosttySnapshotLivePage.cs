@@ -81,6 +81,7 @@ internal static class GhosttySnapshotLivePage
                 row[column] = cell;
             }
             row.SnapshotAllocation = allocation;
+            row.SnapshotAllocationRow = rowIndex;
             row.SnapshotAllocationUnmodified = true;
             rows[rowIndex] = row;
         }

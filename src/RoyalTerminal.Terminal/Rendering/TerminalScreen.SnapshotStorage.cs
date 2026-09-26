@@ -31,6 +31,7 @@ public sealed partial class TerminalScreen
         ulong bytes = quota.MaximumBytes.HasValue
             ? GhosttySnapshotLiveAllocation.Add(GhosttySnapshotLiveAllocation.Measure(this, rows, allocation), allocation.AllocatedBytes(page.Capacity))
             : 0;
+        if (bytes == ulong.MaxValue) return false; // Unrepresentable live capacity must not fit an explicit ulong.MaxValue budget.
         return allocation.Fits(Columns, ViewportRows, bytes, (ulong)rows.Count + (ulong)page.Grid.Rows,
             quota.MaximumBytes, quota.MaximumRows);
     }

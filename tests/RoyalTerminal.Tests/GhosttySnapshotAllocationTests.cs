@@ -49,6 +49,31 @@ public sealed class GhosttySnapshotAllocationTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData(4096)]
+    [InlineData(16384)]
+    public void ColumnAdjustmentRetainsLayoutInsteadOfBorrowingPoolSlack(int alignment)
+    {
+        GhosttySnapshotAllocation allocation = new(alignment);
+        GhosttySnapshotPageCapacity tiny = new(2, 2, 0, 0, 0, 0);
+        Assert.True(allocation.TryAdjustColumns(tiny, 1, out GhosttySnapshotPageCapacity narrow));
+        Assert.Equal(allocation.LayoutBytes(tiny), allocation.LayoutBytes(narrow));
+        Assert.True(narrow.Rows < allocation.InitialRows(1));
+        Assert.False(allocation.TryAdjustColumns(tiny, 65535, out _));
+        foreach (int columns in new[] { 1, 80, 132, 215, 1000, 65535 })
+        {
+            GhosttySnapshotPageCapacity capacity = allocation.InitialCapacity(columns);
+            Assert.Equal(columns, capacity.Columns);
+            Assert.Equal(allocation.InitialRows(columns), capacity.Rows);
+            Assert.Equal((ushort)128, capacity.Styles);
+            Assert.Equal((ushort)192, capacity.HyperlinkBytes);
+            Assert.Equal(8192U, capacity.GraphemeBytes);
+            Assert.Equal(2048U, capacity.StringBytes);
+        }
+        Assert.Throws<ArgumentOutOfRangeException>(() => allocation.TryAdjustColumns(tiny, 0, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(() => allocation.TryAdjustColumns(tiny, 65536, out _));
+    }
+
+    [Theory]
     [InlineData(0U, 0U, (ushort)0, (ushort)0)]
     [InlineData(1000000U, 0U, (ushort)0, (ushort)0)]
     [InlineData(0U, 1000000U, (ushort)0, (ushort)0)]

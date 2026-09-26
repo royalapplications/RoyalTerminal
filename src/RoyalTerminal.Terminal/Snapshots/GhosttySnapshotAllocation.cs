@@ -50,20 +50,33 @@ internal sealed class GhosttySnapshotAllocation
         return Align(metaStart + MetadataBytes(capacity), _pageAlignment);
     }
 
-    internal int InitialRows(int columns)
+    internal int InitialRows(int columns) => InitialCapacity(columns).Rows;
+
+    internal GhosttySnapshotPageCapacity InitialCapacity(int columns)
     {
         if (columns is <= 0 or > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(columns));
-        GhosttySnapshotPageCapacity standard = StandardCapacity;
-        ulong available = StandardPageBytes - MetadataBytes(standard);
-        int rows = checked((int)(available / ((ulong)columns * 8 + 8)));
+        return TryAdjustColumns(StandardCapacity, columns, out GhosttySnapshotPageCapacity adjusted)
+            ? adjusted : StandardCapacity with { Columns = (ushort)columns };
+    }
+
+    // Page.Capacity.adjust retains the layout's size, not its pooled allocation
+    // charge. Small restored/compacted pages must not acquire the pool's spare
+    // bytes when their grid is adjusted during reflow.
+    internal bool TryAdjustColumns(GhosttySnapshotPageCapacity capacity, int columns,
+        out GhosttySnapshotPageCapacity adjusted)
+    {
+        if (columns is <= 0 or > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(columns));
+        ulong total = LayoutBytes(capacity);
+        ulong available = total - MetadataBytes(capacity);
+        int rows = (int)Math.Min(ushort.MaxValue, available / ((ulong)columns * 8 + 8));
         while (rows > 0)
         {
-            if (LayoutBytes(standard with { Columns = (ushort)columns, Rows = checked((ushort)rows) }) <= StandardPageBytes) return rows;
+            adjusted = capacity with { Columns = (ushort)columns, Rows = (ushort)rows };
+            if (LayoutBytes(adjusted) <= total) return true;
             rows--;
         }
-        // Upstream initialCapacity falls back to the unadjusted standard row
-        // count with the requested columns when even one row cannot fit.
-        return standard.Rows;
+        adjusted = default;
+        return false;
     }
 
     internal (ulong Bytes, ulong Rows) MinimumLimits(int columns, int rows)

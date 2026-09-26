@@ -13,6 +13,28 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Snapshot history accounting
+
+Incremental history admission measures logical Ghostty page bytes, not CLR heap
+usage. Restored PAGE capacities are retained, including after partial pruning.
+New live rows are assigned standard pages using their physical width and native
+metadata defaults; subsequent admission checks reuse unoccupied tail slots rather
+than charging another page. Slot identities survive COW and row rotations.
+Recycling a CLR row after scrollback eviction releases its historical page identity.
+
+Content-derived capacity growth observed at an admission checkpoint is retained
+through later erases. An immutable replacement identity updates only the live row
+set, so synchronized-output and search copies retain their own charges. A page's
+charge disappears only when its last row leaves that view. These rules follow
+Ghostty `PageList.grow` and page replacement ownership; Windows Terminal and xterm.js
+use row-oriented storage and do not define this snapshot budget. The managed hard
+scrollback row cap remains independent of the logical native-page budget.
+
+This is not yet exact mutable allocator parity: transient allocations between
+checkpoints, native metadata growth/projection and reflow page reconstruction still
+need event-level accounting. Boundary, COW, recycling and native admission comparison
+tests cover this implementation; execution is pending the full validation phase.
+
 ## Font thickening
 
 `TerminalControl.FontThicken` enables macOS CoreText font smoothing for terminal
