@@ -24,6 +24,19 @@ internal sealed class ManagedKittyAnimation
         _frames = [new(root, 0)];
     }
 
+    private ManagedKittyAnimation(ManagedKittyAnimation source)
+    {
+        _frames = new(source._frames);
+        _currentIndex = source._currentIndex;
+        _state = source._state;
+        _maximumLoops = source._maximumLoops;
+        _currentLoop = source._currentLoop;
+        _frameShownAtMilliseconds = source._frameShownAtMilliseconds;
+        _durationMilliseconds = source._durationMilliseconds;
+    }
+
+    internal ManagedKittyAnimation CreateStateCopy() => new(this);
+
     internal KittyGraphicsDecodedImage RootImage => _frames[0].Image.GetRgbaImage();
     internal KittyGraphicsDecodedImage CurrentImage => CurrentPixels.GetRgbaImage();
     internal ManagedKittyImagePixels CurrentPixels => _frames[_currentIndex].Image;

@@ -26,6 +26,29 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     internal uint LoadingImageId { get; set; }
     internal ulong LoadingTargetGeneration { get; set; }
 
+    // Resize ticks animations and retires pruned placements before publication.
+    // Fork their mutable ownership; loaders and frame pixels are not edited by
+    // resize. No image bytes are copied, including incomplete chunked transfers.
+    internal ManagedKittyGraphicsStore CreateStateCopy()
+    {
+        ManagedKittyGraphicsStore copy = new(byteLimit)
+        {
+            _nextImageId = _nextImageId,
+            _nextInternalPlacementId = _nextInternalPlacementId,
+            _generation = _generation,
+            _storedBytes = _storedBytes,
+            Loading = Loading,
+            LoadingImageId = LoadingImageId,
+            LoadingTargetGeneration = LoadingTargetGeneration,
+        };
+        foreach ((uint id, Image image) in _images) copy._images.Add(id, image.CreateStateCopy());
+        foreach ((PlacementKey key, Placement placement) in _placements)
+            copy._placements.Add(key, new(placement.Anchor, placement.Parent, placement.Virtual,
+                placement.HorizontalOffset, placement.VerticalOffset, placement.Options));
+        copy._marginScrollRestores.AddRange(_marginScrollRestores);
+        return copy;
+    }
+
     internal Image? Find(uint id, uint number = 0)
     {
         if (id != 0) return _images.GetValueOrDefault(id);
@@ -256,17 +279,24 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         return true;
     }
 
-    internal sealed class Image(uint id, uint number, ManagedKittyImagePixels decoded, long quotaBytes, bool transient, ulong generation)
+    internal sealed class Image(uint id, uint number, ManagedKittyImagePixels decoded, long quotaBytes, bool transient, ulong generation,
+        ManagedKittyAnimation? animation = null)
     {
         private KittyGraphicsDecodedImage? _published;
         private TerminalKittyImageSource? _source;
         internal uint Id { get; } = id;
         internal uint Number { get; } = number;
         internal ulong Generation { get; set; } = generation;
-        internal ManagedKittyAnimation Animation { get; } = new(decoded);
+        internal ManagedKittyAnimation Animation { get; } = animation ?? new(decoded);
         internal long QuotaBytes { get; set; } = quotaBytes;
         internal int PlacementCount { get; set; }
         internal int EvictionPriority => (transient ? 0 : 1) + (PlacementCount > 0 ? 2 : 0);
+        internal Image CreateStateCopy() => new(Id, Number, Animation.CurrentPixels, QuotaBytes, transient, Generation, Animation.CreateStateCopy())
+        {
+            PlacementCount = PlacementCount,
+            _published = _published,
+            _source = _source,
+        };
         internal TerminalKittyImageSource Source
         {
             get

@@ -127,7 +127,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private TerminalTheme _theme;
     private readonly ManagedTerminalColors _colors;
     private readonly ManagedVtContinuation _continuation;
-    private readonly ManagedKittyGraphicsStore _primaryKittyStore;
+    private ManagedKittyGraphicsStore _primaryKittyStore;
     private ManagedKittyGraphicsStore? _alternateKittyStore;
     private ManagedKittyGraphicsStore _kittyStore;
 
@@ -193,7 +193,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private readonly ManagedMouseEncoder _mouseEncoder = new();
 
     // Tab stops
-    private readonly HashSet<int> _tabStops = [];
+    private HashSet<int> _tabStops = [];
 
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
@@ -3554,17 +3554,22 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void EmitInBandSizeReport()
     {
-        if (!_extendedDecModesEnabled.Contains(2048) ||
+        if (CreateInBandSizeReport() is { } response) ResponseCallback?.Invoke(response);
+    }
+
+    private byte[]? CreateInBandSizeReport()
+    {
+        if (ResponseCallback is null || !_extendedDecModesEnabled.Contains(2048) ||
             _screen.Columns <= 0 ||
             _screen.ViewportRows <= 0)
         {
-            return;
+            return null;
         }
 
         long reportWidth = (long)_screen.Columns * _reportCellWidthPx;
         long reportHeight = (long)_screen.ViewportRows * _reportCellHeightPx;
         string response = $"\x1b[48;{_screen.ViewportRows};{_screen.Columns};{reportHeight};{reportWidth}t";
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
+        return Encoding.ASCII.GetBytes(response);
     }
 
     private void HandleDecModeQuery()
@@ -4786,41 +4791,33 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <summary>
     /// Notify the processor that the screen has been resized.
     /// Updates the scroll region to match the new dimensions.
+    /// Processor-owned updates are transactional; a preceding host-owned screen resize is not undone on failure.
     /// </summary>
     public void NotifyResize(int columns, int rows)
-    {
-        _mouseEncoder.ResetMotion();
-        if (EndRenderHold())
-        {
-            SetExtendedDecMode(2026, false);
-            _screen.Resize(columns, rows, reflowOnResize: !_inAltScreen);
-        }
-        ApplyResizeState(columns, rows);
-        if (AdvanceKittyAnimations() || _kittyStore.PlacementCount > 0) PublishKittyGraphics();
-    }
+        => ResizeScreenCore(columns, rows, _widthPx, _heightPx, !_inAltScreen,
+            Span<TerminalGridPosition>.Empty, false, reportSize: false, notifyOnly: true);
 
     /// <summary>
     /// Notify the processor that the screen has been resized with pixel dimensions.
     /// Pixel dimensions are used to answer CSI 14t/16t size reports.
+    /// Size responses are delivered after committing processor state; response callback failures do not undo it.
     /// </summary>
     public void NotifyResize(int columns, int rows, int widthPx, int heightPx)
-    {
-        _widthPx = (uint)Math.Max(0, widthPx);
-        _heightPx = (uint)Math.Max(0, heightPx);
-        UpdateReportCellSize(columns, rows, _widthPx, _heightPx);
-        NotifyResize(columns, rows);
-        EmitInBandSizeReport();
-    }
+        => ResizeScreenCore(columns, rows, (uint)Math.Max(0, widthPx), (uint)Math.Max(0, heightPx), !_inAltScreen,
+            Span<TerminalGridPosition>.Empty, false, reportSize: true, notifyOnly: true);
 
     /// <summary>
     /// Resizes the associated screen buffer and remaps the managed cursor through any row reflow.
+    /// Both buffers and processor state are committed together. Before publication, failure preserves the
+    /// original state; response callbacks run after commit. Reacquire row references after successful resize.
+    /// Reflow is enabled by default, subject to the current buffer and autowrap policy.
     /// </summary>
     public void ResizeScreen(
         int columns,
         int rows,
         int widthPx,
         int heightPx,
-        bool reflowOnResize,
+        bool reflowOnResize = true,
         bool preserveViewportTopOnRowsIncrease = false)
     {
         ResizeScreen(
@@ -4835,6 +4832,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     /// <summary>
     /// Resizes the associated screen buffer and remaps the managed cursor plus absolute grid anchors through row reflow.
+    /// The supplied positions change only on commit. Failure before publication preserves both buffers and
+    /// processor state; response callbacks run after commit. Reacquire rows after successful publication.
     /// </summary>
     public void ResizeScreen(
         int columns,
@@ -4849,32 +4848,75 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResizeScreenCore(int columns, int rows, uint widthPx, uint heightPx,
         bool reflowOnResize, Span<TerminalGridPosition> trackedAbsolutePositions,
-        bool preserveViewportTopOnRowsIncrease, bool reportSize)
+        bool preserveViewportTopOnRowsIncrease, bool reportSize, bool notifyOnly = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
-        _mouseEncoder.ResetMotion();
-        if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
-        EndRenderHold();
-        SetExtendedDecMode(2026, false);
-        _widthPx = widthPx;
-        _heightPx = heightPx;
-
-        int oldColumns = _screen.Columns;
-        int oldRows = _screen.ViewportRows;
-        if (columns != oldColumns || rows != oldRows)
+        // Ghostty Screen.resize guarantees unchanged state on failure. Stage
+        // both buffers, even during a synchronized-output hold, and publish only
+        // after cursor metadata, graphics and the size response are prepared.
+        ResizeRollbackState rollback = new(this);
+        Span<TerminalGridPosition> positions = trackedAbsolutePositions.Length <= 32
+            ? stackalloc TerminalGridPosition[trackedAbsolutePositions.Length]
+            : new TerminalGridPosition[trackedAbsolutePositions.Length];
+        trackedAbsolutePositions.CopyTo(positions);
+        byte[]? response;
+        try
         {
-            // Ghostty resizes primary first, even when the alternate is visible.
-            if (_inAltScreen)
-                ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
-            _currentHyperlinkId = ResizeActiveScreenBuffer(columns, rows, reflowOnResize, trackedAbsolutePositions, preserveViewportTopOnRowsIncrease);
-            if (!_inAltScreen)
-                ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
-            ApplyResizeState(columns, rows);
+            _screen = _screen.CreateStateCopy();
+            _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
+            _kittyStore = _kittyStore.CreateStateCopy();
+            // Width changes reset tab stops. Reserve the replacement once;
+            // keep custom stops and their existing set on height-only resizes.
+            if (_tabStopColumns != columns && (notifyOnly || columns != _screen.Columns || rows != _screen.ViewportRows))
+                _tabStops = new((Math.Max(columns, _screen.Columns) - 1) / 8 + 1);
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Staged);
+            if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
+            _widthPx = widthPx;
+            _heightPx = heightPx;
+
+            int oldColumns = _screen.Columns;
+            int oldRows = _screen.ViewportRows;
+            // NotifyResize normally follows a host-owned screen resize. During
+            // an output hold only the published screen was resized by that host;
+            // the live held state must be resized before replacing it.
+            bool resizeBuffers = !notifyOnly || _renderHold is not null;
+            if (resizeBuffers && (columns != oldColumns || rows != oldRows))
+            {
+                // Ghostty resizes primary first, even when alternate is visible.
+                if (_inAltScreen)
+                    ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+                _currentHyperlinkId = ResizeActiveScreenBuffer(columns, rows, reflowOnResize, positions, preserveViewportTopOnRowsIncrease);
+                if (!_inAltScreen)
+                    ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
+                ApplyResizeState(columns, rows);
+            }
+            else if (notifyOnly) ApplyResizeState(columns, rows);
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Layout);
+            _renderHold = null;
+            AdvanceKittyAnimations();
+            PublishKittyGraphics();
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Graphics);
+            response = reportSize ? CreateInBandSizeReport() : null;
+            ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Ready);
         }
-        AdvanceKittyAnimations();
-        PublishKittyGraphics();
-        if (reportSize) EmitInBandSizeReport();
+        catch
+        {
+            rollback.Restore(this);
+            throw;
+        }
+
+        // No allocation or host callback between these ownership transfers.
+        _publishedScreen.AdoptStateFrom(_screen);
+        _screen = _publishedScreen;
+        if (_inAltScreen) _alternateKittyStore = _kittyStore;
+        else _primaryKittyStore = _kittyStore;
+        SetExtendedDecMode(2026, false);
+        _mouseEncoder.ResetMotion();
+        positions.CopyTo(trackedAbsolutePositions);
+        // Observer exceptions do not undo an already committed resize. The
+        // callback may have sent bytes or re-entered the terminal before throwing.
+        if (response is not null) ResponseCallback?.Invoke(response);
     }
 
     private int ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
@@ -4931,6 +4973,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 }
 
                 if (savedCursorAnchor is not null) RemapSavedCursorAfterResize(savedCursorAnchor);
+                ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateRows : ManagedResizeCheckpoint.PrimaryRows);
             }
             finally
             {
@@ -4954,8 +4997,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // Style first, then hyperlink, then release temporary references
             // only in the allocator which survived. Implicit links receive a
             // fresh identity even on height-only/reserved-width resizes.
-            return cursorLease is not null ? cursorLease.Complete(_cursorRow, ref hyperlinkCounter)
+            int hyperlink = cursorLease is not null ? cursorLease.Complete(_cursorRow, ref hyperlinkCounter)
                 : _screen.RestoreSnapshotResizeCursor(key, _cursorRow, resizePen, resizeHyperlink, ref hyperlinkCounter);
+            ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateCursor : ManagedResizeCheckpoint.PrimaryCursor);
+            return hyperlink;
         }
         finally
         {

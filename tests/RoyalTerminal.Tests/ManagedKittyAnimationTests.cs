@@ -11,6 +11,28 @@ namespace RoyalTerminal.Tests;
 public sealed class ManagedKittyAnimationTests
 {
     [Fact]
+    public void StateCopyOwnsFrameListAndClockButSharesImmutablePixels()
+    {
+        ManagedKittyAnimation animation = TwoFrames();
+        animation.ApplyControl(Command("a=a,r=1,z=40,s=3"));
+        Assert.False(animation.Tick(0, true, out _));
+        ManagedKittyAnimation copy = animation.CreateStateCopy();
+        Assert.Same(animation.CurrentPixels, copy.CurrentPixels);
+        Assert.True(copy.Tick(40, true, out _));
+        Assert.Equal(1u, animation.CurrentFrameNumber);
+        Assert.Equal(2u, copy.CurrentFrameNumber);
+        Assert.True(animation.Tick(40, true, out _));
+        Assert.Same(animation.CurrentPixels, copy.CurrentPixels);
+        ManagedKittyImagePixels retained = animation.CurrentPixels;
+        Append(copy, "a=f,r=2,X=1", Pixel(1, 2, 3));
+        Assert.Same(retained, animation.CurrentPixels);
+        Assert.NotSame(retained, copy.CurrentPixels);
+        Assert.True(copy.DeleteFrame(1, out _));
+        Assert.Equal(2, animation.FrameCount);
+        Assert.Equal(1, copy.FrameCount);
+    }
+
+    [Fact]
     public void AppendUsesBackgroundClipsAndReservesOneFullCanvas()
     {
         ManagedKittyAnimation animation = Create(new(2, 2, new byte[16]));

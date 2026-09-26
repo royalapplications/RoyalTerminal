@@ -6,7 +6,7 @@ namespace RoyalTerminal.Avalonia.Rendering;
 public sealed partial class TerminalScreen
 {
     /// <summary>
-    /// Creates a copy-on-write state for a synchronized-output transaction. The caller
+    /// Creates a copy-on-write state for a screen transaction (output hold or resize). The caller
     /// must hold the screen lock and retain no writable cell references across this call.
     /// </summary>
     internal TerminalScreen CreateStateCopy()

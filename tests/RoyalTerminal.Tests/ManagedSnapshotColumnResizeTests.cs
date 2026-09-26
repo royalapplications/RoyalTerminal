@@ -92,6 +92,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         TerminalScreen retained = screen.CreateStateCopy();
 
         terminal.Processor.ResizeScreen(8, 3, 0, 0, reflowOnResize: false);
+        rows = screen.GetSnapshotRows(0)!;
 
         Assert.Same(rows[0].SnapshotAllocation, rows[1].SnapshotAllocation);
         Assert.NotSame(rows[0].SnapshotAllocation, rows[2].SnapshotAllocation);

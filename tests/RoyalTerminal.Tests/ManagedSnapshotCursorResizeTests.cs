@@ -35,6 +35,7 @@ public sealed class ManagedSnapshotCursorResizeTests
         int original = screen.SnapshotCursorHyperlinkToken(0, 0);
         TerminalScreen retained = screen.CreateStateCopy();
         processor.ResizeScreen(8, 3, 0, 0);
+        row = screen.GetViewportRow(0);
         Assert.Same(allocation, row.SnapshotAllocation);
         Assert.True(screen.SnapshotCursorStyleIsCurrent(0, processor.CursorRow, Bold));
         int current = screen.SnapshotCursorHyperlinkToken(0, 0);
@@ -75,6 +76,7 @@ public sealed class ManagedSnapshotCursorResizeTests
         GhosttySnapshotPageAllocation previous = row.SnapshotAllocation!;
         TerminalScreen retained = screen.CreateStateCopy();
         processor.ResizeScreen(16, 2, 0, 0, reflowOnResize: false);
+        row = screen.GetViewportRow(0);
         Assert.Same(previous, row.SnapshotAllocation);
         Assert.Equal((1, 1UL, 0UL, 64UL), Usage(screen, row));
         Assert.Equal((1, 1UL, 0UL, 32UL), Usage(retained, retained.GetViewportRow(0)));
@@ -93,6 +95,7 @@ public sealed class ManagedSnapshotCursorResizeTests
         GhosttySnapshotPageAllocation previous = row.SnapshotAllocation!;
         TerminalScreen retained = screen.CreateStateCopy();
         processor.ResizeScreen(8, 3, 0, 0);
+        row = screen.GetViewportRow(0);
         Assert.NotSame(previous, row.SnapshotAllocation);
         Assert.Equal(4096U, row.SnapshotAllocation!.Capacity.StringBytes);
         Assert.Equal((1, 1UL, 0UL, 2016UL), Usage(screen, row));

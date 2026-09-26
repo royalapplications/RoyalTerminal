@@ -150,6 +150,7 @@ public sealed class ManagedSnapshotGraphemeLifecycleTests
         using BasicVtProcessor processor = new(screen);
         Process(processor, "A\u0301\u001b[2;1HB\u0302");
         processor.ResizeScreen(16, 2, 0, 0, reflowOnResize: false);
+        rows = screen.GetSnapshotRows(0)!;
         Assert.NotSame(rows[0].SnapshotAllocation, rows[1].SnapshotAllocation);
         Assert.Equal(1U, rows[0].SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal(17U, rows[1].SnapshotAllocation!.Capacity.GraphemeBytes);

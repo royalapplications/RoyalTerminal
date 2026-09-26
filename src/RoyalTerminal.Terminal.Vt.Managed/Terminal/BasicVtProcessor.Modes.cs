@@ -137,12 +137,14 @@ public sealed partial class BasicVtProcessor
             SetExtendedDecMode(3, false);
             return;
         }
-        SetExtendedDecMode(3, enabled);
         // A VT-requested resize retains pixel geometry and does not emit the
         // host resize notification (Ghostty Terminal.deccolm/Handler.setMode).
+        if (enabled && !_extendedDecModesEnabled.Contains(3))
+            _extendedDecModesEnabled.EnsureCapacity(_extendedDecModesEnabled.Count + 1);
         ResizeScreenCore(enabled ? 132 : 80, _screen.ViewportRows, _widthPx, _heightPx,
             reflowOnResize: true, Span<RoyalTerminal.Avalonia.Rendering.TerminalGridPosition>.Empty,
             preserveViewportTopOnRowsIncrease: false, reportSize: false);
+        SetExtendedDecMode(3, enabled);
         EraseInDisplay(2);
         HomeCursor();
     }
