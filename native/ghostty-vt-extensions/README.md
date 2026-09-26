@@ -9,7 +9,7 @@ Both shared and static libraries include them.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies eight corrections to pinned upstream
+The generated source copy also applies nine corrections to pinned upstream
 `622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -75,8 +75,17 @@ fails the build until reviewed. The submodule checkout is never changed.
   of all remaining space by the next entry. This eighth correction and its
   native/managed comparisons are source-reviewed; execution remains pending.
 
+- `PageList.zig`: reset a failed non-reflow row clone before removing its slot
+  from the live row count. Clones can retain a prefix of style, grapheme and
+  hyperlink references before failing; the unused tail must be cleared before
+  reuse. After a failed preceding-page backfill, remap pins for every earlier
+  successful copy instead of skipping the remap and destroying their source
+  page. The fresh-page failure path also resets its partial row. This ninth
+  correction is based on source inspection; native resize/continuation
+  regressions are added but have not been executed.
+
 Five earlier corrections were reproduced through the native C API before
-correction and have focused tests. The dirty-wrap, eviction-quota and bitmap-bounds
+correction and have focused tests. The dirty-wrap, eviction-quota, bitmap-bounds and resize-rollback
 corrections above still await execution. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
@@ -86,7 +95,7 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the eight correctness fixes.
+These are host integration additions, separate from the nine correctness fixes.
 Native rebuild and callback/lifetime tests are pending implementation-phase validation.
 
 The sixteen additional C exports are declared in

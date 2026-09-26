@@ -2404,6 +2404,12 @@ public sealed partial class TerminalScreen
 
     private void ResizeRows(int columns)
     {
+        if (columns > Columns && PrepareSnapshotResize(columns) is { } tracker)
+        {
+            GhosttySnapshotColumnResize.Resize(_rows, columns, DefaultForeground, DefaultBackground,
+                SnapshotStyleLayout(), tracker);
+            return;
+        }
         for (int i = 0; i < _rows.Count; i++)
         {
             _rows[i].Resize(columns, DefaultForeground, DefaultBackground);

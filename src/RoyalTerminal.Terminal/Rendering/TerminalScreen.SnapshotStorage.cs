@@ -3,7 +3,6 @@
 
 using RoyalTerminal.Terminal.Theming;
 using RoyalTerminal.Terminal.Snapshots;
-using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.Avalonia.Rendering;
 
@@ -38,11 +37,15 @@ public sealed partial class TerminalScreen
 
     private GhosttySnapshotReflowAllocation? CreateSnapshotReflowAllocation(int columns)
     {
+        GhosttySnapshotStyleTracker? tracker = PrepareSnapshotResize(columns);
+        return tracker is null ? null : new(_rows, columns, SnapshotStyleLayout(), tracker);
+    }
+
+    private GhosttySnapshotStyleTracker? PrepareSnapshotResize(int columns)
+    {
         if (_rows.Count == 0 || columns is < 1 or > ushort.MaxValue ||
             _snapshotScrollbackQuota is null && _rows[0].SnapshotAllocation is null) return null;
-        int alignment = _snapshotScrollbackQuota?.PageAlignment ??
-            (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096);
-        GhosttySnapshotAllocation layout = new(alignment);
+        GhosttySnapshotAllocation layout = SnapshotStyleLayout();
         for (int i = 0; i < _rows.Count; i++)
             if (_rows[i].PreservedColumns is < 1 or > ushort.MaxValue) return null;
         GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
@@ -56,7 +59,7 @@ public sealed partial class TerminalScreen
         // overflow may become representable after reflow splits the content;
         // retain its existing page identity instead of dropping all accounting.
         _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
-        return new(_rows, columns, layout, tracker);
+        return tracker;
     }
     // Allocate a lineage only when a decoder tracks this terminal. COW publication
     // preserves it; a separately restored terminal receives a different identity.

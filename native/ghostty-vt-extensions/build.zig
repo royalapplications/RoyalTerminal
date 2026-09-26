@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) !void {
         .exclude_extensions = &.{
             b.pathJoin(&.{ "terminal", "Terminal.zig" }),
             b.pathJoin(&.{ "terminal", "Screen.zig" }),
+            b.pathJoin(&.{ "terminal", "PageList.zig" }),
             b.pathJoin(&.{ "terminal", "bitmap_allocator.zig" }),
             b.pathJoin(&.{ "terminal", "kitty", "graphics_storage.zig" }),
             b.pathJoin(&.{ "terminal", "stream_continuation.zig" }),
@@ -60,6 +61,22 @@ pub fn build(b: *std.Build) !void {
         .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
         .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
     }});
+    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{ .{
+        // A clone can fail after retaining a styled/grapheme/link prefix.
+        // Reset it while the row is still in size.rows, then remap pins for
+        // earlier successful copies before destroying their source page.
+        .before = "                prev_page.size.rows -= 1;\n                copied -= 1;\n                break :prev;",
+        .after = "                prev_page.resetRow(dst_row);\n                prev_page.size.rows -= 1;\n                copied -= 1;\n                break;",
+    }, .{
+        .before = "        assert(copied == len);\n",
+        .after = "        assert(copied <= len);\n",
+    }, .{
+        .before = "            if (p.node != chunk.node or p.y >= len) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - len;",
+        .after = "            if (p.node != chunk.node or p.y >= copied) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - copied;",
+    }, .{
+        .before = "                new_page.size.rows -= 1;\n                break;",
+        .after = "                new_page.resetRow(dst_row);\n                new_page.size.rows -= 1;\n                break;",
+    } });
     try addOverlay(b, sources, ghostty, "terminal/bitmap_allocator.zig", "bac61a65b5a3141ccfad2d9d0a6a452be7106a647182470fcf38e1289b5f86e1", &.{.{
         // The full-word loop checks its bounds, but it can finish (or be
         // skipped) with a partial-word remainder and i == bitmaps.len.

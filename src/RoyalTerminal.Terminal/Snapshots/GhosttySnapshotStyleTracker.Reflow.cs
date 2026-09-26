@@ -47,6 +47,9 @@ internal sealed partial class GhosttySnapshotStyleTracker
             state.ObserveSlot(row.SnapshotAllocationRow);
             state.Revisions[row.SnapshotAllocationRow] = row.SnapshotStyleRevision;
         }
+        // Non-reflow growth can keep the allocation identity while replacing
+        // its COW-owned table (and retaining its existing cursor reference).
+        _pages.Remove(page);
         _pages.Add(page, state);
     }
 
