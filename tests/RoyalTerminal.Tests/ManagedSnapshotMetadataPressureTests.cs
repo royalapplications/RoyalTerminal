@@ -263,6 +263,56 @@ public sealed class ManagedSnapshotMetadataPressureTests
         TerminalRow row = Live(page);
         for (int i = 0; i < ids.Length; i++) Assert.Equal(i < 102, row.ReadOnlyCells[i].HyperlinkId != 0);
         for (int i = 0; i < ids.Length; i++) Assert.Equal(1UL, page.Grid.Cells[i] >> 48);
+        GhosttySnapshotHyperlinkStorage storage = page.CreateAllocationIdentity().CopyRestoredHyperlinks();
+        Assert.Equal(102, storage.CellCount);
+        Assert.Equal(102, storage.ReferenceCount(storage.CellId(0)));
+        Assert.Equal(0, storage.CellId(102));
+        Assert.Equal(1, storage.Count);
+    }
+
+    [Fact]
+    public void RestoredHyperlinkSeedReleasesAliasTableReferencesButRetainsDeadStrings()
+    {
+        GhosttySnapshotPage page = Read(Payload(links:
+            [new(1, 1, null, [65]), new(2, 1, null, [65]), new(3, 2, null, [66])], linkIds: [1, 2, 0, 0]));
+        GhosttySnapshotPageAllocation allocation = page.CreateAllocationIdentity();
+        Assert.True(allocation.HasHyperlinkSeed);
+        GhosttySnapshotHyperlinkStorage storage = allocation.CopyRestoredHyperlinks();
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(2, storage.CellCount);
+        Assert.Equal(storage.CellId(0), storage.CellId(1));
+        Assert.Equal(2, storage.ReferenceCount(storage.CellId(0)));
+        Assert.Equal(64UL, storage.StringBytes); // Unused B is dead, not freed.
+        storage.ClearCells(0, 4);
+        Assert.Equal(0, storage.Count);
+        Assert.Equal(64UL, storage.StringBytes);
+        GhosttySnapshotHyperlinkStorage retained = allocation.CopyRestoredHyperlinks();
+        Assert.Equal(1, retained.Count);
+        Assert.Equal(2, retained.ReferenceCount(retained.CellId(0)));
+        Assert.True(page.TryGetLiveCellHyperlink(0, out GhosttySnapshotHyperlink link));
+        Assert.Equal(new byte[] { 65 }, link.Uri.ToArray());
+        Assert.True(page.TryGetHyperlink(3, out _)); // Raw table remains lossless.
+    }
+
+    [Fact]
+    public void IgnoredDuplicateWireIdLeavesItsStringPressureInTheRetainedSeed()
+    {
+        GhosttySnapshotPage page = Read(Payload(links:
+            [new(1, 1, null, Filled(2000, 65)), new(1, 2, null, Filled(32, 66)), new(2, 3, null, [67])], linkIds: [1, 2, 0, 0]));
+        GhosttySnapshotHyperlinkStorage storage = page.CreateAllocationIdentity().CopyRestoredHyperlinks();
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(1, storage.CellCount);
+        Assert.Equal(2048UL, storage.StringBytes);
+        storage.Clear(0);
+        Assert.Equal(0, storage.Count);
+        Assert.Equal(2048UL, storage.StringBytes);
+        using MemoryStream output = new();
+        new GhosttySnapshotHyperlink(false, 4, [], [68]).WriteTo(output);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.StringsFull, storage.StartCursor(output.ToArray()));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, storage.Rebuild(192, 2048, out GhosttySnapshotHyperlinkStorage? rebuilt));
+        Assert.Equal(0UL, rebuilt!.StringBytes);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, rebuilt.StartCursor(output.ToArray()));
+        Assert.Equal(32UL, rebuilt.StringBytes);
     }
 
     [Fact]

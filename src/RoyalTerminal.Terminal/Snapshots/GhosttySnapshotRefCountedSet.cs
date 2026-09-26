@@ -191,7 +191,9 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
     private Item LiveItem(int id) => id > 0 && id < _nextId && _items[id] is { References: > 0 } item
         ? item : throw new InvalidOperationException("Native snapshot set reference is not live.");
 
-    private int Lookup(T value)
+    // Cross-page hyperlink cloning checks for an existing value before copying
+    // strings. Unlike Add this borrows the value and does not consume it.
+    internal int Lookup(T value)
     {
         if (_tableCapacity == 0) return 0;
         ulong hash = context.Hash(value);

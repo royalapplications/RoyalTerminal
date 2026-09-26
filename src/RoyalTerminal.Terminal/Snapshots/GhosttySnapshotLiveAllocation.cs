@@ -9,7 +9,8 @@ namespace RoyalTerminal.Terminal.Snapshots;
 // Immutable allocation identity survives row moves, partial pruning and COW.
 // No live screen/row references are retained by the identity itself.
 internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity capacity, GhosttySnapshotStyleStorage? restoredStyles = null,
-    bool metadataOverflow = false, GhosttySnapshotGraphemeStorage? restoredGraphemes = null)
+    bool metadataOverflow = false, GhosttySnapshotGraphemeStorage? restoredGraphemes = null,
+    GhosttySnapshotHyperlinkStorage? restoredHyperlinks = null)
 {
     internal GhosttySnapshotPageCapacity Capacity { get; } = capacity;
     internal bool MetadataOverflow { get; } = metadataOverflow;
@@ -18,6 +19,8 @@ internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity 
     internal GhosttySnapshotStyleStorage CopyRestoredStyles() => restoredStyles?.Copy() ?? new(capacity.Styles);
     internal bool HasGraphemeSeed => restoredGraphemes is not null;
     internal GhosttySnapshotGraphemeStorage CopyRestoredGraphemes() => restoredGraphemes?.Copy() ?? new(capacity.GraphemeBytes);
+    internal bool HasHyperlinkSeed => restoredHyperlinks is not null;
+    internal GhosttySnapshotHyperlinkStorage CopyRestoredHyperlinks() => restoredHyperlinks?.Copy() ?? new(capacity.HyperlinkBytes, capacity.StringBytes);
 }
 
 /// <summary>Measures only currently retained storage, including the unpublished COW screen.</summary>

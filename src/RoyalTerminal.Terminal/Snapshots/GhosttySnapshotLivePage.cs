@@ -23,8 +23,7 @@ internal static class GhosttySnapshotLivePage
         TerminalRow[] rows = new TerminalRow[grid.Rows];
         GhosttySnapshotPageAllocation allocation = page.CreateAllocationIdentity();
         Dictionary<ushort, TerminalCell> styles = new(page.StyleCount);
-        Dictionary<ushort, int> links = new(page.HyperlinkCount);
-        ulong remainingLinks = GhosttySnapshotAllocation.MapItemCapacity(page.Capacity.HyperlinkBytes / 48UL * 16, 80);
+        Dictionary<int, int> links = new(page.HyperlinkCount);
         Span<char> textScratch = stackalloc char[TerminalGraphemeStorage.MaximumCodepoints * 2];
         for (int rowIndex = 0; rowIndex < grid.Rows; rowIndex++)
         {
@@ -68,17 +67,21 @@ internal static class GhosttySnapshotLivePage
                 cell.IsWideSpacerHead = width == 3;
                 cell.IsProtected = (bits & (1UL << 44)) != 0;
                 cell.SemanticContent = (TerminalSemanticContent)((bits >> 46) & 3);
-                ushort linkId = (ushort)(bits >> 48);
-                if (linkId != 0 && remainingLinks != 0)
+                int cellIndex = rowIndex * grid.Columns + column;
+                int linkId = page.LiveHyperlinkId(cellIndex);
+                if (linkId != 0)
                 {
                     if (!links.TryGetValue(linkId, out int token))
                     {
-                        if (page.TryGetLiveHyperlink(linkId, out GhosttySnapshotHyperlink link))
-                            token = hyperlinkOwner.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId);
+                        // Decode/register once per native identity, including
+                        // aliases in the wire table. Cell admission was already
+                        // resolved by the retained allocator, not a second quota.
+                        if (!page.TryGetLiveCellHyperlink(cellIndex, out GhosttySnapshotHyperlink link))
+                            throw new InvalidDataException("Missing restored cell hyperlink.");
+                        token = hyperlinkOwner.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId);
                         links.Add(linkId, token);
                     }
                     cell.HyperlinkId = token;
-                    if (token != 0) remainingLinks--;
                 }
                 row[column] = cell;
             }

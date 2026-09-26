@@ -15,9 +15,10 @@ internal sealed class GhosttySnapshotPage
     private readonly Dictionary<ushort, GhosttySnapshotStyle> _styles;
     private readonly Dictionary<ushort, byte[]> _hyperlinks;
     private readonly IReadOnlyDictionary<int, uint[]>? _liveGraphemes;
-    private readonly IReadOnlySet<ushort>? _liveStyles, _liveLinks;
+    private readonly IReadOnlySet<ushort>? _liveStyles;
     private readonly GhosttySnapshotStyleStorage? _styleStorage;
     private readonly GhosttySnapshotGraphemeStorage? _graphemeStorage;
+    private readonly GhosttySnapshotHyperlinkStorage _hyperlinkStorage;
 
     private GhosttySnapshotPage(byte[] header, GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks,
@@ -25,9 +26,10 @@ internal sealed class GhosttySnapshotPage
         GhosttySnapshotGraphemeStorage? graphemeStorage = null)
     {
         _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes;
-        _liveStyles = metadata?.Styles; _liveLinks = metadata?.Links;
+        _liveStyles = metadata?.Styles;
         _styleStorage = metadata?.FinishStyles(grid);
         _graphemeStorage = graphemeStorage;
+        _hyperlinkStorage = metadata?.FinishHyperlinks(grid) ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes);
     }
 
     internal GhosttySnapshotGrid Grid { get; }
@@ -37,7 +39,13 @@ internal sealed class GhosttySnapshotPage
 
     // The identity owns a read-only restore seed. Each live owner obtains an
     // isolated mutable copy, while raw PAGE data and held COW frames stay stable.
-    internal GhosttySnapshotPageAllocation CreateAllocationIdentity() => new(Capacity, _styleStorage, restoredGraphemes: _graphemeStorage);
+    internal GhosttySnapshotPageAllocation CreateAllocationIdentity() => new(Capacity, _styleStorage,
+        restoredGraphemes: _graphemeStorage, restoredHyperlinks: _hyperlinkStorage);
+
+    internal bool TryGetLiveCellHyperlink(int index, out GhosttySnapshotHyperlink link)
+        => _hyperlinkStorage.TryGetCell(index, out link);
+
+    internal int LiveHyperlinkId(int index) => _hyperlinkStorage.CellId(index);
 
     // Raw codec output stays lossless; live cells follow native allocation
     // failure and suffix-bound semantics computed in original wire order.
@@ -107,12 +115,6 @@ internal sealed class GhosttySnapshotPage
         return false;
     }
 
-    internal bool TryGetLiveHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
-    {
-        if (_liveLinks is null || _liveLinks.Contains(id)) return TryGetHyperlink(id, out hyperlink);
-        hyperlink = default;
-        return false;
-    }
     internal bool TryGetHyperlink(ushort id, out GhosttySnapshotHyperlink hyperlink)
     {
         if (_hyperlinks.TryGetValue(id, out byte[]? bytes))
