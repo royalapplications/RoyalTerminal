@@ -250,9 +250,29 @@ uses repeated line splices and has no Ghostty PAGE allocator. Forty-two new
 large-count, discarded-metadata, pressure, COW, anchor/raster and pending-wrap
 cases are authored, including native comparisons, but remain unrun. The expected
 gain is one row traversal instead of one traversal per requested line; no measured
-speedup is claimed before profiling. Temporary scrolling-cursor allocation
-transitions and the alternate full-screen row-rotation fast path remain in the
-broader audit; this change does not establish exhaustive scrolling parity.
+speedup is claimed before profiling.
+
+Scrolling now distinguishes explicit SU/SD from LF/IND. SU/SD account for the
+temporary top/bottom cursor visit and its return, including unprinted style
+allocation, implicit hyperlink reissue and native pen/link degradation. Primary
+history growth also accounts for each intermediate page before painting its
+background. Full-width LF/IND and alternate full-screen SU rotate row ownership
+within each logical page; only boundary rows are cloned. Surviving wrap flags,
+wide spacers, semantic metadata and COW cell storage remain intact, while the
+recycled row loses old metadata and takes the accepted background. Page identities
+and physical allocator slots remain owned, with no history created by alternate
+rotation. The cursor remains on its page during bounded LF/IND; row rotation
+does not create a spurious hyperlink migration. Fatal boundary copies retain the
+existing owner-fault/no-publication behavior. Reverse index preserves pending
+wrap when it scrolls, but clears it on its cursor-up fallback, including a clamped
+row-zero move. Forty additional cursor,
+rotation, COW, background, single-row and native differential cases are authored
+but unrun. These decisions follow Ghostty `Terminal.scrollUp/scrollDown/index`,
+`Screen.cursorScrollRegionUp` and `PageList.eraseRow[Bounded]`; Windows Terminal
+rectangle scrolling and xterm.js line splices do not supply the per-page cursor
+contract. No throughput or allocation benchmark claim is made yet. The broader
+mutation audit, including post-rotation rebuild order and top-origin history
+rotation across page boundaries, remains unfinished.
 
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can

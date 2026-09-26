@@ -1641,7 +1641,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorRow == _scrollBottom && CursorInsideHorizontalMargins)
         {
             // At bottom of scroll region — scroll the region up
-            ScrollUpInRegion();
+            ScrollRegion(1, down: false, index: true);
         }
         else if (_cursorRow < _screen.ViewportRows - 1 && _cursorRow != _scrollBottom)
         {
@@ -1664,9 +1664,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // At top of scroll region — scroll region down
             ScrollDownInRegion();
         }
-        else if (_cursorRow > 0)
+        else
         {
-            _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - 1);
+            // Native RI preserves pending wrap when it scrolls, but the CUU
+            // fallback clears it even if the cursor is already on row zero.
+            ResetDelayedWrap();
+            if (_cursorRow > 0)
+                _cursorRow = Math.Max(_cursorRow >= _scrollTop ? _scrollTop : 0, _cursorRow - 1);
         }
     }
 
@@ -1692,9 +1696,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ScrollDownInRegion(int count = 1) => ScrollRegion(count, down: true);
 
-    private void ScrollRegion(int count, bool down)
+    private void ScrollRegion(int count, bool down, bool index = false)
     {
         count = Math.Clamp(count, 1, _scrollBottom - _scrollTop + 1);
+        int oldColumn = _cursorCol, oldRow = _cursorRow;
+        bool oldWrap = _delayedWrap;
+        bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !_inAltScreen;
+        bool rotate = !down && !HasHorizontalMargins &&
+            (index || _inAltScreen && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
         bool adjustImages = _kittyStore.PlacementCount > 0 &&
             (_scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins);
         ulong revision = _kittyStore.Revision;
@@ -1705,26 +1714,58 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 left: _scrollLeft, right: RightMargin);
         try
         {
+            // SU/SD use a temporary cursor; page entry can grow metadata or
+            // degrade the pen/link even when the visible position is restored.
+            // Full-width IND instead rotates under its existing bottom cursor.
+            if (!index || HasHorizontalMargins)
+            {
+                _cursorCol = _scrollLeft;
+                _cursorRow = history || rotate ? _scrollBottom : _scrollTop;
+            }
+            RecordSnapshotCursorStyle();
             if (HasHorizontalMargins)
             {
                 ScrollRectangle(_scrollTop, _scrollBottom, count, down);
                 return;
             }
-            if (!down && _scrollTop == 0 && !_inAltScreen)
+            if (history)
             {
                 // Native cursorScrollAbove also creates history one row at a
                 // time. Do not turn this into a destructive in-place shift.
                 for (int i = 0; i < count; i++) ScrollIntoHistoryOneRow();
             }
+            else if (rotate)
+            {
+                for (int i = 0; i < count; i++) RotateScrollRegionUpOneRow();
+            }
             else ShiftFullWidthRows(_scrollTop, _scrollBottom, count, down);
+        }
+        catch (OutOfMemoryException failure)
+        {
+            _screen.RecordSnapshotMutationFailure(failure);
+            throw;
         }
         finally
         {
-            if (adjustImages)
+            try
             {
-                _kittyStore.EndMarginScroll(_screen);
-                if (!_screen.SnapshotMutationFailed && _kittyStore.Revision != revision) PublishKittyGraphics();
+                if (adjustImages) _kittyStore.EndMarginScroll(_screen);
             }
+            finally
+            {
+                _cursorCol = oldColumn;
+                _cursorRow = oldRow;
+                _delayedWrap = oldWrap;
+                // A fatal copy already latched its failure: do not allocate
+                // or mask that exception while restoring cursor coordinates.
+                try { RecordSnapshotCursorStyle(); }
+                catch (OutOfMemoryException failure)
+                {
+                    _screen.RecordSnapshotMutationFailure(failure);
+                    throw;
+                }
+            }
+            if (adjustImages && !_screen.SnapshotMutationFailed && _kittyStore.Revision != revision) PublishKittyGraphics();
         }
     }
 
@@ -1733,6 +1774,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // A top-origin region creates history even with a bottom margin.
         TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
             ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
+        // Growth may cross/recycle a page. Migrate before painting its blank
+        // row, and before another iteration can leave this intermediate page.
+        RecordSnapshotCursorStyle();
         if (_currentBgKind != SgrColorKind.Default)
             ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
         _screen.InvalidateViewport();
@@ -1765,9 +1809,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateViewport();
     }
 
-    private void CopyRow(TerminalRow src, TerminalRow dst)
+    private void CopyRow(TerminalRow src, TerminalRow dst, bool preserveWrap = false)
     {
-        try { CopyRowCore(src, dst); }
+        try { CopyRowCore(src, dst, preserveWrap); }
         catch (OutOfMemoryException failure)
         {
             _screen.RecordSnapshotMutationFailure(failure);
@@ -1775,18 +1819,31 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
     }
 
-    private void CopyRowCore(TerminalRow src, TerminalRow dst)
+    private void CopyRowCore(TerminalRow src, TerminalRow dst, bool preserveWrap)
     {
-        ClearPreservedCellsForMutation(src);
+        if (!preserveWrap) ClearPreservedCellsForMutation(src);
         ClearPreservedCellsForMutation(dst);
         using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(src);
         using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(dst);
         bool swap = destinationStyles.ShiftFrom(sourceStyles, 0, Math.Min(src.Columns, dst.Columns));
         destinationStyles.Clear(Math.Min(src.Columns, dst.Columns), dst.PreservedColumns - Math.Min(src.Columns, dst.Columns));
-        src.WrapsToNext = false;
-        src.IsWrapContinuation = false;
-        if (swap) dst.SwapActiveStorage(src);
+        if (!preserveWrap)
+        {
+            src.WrapsToNext = false;
+            src.IsWrapContinuation = false;
+            dst.WrapsToNext = false;
+            dst.IsWrapContinuation = false;
+        }
+        if (swap)
+        {
+            (src.WrapsToNext, dst.WrapsToNext) = (dst.WrapsToNext, src.WrapsToNext);
+            (src.IsWrapContinuation, dst.IsWrapContinuation) = (dst.IsWrapContinuation, src.IsWrapContinuation);
+            dst.SwapActiveStorage(src);
+        }
         else dst.CopyActiveFrom(src, _screen.DefaultForeground, _screen.DefaultBackground);
+        // PageList row rotation clones whole rows, including real-edge wide
+        // spacers and wrap metadata. IL/DL intentionally break those links.
+        if (preserveWrap) return;
         dst.WrapsToNext = false;
         dst.IsWrapContinuation = false;
         if (dst.ReadOnlyCells[^1].IsWideSpacerHead)
@@ -1875,7 +1932,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'M': // RI — Reverse index
-                ResetDelayedWrap();
                 ReverseIndex();
                 _state = ParserState.Ground;
                 break;

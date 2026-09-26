@@ -8,6 +8,28 @@ namespace RoyalTerminal.Avalonia.Rendering;
 public sealed partial class TerminalScreen
 {
     /// <summary>
+    /// Rotates row ownership within one viewport page slice. The first row is
+    /// recycled at the end without releasing its allocator slot. The processor
+    /// owns cell clearing/cross-page copies and shifts anchors separately.
+    /// Caller holds the screen lock.
+    /// </summary>
+    internal void RotateViewportRowsUp(int top, int bottom)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(top);
+        ArgumentOutOfRangeException.ThrowIfLessThan(bottom, top);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(bottom, ViewportRows);
+        int first = GetAbsoluteRowForViewportRow(top), last = GetAbsoluteRowForViewportRow(bottom);
+        TerminalRow recycled = _rows[first];
+        for (int row = first; row < last; row++)
+        {
+            _rows[row] = _rows[row + 1];
+            _rows[row].IsDirty = true;
+        }
+        _rows[last] = recycled;
+        recycled.IsDirty = true;
+    }
+
+    /// <summary>
     /// Creates history above a top-origin scrolling region, leaving rows below
     /// its bottom margin stationary. Caller holds the screen lock.
     /// </summary>
