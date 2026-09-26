@@ -105,7 +105,7 @@ public sealed class ManagedSnapshotStyleMutationTests
         using BasicVtProcessor processor = new(screen);
         processor.Process("\u001b[1mA\u001b[0m\u001b[2K"u8);
         Assert.Null(screen.GetViewportRow(0).SnapshotAllocation);
-        Assert.False(screen.TracksSnapshotStyles);
+        Assert.False(screen.TracksSnapshotMetadata);
     }
 
     [Fact]

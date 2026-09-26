@@ -1387,7 +1387,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int targetRowIndex = _cursorRow;
         int targetColIndex = _autoWrap && _delayedWrap ? _cursorCol : _cursorCol - 1;
         if (useBoundaries && !_autoWrap && _cursorCol == CursorRightLimit &&
-            _screen.GetViewportRow(_cursorRow)[_cursorCol].HasContent)
+            _screen.GetViewportRow(_cursorRow).ReadOnlyCells[_cursorCol].HasContent)
         {
             targetColIndex = _cursorCol;
         }
@@ -1398,8 +1398,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         TerminalRow targetRow = _screen.GetViewportRow(targetRowIndex);
-        while (targetColIndex >= 0 && targetRow[targetColIndex].Width == 0 &&
-            !targetRow[targetColIndex].IsWideSpacerHead)
+        while (targetColIndex >= 0 && targetRow.ReadOnlyCells[targetColIndex].Width == 0 &&
+            !targetRow.ReadOnlyCells[targetColIndex].IsWideSpacerHead)
         {
             targetColIndex--;
         }
@@ -1409,7 +1409,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        ref TerminalCell targetCell = ref targetRow[targetColIndex];
+        TerminalCell targetCell = targetRow.ReadOnlyCells[targetColIndex];
         if (!targetCell.HasContent)
         {
             return false;
@@ -1501,6 +1501,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ClearPreservedCellsForMutation(targetRow);
         ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, Math.Max(oldWidth, newWidth));
 
+        using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(targetRow);
+
         targetCell.Codepoint = targetCell.Codepoint != 0
             ? targetCell.Codepoint
             : codepoint;
@@ -1529,6 +1531,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _cursorCol = targetColIndex + newWidth;
         }
 
+        // Ghostty writes a newly widened spacer before appending the suffix;
+        // that write can itself replace the page. Keep the old grapheme live
+        // until those edits complete, then use the coordinator's current page.
+        metadata.AppendGrapheme(targetColIndex);
+        targetRow[targetColIndex] = targetCell;
         targetRow.IsDirty = true;
         return true;
     }
@@ -1578,7 +1585,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+        using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
         TerminalCell existing = row.ReadOnlyCells[column];
         if (existing.Width == 0 && column > 0)
         {
@@ -1781,8 +1788,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClearPreservedCellsForMutation(src);
         ClearPreservedCellsForMutation(dst);
-        using GhosttySnapshotStyleTracker.RowEdit sourceStyles = _screen.EditSnapshotRowStyles(src);
-        using GhosttySnapshotStyleTracker.RowEdit destinationStyles = _screen.EditSnapshotRowStyles(dst);
+        using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(src);
+        using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(dst);
         bool swap = destinationStyles.ShiftFrom(sourceStyles, 0, Math.Min(src.Columns, dst.Columns));
         destinationStyles.Clear(Math.Min(src.Columns, dst.Columns), dst.PreservedColumns - Math.Min(src.Columns, dst.Columns));
         src.WrapsToNext = false;
@@ -3961,7 +3968,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         // cursorCopy loads the entering style at the dormant cursor's page
         // before moving to the copied position. Preserve that allocation event.
-        if (_screen.TracksSnapshotStyles)
+        if (_screen.TracksSnapshotMetadata)
             _screen.SnapshotStyleChanged(1, _savedAlternateCursorRow, _snapshotAlternatePen, CaptureSnapshotPen());
 
         // Scrolling margins are terminal-wide and survive screen switches.
@@ -4009,7 +4016,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             InstallSnapshotPen(in pen);
             _currentProtected = _snapshotPrimaryProtected;
         }
-        else if (_screen.TracksSnapshotStyles)
+        else if (_screen.TracksSnapshotMetadata)
             _screen.SnapshotStyleChanged(0, _savedMainCursorRow, _snapshotPrimaryPen, CaptureSnapshotPen());
 
         // Scrolling margins are terminal-wide and survive screen switches.
@@ -4023,7 +4030,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessSgr()
     {
-        bool trackStyles = _screen.TracksSnapshotStyles;
+        bool trackStyles = _screen.TracksSnapshotMetadata;
         if (_params.Count == 0)
         {
             GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
@@ -4410,7 +4417,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
-        using (GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row))
+        using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
             for (var c = RightMargin; c >= _cursorCol + count; c--)
             {
@@ -4443,7 +4450,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             EraseCells(row, row.Columns - 1, 1);
         ResetRowSoftWrap(row);
         ResetDelayedWrap();
-        using (GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row))
+        using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
             for (var c = _cursorCol; c + count <= RightMargin; c++)
             {
@@ -4496,7 +4503,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (row.PreservedColumns > row.Columns)
         {
-            using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+            using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
             styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
             row.ClearPreservedCellsFrom(row.Columns, _screen.DefaultForeground, _screen.DefaultBackground);
         }
@@ -4897,8 +4904,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease,
         GhosttySnapshotStyle? snapshotPen = null)
     {
-        GhosttySnapshotStyle resizePen = _screen.TracksSnapshotStyles ? snapshotPen ?? CaptureSnapshotPen() : default;
-        if (_screen.TracksSnapshotStyles)
+        GhosttySnapshotStyle resizePen = _screen.TracksSnapshotMetadata ? snapshotPen ?? CaptureSnapshotPen() : default;
+        if (_screen.TracksSnapshotMetadata)
             _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
         bool alternateScreen = _inAltScreen;
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
@@ -4970,7 +4977,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Screen.resize retains the old pen reference through row mutation,
         // then restores it on the remapped page after prompt clearing. Reflow
         // builds fresh cell-only style tables, so even an unchanged pen moves.
-        if (_screen.TracksSnapshotStyles)
+        if (_screen.TracksSnapshotMetadata)
             _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
     }
 

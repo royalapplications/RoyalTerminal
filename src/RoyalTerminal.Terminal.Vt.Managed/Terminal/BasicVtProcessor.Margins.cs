@@ -69,8 +69,8 @@ public sealed partial class BasicVtProcessor
             if (source >= top && source <= bottom)
             {
                 TerminalRow sourceRow = _screen.GetViewportRow(source);
-                using GhosttySnapshotStyleTracker.RowEdit sourceStyles = _screen.EditSnapshotRowStyles(sourceRow);
-                using GhosttySnapshotStyleTracker.RowEdit destinationStyles = _screen.EditSnapshotRowStyles(row);
+                using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(sourceRow);
+                using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(row);
                 if (destinationStyles.ShiftFrom(sourceStyles, _scrollLeft, width, wholeRow: false))
                 {
                     Span<TerminalCell> sourceCells = sourceRow.Cells.Slice(_scrollLeft, width);

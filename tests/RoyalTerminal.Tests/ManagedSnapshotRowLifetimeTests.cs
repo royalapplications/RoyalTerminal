@@ -65,7 +65,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
         Assert.Equal(0, recycled.ReadOnlyCells[0].Codepoint);
         WriteStyle(screen, survivor, 1, CellAttributes.Dim);
         Assert.Equal(4, Capacity(survivor));
-        using (screen.EditSnapshotRowStyles(recycled)) { }
+        using (screen.EditSnapshotRowMetadata(recycled)) { }
         Assert.NotSame(page, recycled.SnapshotAllocation);
         Assert.Equal(0, recycled.SnapshotAllocationRow);
         Assert.Equal(CellAttributes.Bold, retained.GetSnapshotRows(0)![0].ReadOnlyCells[0].Attributes);
@@ -81,12 +81,12 @@ public sealed class ManagedSnapshotRowLifetimeTests
         TerminalScreen retained = screen.CreateStateCopy();
         Assert.Equal(1, screen.DiscardTransientResizeRows());
         TerminalRow appended = screen.AddRow();
-        using (screen.EditSnapshotRowStyles(appended)) { }
+        using (screen.EditSnapshotRowMetadata(appended)) { }
         Assert.Same(page, appended.SnapshotAllocation);
         Assert.Equal(3, appended.SnapshotAllocationRow);
 
         TerminalRow retainedAppend = retained.AddRow();
-        using (retained.EditSnapshotRowStyles(retainedAppend)) { }
+        using (retained.EditSnapshotRowMetadata(retainedAppend)) { }
         Assert.NotSame(page, retainedAppend.SnapshotAllocation);
         Assert.Equal(0, retainedAppend.SnapshotAllocationRow);
     }
@@ -101,7 +101,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
         rows[3].IsTransientResizeRow = true;
         Assert.Equal(1, screen.DiscardTransientResizeRows());
         TerminalRow appended = screen.AddRow();
-        using (screen.EditSnapshotRowStyles(appended)) { }
+        using (screen.EditSnapshotRowMetadata(appended)) { }
         Assert.NotSame(page, appended.SnapshotAllocation);
         Assert.Equal(3, rows[0].SnapshotAllocationRow);
     }
@@ -117,7 +117,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
         rows[4].IsTransientResizeRow = true;
         Assert.Equal(1, screen.DiscardTransientResizeRows());
         TerminalRow appended = screen.AddRow();
-        using (screen.EditSnapshotRowStyles(appended)) { }
+        using (screen.EditSnapshotRowMetadata(appended)) { }
         Assert.Same(page, appended.SnapshotAllocation);
         Assert.Equal(4, appended.SnapshotAllocationRow);
         Assert.Equal(3, rows[3].SnapshotAllocationRow);
@@ -133,7 +133,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
         WriteStyle(screen, rows[0], 1, CellAttributes.Dim);
         Assert.Equal(4, Capacity(rows[0]));
         TerminalRow appended = screen.AddRow();
-        using (screen.EditSnapshotRowStyles(appended)) { }
+        using (screen.EditSnapshotRowMetadata(appended)) { }
         Assert.Same(rows[0].SnapshotAllocation, appended.SnapshotAllocation);
         Assert.Equal(2, appended.SnapshotAllocationRow);
     }
@@ -191,13 +191,13 @@ public sealed class ManagedSnapshotRowLifetimeTests
     {
         TerminalScreen screen = CreateScreen([Row(CellAttributes.Bold), Row(CellAttributes.Italic), Row()], 2);
         TerminalRowBuffer rows = screen.GetSnapshotRows(0)!;
-        GhosttySnapshotStyleTracker tracker = new();
+        GhosttySnapshotPageTracker tracker = new();
         GhosttySnapshotStyle bold = new(default, default, default, 1);
         tracker.ChangeCursor(rows, 0, rows[0], default, bold, new(4096));
         tracker.RetireRows(rows, 0, 1);
         rows.RemoveFirst();
         Assert.True(tracker.IsCurrent(0, rows[0], bold));
-        using (GhosttySnapshotStyleTracker.RowEdit edit = tracker.EditRow(rows, rows[0], new(4096)))
+        using (GhosttySnapshotPageTracker.RowEdit edit = tracker.EditRow(rows, rows[0], new(4096)))
             edit.Write(1, new(default, default, default, 4));
         // Italic cells + the independent bold cursor still fill the two usable
         // entries. Dim must grow despite retiring all bold cells.
@@ -313,7 +313,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
 
     private static void WriteStyle(TerminalScreen screen, TerminalRow row, int column, CellAttributes attributes)
     {
-        using GhosttySnapshotStyleTracker.RowEdit edit = screen.EditSnapshotRowStyles(row);
+        using GhosttySnapshotPageTracker.RowEdit edit = screen.EditSnapshotRowMetadata(row);
         TerminalCell cell = TerminalCell.Empty(screen.DefaultForeground, screen.DefaultBackground);
         cell.Codepoint = 'Z'; cell.Attributes = attributes;
         edit.Write(column, GhosttySnapshotLivePage.EncodeStyle(in cell));

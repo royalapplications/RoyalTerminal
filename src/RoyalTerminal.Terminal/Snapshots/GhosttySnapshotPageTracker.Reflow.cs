@@ -5,12 +5,12 @@ using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Terminal.Snapshots;
 
-internal sealed partial class GhosttySnapshotStyleTracker
+internal sealed partial class GhosttySnapshotPageTracker
 {
     // The resize owner serializes access. These are borrowed read-only source
-    // tables for this traversal, not retained publication state. Reconcile once
+    // metadata for this traversal, not retained publication state. Reconcile once
     // per page so restored IDs/dead slots and live mutations are both honored.
-    internal Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotStyleStorage> ReflowSources(
+    internal Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> ReflowSources(
         TerminalRowBuffer rows, GhosttySnapshotAllocation layout)
     {
         Dictionary<GhosttySnapshotPageAllocation, List<TerminalRow>> groups = [];
@@ -20,7 +20,7 @@ internal sealed partial class GhosttySnapshotStyleTracker
             if (!groups.TryGetValue(page, out List<TerminalRow>? group)) groups.Add(page, group = []);
             group.Add(rows[i]);
         }
-        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotStyleStorage> sources = new(groups.Count);
+        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> sources = new(groups.Count);
         foreach ((GhosttySnapshotPageAllocation original, List<TerminalRow> group) in groups)
         {
             GhosttySnapshotPageAllocation page = original;
@@ -38,14 +38,14 @@ internal sealed partial class GhosttySnapshotStyleTracker
         return sources;
     }
 
-    internal void InstallReflowPage(GhosttySnapshotPageAllocation page, GhosttySnapshotStyleStorage styles,
+    internal void InstallReflowPage(GhosttySnapshotPageAllocation page, GhosttySnapshotPageStorage storage,
         IReadOnlyList<TerminalRow> rows)
     {
-        State state = new(styles);
+        State state = new(storage);
         foreach (TerminalRow row in rows)
         {
             state.ObserveSlot(row.SnapshotAllocationRow);
-            state.Revisions[row.SnapshotAllocationRow] = row.SnapshotStyleRevision;
+            state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
         }
         // Non-reflow growth can keep the allocation identity while replacing
         // its COW-owned table (and retaining its existing cursor reference).
@@ -58,9 +58,19 @@ internal sealed partial class GhosttySnapshotStyleTracker
         count = 0;
         if (page.MetadataOverflow || !_pages.TryGetValue(page, out State? state)) return false;
         foreach (TerminalRow row in rows)
-            if (!state.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong? revision) || revision != row.SnapshotStyleRevision)
+            if (!state.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong? revision) || revision != row.SnapshotMetadataRevision)
                 return false;
-        count = state.Storage.Count;
+        count = state.Storage.Styles.Count;
+        return true;
+    }
+
+    internal bool TryGetGraphemeUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        out ulong cells, out ulong bytes)
+    {
+        cells = bytes = 0;
+        if (!TryGetStyleUsage(page, rows, out _) || !_pages.TryGetValue(page, out State? state)) return false;
+        cells = (ulong)state.Storage.Graphemes.Count;
+        bytes = state.Storage.Graphemes.AllocatedBytes;
         return true;
     }
 }

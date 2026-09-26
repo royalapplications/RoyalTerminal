@@ -57,7 +57,7 @@ public sealed class ManagedSnapshotReflowStyleTests
         terminal.Processor.ResizeScreen(8, 2, 0, 0);
         TerminalRow result = terminal.Screen.GetSnapshotRows(0)![0];
         Assert.Equal(2, StyleCount(terminal.Screen, result));
-        using (GhosttySnapshotStyleTracker.RowEdit edit = terminal.Screen.EditSnapshotRowStyles(result))
+        using (GhosttySnapshotPageTracker.RowEdit edit = terminal.Screen.EditSnapshotRowMetadata(result))
         {
             edit.Clear(0, 4);
             result.Cells[..4].Fill(TerminalCell.Empty());
@@ -77,7 +77,7 @@ public sealed class ManagedSnapshotReflowStyleTests
         terminal.Processor.ResizeScreen(8, 2, 0, 0);
         TerminalScreen retained = terminal.Screen.CreateStateCopy();
         TerminalRow row = terminal.Screen.GetSnapshotRows(0)![0];
-        using (GhosttySnapshotStyleTracker.RowEdit edit = terminal.Screen.EditSnapshotRowStyles(row))
+        using (GhosttySnapshotPageTracker.RowEdit edit = terminal.Screen.EditSnapshotRowMetadata(row))
         {
             edit.Clear(0, 8);
             row.Clear();
@@ -202,7 +202,7 @@ public sealed class ManagedSnapshotReflowStyleTests
 
     private static void Write(TerminalScreen screen, TerminalRow row, int column, CellAttributes attributes)
     {
-        using GhosttySnapshotStyleTracker.RowEdit edit = screen.EditSnapshotRowStyles(row);
+        using GhosttySnapshotPageTracker.RowEdit edit = screen.EditSnapshotRowMetadata(row);
         TerminalCell cell = TerminalCell.Empty(); cell.Codepoint = 'Z'; cell.Attributes = attributes;
         edit.Write(column, GhosttySnapshotLivePage.EncodeStyle(in cell));
         row[column] = cell;

@@ -62,7 +62,7 @@ public sealed partial class BasicVtProcessor
     {
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         int departingRow = _cursorRow;
-        GhosttySnapshotStyle previous = _screen.TracksSnapshotStyles ? CaptureSnapshotPen() : default;
+        GhosttySnapshotStyle previous = _screen.TracksSnapshotMetadata ? CaptureSnapshotPen() : default;
         if (SavedCursor is not { } saved)
         {
             _cursorCol = _cursorRow = 0;
@@ -92,7 +92,7 @@ public sealed partial class BasicVtProcessor
         _currentDecorations = saved.Decorations;
         // Ghostty restoreCursor applies the saved style before cursorAbsolute.
         // Accounting at only the destination would miss growth at the old page.
-        if (_screen.TracksSnapshotStyles)
+        if (_screen.TracksSnapshotMetadata)
             _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, departingRow, previous, CaptureSnapshotPen());
     }
 

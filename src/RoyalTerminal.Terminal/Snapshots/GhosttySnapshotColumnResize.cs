@@ -12,18 +12,18 @@ internal static class GhosttySnapshotColumnResize
 {
     private readonly record struct Source(TerminalRow Row, GhosttySnapshotPageAllocation Page, int Slot);
 
-    private sealed class Destination(GhosttySnapshotPageAllocation page, GhosttySnapshotStyleStorage styles)
+    private sealed class Destination(GhosttySnapshotPageAllocation page, GhosttySnapshotPageStorage storage)
     {
         internal readonly GhosttySnapshotPageAllocation Page = page;
-        internal readonly GhosttySnapshotStyleStorage Styles = styles;
+        internal readonly GhosttySnapshotPageStorage Storage = storage;
         internal readonly List<TerminalRow> Rows = [];
         internal int NextSlot;
     }
 
     internal static void Resize(TerminalRowBuffer rows, int columns, uint foreground, uint background,
-        GhosttySnapshotAllocation layout, GhosttySnapshotStyleTracker tracker)
+        GhosttySnapshotAllocation layout, GhosttySnapshotPageTracker tracker)
     {
-        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotStyleStorage> styles = tracker.ReflowSources(rows, layout);
+        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> storage = tracker.ReflowSources(rows, layout);
         Source[] sources = new Source[rows.Count];
         Dictionary<GhosttySnapshotPageAllocation, int> counts = [];
         for (int i = 0; i < rows.Count; i++)
@@ -51,7 +51,7 @@ internal static class GhosttySnapshotColumnResize
                 if (row.Columns < columns && row.ReadOnlyCells[^1].IsWideSpacerHead) reusable = false;
             }
 
-            if (reusable && styles.TryGetValue(page, out GhosttySnapshotStyleStorage? original))
+            if (reusable && storage.TryGetValue(page, out GhosttySnapshotPageStorage? original))
             {
                 // Copy even when no cells change: later backfill must not mutate
                 // either a borrowed source or a retained publication's table.
@@ -73,25 +73,25 @@ internal static class GhosttySnapshotColumnResize
             // still need a valid stride if a spacer forces a clone after shrink.
             // Processor-owned native-like resizes clear hidden cells separately.
             GhosttySnapshotPageCapacity capacity = Adjust(page.Capacity, preservedColumns, counts[page], layout);
-            styles.TryGetValue(page, out GhosttySnapshotStyleStorage? sourceStyles);
+            storage.TryGetValue(page, out GhosttySnapshotPageStorage? sourceStorage);
             int index = start;
-            if (previous is not null && !previous.Page.MetadataOverflow && sourceStyles is not null &&
+            if (previous is not null && !previous.Page.MetadataOverflow && sourceStorage is not null &&
                 previous.Page.Capacity.Columns >= preservedColumns)
             {
                 while (index < end && previous.NextSlot < previous.Page.Capacity.Rows)
                 {
-                    if (!Copy(previous, sources[index], sourceStyles)) break;
+                    if (!Copy(previous, sources[index], sourceStorage)) break;
                     Assign(previous, sources[index++], columns, foreground, background);
                 }
             }
 
             while (index < end)
             {
-                Destination destination = new(new(capacity, metadataOverflow: sourceStyles is null), new(capacity.Styles));
+                Destination destination = new(new(capacity, metadataOverflow: sourceStorage is null), new(capacity));
                 destinations.Add(destination);
                 while (index < end && destination.NextSlot < capacity.Rows)
                 {
-                    if (sourceStyles is not null && !Copy(destination, sources[index], sourceStyles))
+                    if (sourceStorage is not null && !Copy(destination, sources[index], sourceStorage))
                     {
                         if (destination.NextSlot > 0) break;
                         // A source row should fit its inherited style capacity.
@@ -99,7 +99,7 @@ internal static class GhosttySnapshotColumnResize
                         // retain the payload with explicit unrepresentable charge;
                         // never retry forever or silently admit more history.
                         destinations.RemoveAt(destinations.Count - 1);
-                        destination = new(new(capacity, metadataOverflow: true), new(capacity.Styles));
+                        destination = new(new(capacity, metadataOverflow: true), new(capacity));
                         destinations.Add(destination);
                         Assign(destination, sources[index++], columns, foreground, background);
                         break;
@@ -112,7 +112,7 @@ internal static class GhosttySnapshotColumnResize
         }
 
         foreach (Destination destination in destinations)
-            tracker.InstallReflowPage(destination.Page, destination.Styles, destination.Rows);
+            tracker.InstallReflowPage(destination.Page, destination.Storage, destination.Rows);
     }
 
     private static GhosttySnapshotPageCapacity Adjust(GhosttySnapshotPageCapacity source, int columns,
@@ -123,18 +123,28 @@ internal static class GhosttySnapshotColumnResize
             Rows = checked((ushort)Math.Min(liveRows, source.Rows)),
         };
 
-    private static bool Copy(Destination destination, Source source, GhosttySnapshotStyleStorage styles)
+    private static bool Copy(Destination destination, Source source, GhosttySnapshotPageStorage storage)
     {
         int target = checked(destination.NextSlot * destination.Page.Capacity.Columns);
         int offset = checked(source.Slot * source.Page.Capacity.Columns);
+        int count = source.Row.PreservedColumns;
         GhosttySnapshotStyleStorage.CopyCache cache = default;
-        GhosttySnapshotSetAddResult result = destination.Styles.CopyCellsFrom(target, styles, offset,
-            source.Row.PreservedColumns, ref cache, out int copied);
-        if (result == GhosttySnapshotSetAddResult.Success) return true;
+        int copied = 0;
+        while (copied < count)
+        {
+            int batch = storage.Graphemes.Count == 0 ? count - copied : 1;
+            if (batch == 1 && destination.Storage.Graphemes.CopyCellFrom(target + copied, storage.Graphemes, offset + copied) != GhosttySnapshotGraphemeAddResult.Success) break;
+            GhosttySnapshotSetAddResult result = destination.Storage.Styles.CopyCellsFrom(target + copied, storage.Styles,
+                offset + copied, batch, ref cache, out int added);
+            copied += added;
+            if (result != GhosttySnapshotSetAddResult.Success) break;
+        }
+        if (copied == count) return true;
         // Page.cloneRowFrom may fail after copying a styled prefix. Roll back
         // that row's references, retaining dead IDs/probe history from the try.
         // No rehash or capacity growth is allowed on a preceding-page backfill.
-        destination.Styles.ClearCells(target, copied);
+        destination.Storage.Styles.ClearCells(target, count);
+        destination.Storage.Graphemes.ClearCells(target, count);
         return false;
     }
 

@@ -37,18 +37,18 @@ public sealed partial class TerminalScreen
 
     private GhosttySnapshotReflowAllocation? CreateSnapshotReflowAllocation(int columns)
     {
-        GhosttySnapshotStyleTracker? tracker = PrepareSnapshotResize(columns);
-        return tracker is null ? null : new(_rows, columns, SnapshotStyleLayout(), tracker);
+        GhosttySnapshotPageTracker? tracker = PrepareSnapshotResize(columns);
+        return tracker is null ? null : new(_rows, columns, SnapshotPageLayout(), tracker);
     }
 
-    private GhosttySnapshotStyleTracker? PrepareSnapshotResize(int columns)
+    private GhosttySnapshotPageTracker? PrepareSnapshotResize(int columns)
     {
         if (_rows.Count == 0 || columns is < 1 or > ushort.MaxValue ||
             _snapshotScrollbackQuota is null && _rows[0].SnapshotAllocation is null) return null;
-        GhosttySnapshotAllocation layout = SnapshotStyleLayout();
+        GhosttySnapshotAllocation layout = SnapshotPageLayout();
         for (int i = 0; i < _rows.Count; i++)
             if (_rows[i].PreservedColumns is < 1 or > ushort.MaxValue) return null;
-        GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
+        GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
         bool allAccounted = true;
         for (int i = 0; i < _rows.Count; i++) allAccounted &= _rows[i].SnapshotAllocation is not null;
         // Existing PAGE seeds are more precise than visible styles (notably

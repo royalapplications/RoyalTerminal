@@ -8,13 +8,13 @@ namespace RoyalTerminal.Terminal;
 public sealed partial class BasicVtProcessor
 {
     private SnapshotCursorStyleScope TrackSnapshotCursorMovement()
-        => _screen.TracksSnapshotStyles ? new(this) : default;
+        => _screen.TracksSnapshotMetadata ? new(this) : default;
 
     // Only semantic control boundaries call this, never each printable byte.
     // Same-page movement does not migrate references in Ghostty either.
     private void RecordSnapshotCursorStyle()
     {
-        if (!_screen.TracksSnapshotStyles) return;
+        if (!_screen.TracksSnapshotMetadata) return;
         int key = _inAltScreen ? 1 : 0;
         GhosttySnapshotStyle pen = CaptureSnapshotPen();
         if (!_screen.SnapshotCursorStyleIsCurrent(key, _cursorRow, pen))

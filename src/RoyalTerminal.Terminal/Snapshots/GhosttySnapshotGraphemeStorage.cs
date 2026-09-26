@@ -119,6 +119,13 @@ internal sealed class GhosttySnapshotGraphemeStorage
         ArgumentOutOfRangeException.ThrowIfNegative(start);
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         int end = checked(start + count);
+        if (count <= _cells.Count)
+        {
+            // A dense page should pay for the affected row/run, not a scan of
+            // every retained grapheme whenever one row is erased or copied.
+            for (int cell = start; cell < end; cell++) Clear(cell);
+            return;
+        }
         // Dictionary.Remove is supported during enumeration on our .NET target.
         // Visit sparse grapheme cells rather than every cell in a wide blank row.
         foreach (int cell in _cells.Keys)

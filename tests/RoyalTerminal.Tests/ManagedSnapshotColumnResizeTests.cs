@@ -39,7 +39,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         Assert.Equal(CellAttributes.Bold, first.ReadOnlyPreservedCells[3].Attributes);
         Assert.Equal(3, Styles(screen, first)); // Two cell styles plus the unprinted dim pen.
         Assert.Equal(2, retained.Columns);
-        using (GhosttySnapshotStyleTracker.RowEdit edit = screen.EditSnapshotRowStyles(first))
+        using (GhosttySnapshotPageTracker.RowEdit edit = screen.EditSnapshotRowMetadata(first))
         {
             edit.Clear(0, 4);
             first.Clear();
@@ -59,7 +59,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         TerminalScreen screen = Screen(source, input, alignment);
         TerminalRowBuffer rows = screen.GetSnapshotRows(0)!;
         // Reconcile source physical IDs before rotating rows.
-        using (screen.EditSnapshotRowStyles(rows[0])) { }
+        using (screen.EditSnapshotRowMetadata(rows[0])) { }
         (rows[0], rows[1]) = (rows[1], rows[0]);
         TerminalScreen retained = screen.CreateStateCopy();
         GhosttySnapshotAllocation layout = new(alignment);
@@ -103,7 +103,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         Assert.Equal(new TerminalGridPosition(0, 1), position);
         screen.ReleaseAnchor(anchor);
         Assert.NotSame(retained.GetSnapshotRows(0)![0].SnapshotAllocation, rows[0].SnapshotAllocation);
-        using (GhosttySnapshotStyleTracker.RowEdit edit = screen.EditSnapshotRowStyles(rows[0]))
+        using (GhosttySnapshotPageTracker.RowEdit edit = screen.EditSnapshotRowMetadata(rows[0]))
         {
             edit.Clear(0, 8);
             rows[0].Clear();
@@ -120,7 +120,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         rows[0].SnapshotAllocationRow = 1; // Retired prefix slot zero is not reusable.
         rows[1].SnapshotAllocation = new(new(4, 1, 8, 0, 0, 0));
         rows[1].SnapshotAllocationRow = 0;
-        using (screen.EditSnapshotRowStyles(rows[0])) { }
+        using (screen.EditSnapshotRowMetadata(rows[0])) { }
         TerminalScreen retained = screen.CreateStateCopy();
         GhosttySnapshotPageAllocation first = rows[0].SnapshotAllocation!;
 
@@ -153,7 +153,7 @@ public sealed class ManagedSnapshotColumnResizeTests
         Assert.Same(rows[0].SnapshotAllocation, rows[1].SnapshotAllocation);
         Assert.Same(rows[0].SnapshotAllocation, rows[2].SnapshotAllocation);
         Assert.Equal(3, Styles(screen, rows[0]));
-        using (GhosttySnapshotStyleTracker.RowEdit edit = screen.EditSnapshotRowStyles(rows[1]))
+        using (GhosttySnapshotPageTracker.RowEdit edit = screen.EditSnapshotRowMetadata(rows[1]))
         {
             edit.Clear(0, 8);
             rows[1].Clear();

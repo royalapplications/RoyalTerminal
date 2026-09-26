@@ -195,7 +195,7 @@ public sealed class TerminalRow
     internal RoyalTerminal.Terminal.Snapshots.GhosttySnapshotPageAllocation? SnapshotAllocation { get; set; }
     internal int SnapshotAllocationRow { get; set; }
     internal bool SnapshotAllocationUnmodified { get; set; }
-    internal ulong SnapshotStyleRevision { get; private set; }
+    internal ulong SnapshotMetadataRevision { get; private set; }
     private TerminalCell[] _cells;
     private int _columns;
     private byte _rowMetadata;
@@ -284,7 +284,7 @@ public sealed class TerminalRow
         SnapshotAllocation = source.SnapshotAllocation;
         SnapshotAllocationRow = source.SnapshotAllocationRow;
         SnapshotAllocationUnmodified = source.SnapshotAllocationUnmodified;
-        SnapshotStyleRevision = source.SnapshotStyleRevision;
+        SnapshotMetadataRevision = source.SnapshotMetadataRevision;
         _cells = source._cells;
         _columns = source._columns;
         CellsAreShared = source.CellsAreShared = true;
@@ -385,8 +385,8 @@ public sealed class TerminalRow
         (SemanticPrompt, other.SemanticPrompt) = (other.SemanticPrompt, SemanticPrompt);
         (IsTransientResizeRow, other.IsTransientResizeRow) = (other.IsTransientResizeRow, IsTransientResizeRow);
         SnapshotAllocationUnmodified = other.SnapshotAllocationUnmodified = false;
-        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
-        other.SnapshotStyleRevision = unchecked(other.SnapshotStyleRevision + 1);
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
+        other.SnapshotMetadataRevision = unchecked(other.SnapshotMetadataRevision + 1);
         IsDirty = other.IsDirty = true;
     }
 
@@ -510,7 +510,7 @@ public sealed class TerminalRow
     private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
     {
         SnapshotAllocationUnmodified = false;
-        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
         if (columns == _cells.Length)
         {
             EnsureWritableCells();
@@ -530,7 +530,7 @@ public sealed class TerminalRow
     private void EnsureWritableCells()
     {
         SnapshotAllocationUnmodified = false;
-        SnapshotStyleRevision = unchecked(SnapshotStyleRevision + 1);
+        SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
         if (!CellsAreShared)
         {
             return;
@@ -1444,7 +1444,7 @@ public sealed partial class TerminalScreen
         }
 
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
-        _snapshotStyleTracker?.DiscardCursor(1);
+        _snapshotPageTracker?.DiscardCursor(1);
         _alternateRows = null;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
@@ -1557,7 +1557,7 @@ public sealed partial class TerminalScreen
         }
 
         _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
-        _snapshotStyleTracker = null;
+        _snapshotPageTracker = null;
         _primaryRows = null;
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;
@@ -1707,7 +1707,7 @@ public sealed partial class TerminalScreen
             TerminalRow row = _rows[i];
             if (row.PreservedColumns > row.Columns)
             {
-                using GhosttySnapshotStyleTracker.RowEdit styles = EditSnapshotRowStyles(row);
+                using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
                 styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
                 row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
             }
@@ -1965,7 +1965,7 @@ public sealed partial class TerminalScreen
                 rowEnd++;
             }
 
-            using GhosttySnapshotStyleTracker.RowEdit styles = EditSnapshotRowStyles(row);
+            using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
             styles.Clear(rowStart, rowEnd - rowStart + 1);
             for (int column = rowStart; column <= rowEnd; column++)
             {
@@ -2407,7 +2407,7 @@ public sealed partial class TerminalScreen
         if (columns > Columns && PrepareSnapshotResize(columns) is { } tracker)
         {
             GhosttySnapshotColumnResize.Resize(_rows, columns, DefaultForeground, DefaultBackground,
-                SnapshotStyleLayout(), tracker);
+                SnapshotPageLayout(), tracker);
             return;
         }
         for (int i = 0; i < _rows.Count; i++)
@@ -2747,14 +2747,14 @@ public sealed partial class TerminalScreen
                 }
 
                 // Cell payloads still copy in bulk. Snapshot-aware reflow also
-                // records native style-ID/refcount copies before the payload;
+                // records native metadata allocation/copies before the payload;
                 // ordinary screens skip that bookkeeping entirely.
                 int runLength = GetReflowCopyRunLength(
                     logicalLine[sourceIndex..], semanticRows.IsEmpty ? columns - column
                         : Math.Min(columns - column, semanticRows[semanticIndex].End - sourceIndex));
                 if (runLength > 0)
                 {
-                    snapshotAllocation?.CopyStyles(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
+                    snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
                     logicalLine.Slice(sourceIndex, runLength).CopyTo(row.Cells[column..]);
                     if (mappedPosition is null && trackedLogicalOffset >= 0 &&
                         trackedLogicalOffset <= sourceIndex + runLength)
@@ -2804,13 +2804,14 @@ public sealed partial class TerminalScreen
                 }
 
                 cell.Width = (byte)width;
-                snapshotAllocation?.CopyStyles(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
+                snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
                 row[column] = cell;
 
                 if (width == 2 && column + 1 < columns)
                 {
-                    snapshotAllocation?.CopyStyles(row, column + 1, snapshotSources, ref snapshotSourceIndex,
-                        sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]) ? sourceIndex + 1 : sourceIndex, 1);
+                    snapshotAllocation?.CopyMetadata(row, column + 1, snapshotSources, ref snapshotSourceIndex,
+                        sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]) ? sourceIndex + 1 : sourceIndex, 1,
+                        includeGraphemes: sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]));
                     row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
                         ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                 }

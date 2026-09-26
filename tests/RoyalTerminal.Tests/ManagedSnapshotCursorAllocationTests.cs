@@ -161,13 +161,13 @@ public sealed class ManagedSnapshotCursorAllocationTests
     [Fact]
     public void DiscardingAnAlternateCursorLeavesItsCowOwnerIntact()
     {
-        GhosttySnapshotStyleTracker tracker = new();
+        GhosttySnapshotPageTracker tracker = new();
         TerminalRow row = new(4) { SnapshotAllocation = new(new(4, 1, 16, 0, 0, 0)) };
         TerminalRowBuffer rows = new(1);
         rows.Add(row);
         GhosttySnapshotStyle bold = new(default, default, default, 1);
         tracker.ChangeCursor(rows, 1, row, default, bold, new(4096));
-        GhosttySnapshotStyleTracker retained = tracker.Copy();
+        GhosttySnapshotPageTracker retained = tracker.Copy();
         tracker.DiscardCursor(1);
         Assert.False(tracker.IsCurrent(1, row, bold));
         Assert.True(retained.IsCurrent(1, row, bold));

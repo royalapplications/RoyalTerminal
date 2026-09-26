@@ -5,9 +5,9 @@ using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Terminal.Snapshots;
 
-internal sealed partial class GhosttySnapshotStyleTracker
+internal sealed partial class GhosttySnapshotPageTracker
 {
-    // Called before removing rows or reusing their allocation identities. Like
+    // Called before removing rows or reusing their metadata allocation identities. Like
     // Page.resetRow, retirement releases cells, not the independent cursor pin.
     // Do not reconcile disappearing cells: their last tracked references are
     // simply released, and survivors keep their own pending row revisions.
@@ -26,7 +26,8 @@ internal sealed partial class GhosttySnapshotStyleTracker
             State state = _pages.TryGetValue(page, out State? known)
                 ? Exclusive(page, known) : Writable(page, Group(rows, page));
             int slot = row.SnapshotAllocationRow;
-            state.Storage.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
+            state.Storage.Styles.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
+            state.Storage.Graphemes.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
             state.RetireSlot(slot);
         }
     }

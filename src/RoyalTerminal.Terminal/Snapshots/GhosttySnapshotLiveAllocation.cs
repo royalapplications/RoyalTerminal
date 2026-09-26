@@ -67,7 +67,7 @@ internal static class GhosttySnapshotLiveAllocation
         }
         foreach ((GhosttySnapshotPageAllocation page, List<TerminalRow> group) in pages)
         {
-            screen.SnapshotStyleRowsObserved(page, group);
+            screen.SnapshotRowsObserved(page, group);
             bool unchanged = true;
             foreach (TerminalRow row in group) unchanged &= row.SnapshotAllocationUnmodified;
             if (unchanged)
@@ -78,7 +78,7 @@ internal static class GhosttySnapshotLiveAllocation
             }
             if (!TryMeasureCapacity(screen, group, allocation, page.Capacity, out GhosttySnapshotPageCapacity capacity)) return ulong.MaxValue;
             GhosttySnapshotPageAllocation updated = capacity == page.Capacity && !page.MetadataOverflow ? page : new(capacity);
-            if (!ReferenceEquals(page, updated)) screen.SnapshotStyleAllocationReplaced(page, updated);
+            if (!ReferenceEquals(page, updated)) updated = screen.SnapshotAllocationReplaced(page, updated);
             foreach (TerminalRow row in group)
             {
                 // Replace the immutable identity only on this row set. A held
@@ -86,6 +86,7 @@ internal static class GhosttySnapshotLiveAllocation
                 row.SnapshotAllocation = updated;
                 row.SnapshotAllocationUnmodified = true;
             }
+            if (updated.MetadataOverflow) return ulong.MaxValue;
             bytes = Add(bytes, allocation.AllocatedBytes(capacity));
         }
         return bytes;
@@ -106,6 +107,8 @@ internal static class GhosttySnapshotLiveAllocation
         HashSet<int> links = [];
         int columns = 1;
         ulong graphemes = 0, temporaryGrapheme = 0, graphemeCells = 0, strings = 0, linkedCells = 0;
+        bool trackedGraphemes = rows[0].SnapshotAllocation is { } owner &&
+            screen.TryGetSnapshotGraphemeUsage(owner, rows, out graphemeCells, out graphemes);
         foreach (TerminalRow row in rows)
         {
             columns = Math.Max(columns, row.PreservedColumns);
@@ -116,7 +119,7 @@ internal static class GhosttySnapshotLiveAllocation
                     GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cell);
                     if (style != default) styles.Add(style);
                 }
-                if (cell.Grapheme is { Length: > 0 } text)
+                if (!trackedGraphemes && cell.Grapheme is { Length: > 0 } text)
                 {
                     ulong scalars = 0;
                     foreach (Rune _ in text.EnumerateRunes()) scalars++;

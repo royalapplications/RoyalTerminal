@@ -122,7 +122,7 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
             ClearPreservedCellsForMutation(row);
             // Native resize temporarily detaches the cursor pen before this
             // clear, so prompt blanks use default colors, not the active SGR.
-            using GhosttySnapshotStyleTracker.RowEdit styles = _screen.EditSnapshotRowStyles(row);
+            using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
             styles.Clear(0, row.Columns);
             row.Cells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
             row.IsDirty = true;
