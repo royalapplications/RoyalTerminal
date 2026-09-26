@@ -397,25 +397,35 @@ jobs:
         working-directory: native/ghostty-vt-extensions
         shell: bash
         run: |
-          target=""
+          cpu=""
           simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-gnu"
             # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
             # compile when Ghostty's vendored SIMD archive is enabled.
             simd="-Dsimd=false"
+          else
+            # Match release compatibility artifacts. The build and test runners
+            # can have different CPUs: runner-native AVX-512 instructions caused
+            # TerminalNew to crash with 0xC000001D in CI run 36269330366.
+            target="-Dtarget=x86_64-windows-msvc"
+            cpu="-Dcpu=x86_64-vzeroupper"
+            simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast ${target} ${simd}
+          zig build -Doptimize=ReleaseFast ${target} ${cpu} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         shell: bash
         run: |
-          target=""
+          cpu=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-gnu"
+          else
+            target="-Dtarget=x86_64-windows-msvc"
+            cpu="-Dcpu=x86_64-vzeroupper"
           fi
-          zig build -Doptimize=ReleaseFast ${target}
+          zig build -Doptimize=ReleaseFast ${target} ${cpu}
 
       - name: Collect artifacts
         shell: bash
@@ -445,6 +455,13 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify Windows x64 native artifacts avoid AVX
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          ./scripts/verify-windows-x64-no-avx.ps1 `
+            -Path "artifacts/win-x64/native/ghostty-vt.dll", "artifacts/win-x64/native/ghostty-renderer-capi.dll"
 
       - name: Upload native library
         uses: actions/upload-artifact@v7
