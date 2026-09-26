@@ -45,7 +45,8 @@ internal sealed partial class ManagedKittyGraphicsStore
 
     internal bool DeleteAtCell(TerminalScreen screen, int column, int row,
         int? z, uint cellWidth, uint cellHeight, bool deleteUnused)
-        => DeleteMatchingPlacements(screen, (key, placement) =>
+        => column >= 0 && column < screen.Columns && row >= 0 && row < screen.ViewportRows &&
+        DeleteMatchingPlacements(screen, (key, placement) =>
         {
             if (z is int layer && placement.Options.Z != layer) return false;
             return TryGetCellRect(screen, key, placement, cellWidth, cellHeight,
@@ -62,7 +63,7 @@ internal sealed partial class ManagedKittyGraphicsStore
 
     internal bool DeleteByRow(TerminalScreen screen, int row,
         uint cellWidth, uint cellHeight, bool deleteUnused)
-        => DeleteMatchingPlacements(screen, (key, placement) =>
+        => row >= 0 && row < screen.ViewportRows && DeleteMatchingPlacements(screen, (key, placement) =>
             TryGetCellRect(screen, key, placement, cellWidth, cellHeight,
                 out _, out long top, out _, out long bottom) &&
             row >= top && row < bottom, deleteUnused);
@@ -74,14 +75,14 @@ internal sealed partial class ManagedKittyGraphicsStore
                 !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin)) return false;
             int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
             if (origin.Row >= activeTop + screen.ViewportRows) return false;
+            // Ghostty selects every active-area pin, including an empty crop.
+            if (origin.Row >= activeTop) return true;
             // A placement anchored in history can still reach into the active viewport.
             if (!_images.TryGetValue(key.ImageId, out Image? image)) return false;
             ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
                 (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
                 cellWidth, cellHeight);
-            long rows = (geometry.OffsetY + (long)geometry.Height + Math.Max(1u, cellHeight) - 1) /
-                Math.Max(1u, cellHeight);
-            return origin.Row + rows > activeTop;
+            return geometry.Columns > 0 && geometry.Rows > 0 && origin.Row + (long)geometry.Rows > activeTop;
         }, deleteUnused);
 
     private bool DeleteMatchingPlacements(TerminalScreen screen,
@@ -112,17 +113,18 @@ internal sealed partial class ManagedKittyGraphicsStore
     {
         left = top = right = bottom = 0;
         if (!_images.TryGetValue(key.ImageId, out Image? image) ||
-            !TryResolveRoot(screen, placement, out Placement? root, out long dx, out long dy) ||
-            root?.Anchor is not TerminalScreenAnchor anchor ||
+            // Relative/virtual placements have no independent screen pin for
+            // geometric deletion. They follow their parent's deletion instead.
+            placement.Anchor is not TerminalScreenAnchor anchor ||
             !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin)) return false;
         ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
             (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
             cellWidth, cellHeight);
         if (geometry.Columns == 0 || geometry.Rows == 0) return false;
-        left = origin.Column + dx;
-        top = origin.Row + dy - Math.Max(0, screen.TotalRows - screen.ViewportRows);
-        right = left + geometry.Columns;
-        bottom = top + geometry.Rows;
+        left = origin.Column;
+        top = origin.Row - Math.Max(0, screen.TotalRows - screen.ViewportRows);
+        right = Math.Min(screen.Columns, left + geometry.Columns);
+        bottom = Math.Min(screen.ViewportRows, top + geometry.Rows);
         return true;
     }
 }

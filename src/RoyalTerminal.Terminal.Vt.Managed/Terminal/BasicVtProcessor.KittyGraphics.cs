@@ -106,7 +106,7 @@ public sealed partial class BasicVtProcessor
         ManagedKittyImageLoader? loader = _kittyStore.Loading;
         responseCommand = loader?.InitialCommand ?? command;
         responseId = responseCommand.ImageId;
-        responseFrame = responseCommand.Action == 'f' ? responseCommand.Get('r') : 0;
+        responseFrame = loader is null && responseCommand.Action == 'f' ? responseCommand.Get('r') : 0;
         if (loader is not null && responseCommand.Action == 'f') responseId = _kittyStore.LoadingImageId;
         if (loader is null)
         {
@@ -123,15 +123,24 @@ public sealed partial class BasicVtProcessor
                 _kittyStore.LoadingImageId = target.Id;
                 _kittyStore.LoadingTargetGeneration = target.Generation;
             }
+            // Ghostty retires the previous image at the start of an explicit
+            // retransmission, including one whose format or medium is invalid.
+            if (command.ImageId != 0 && command.Action is 't' or 'T')
+                _kittyStore.RemoveImage(_screen, command.ImageId);
             if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                     _options.KittyGraphicsMaxImageBytes, out loader, out error,
                     _options.KittyGraphicsMediumReader)) return false;
-            if (command.ImageId != 0 && command.Action is 't' or 'T')
-                _kittyStore.RemoveImage(_screen, command.ImageId);
+            if (command.Action is 't' or 'T')
+                _kittyStore.LoadingImageId = command.ImageId != 0 ? command.ImageId
+                    : _kittyStore.AllocateImageId(command.ImageNumber != 0);
+            // The loader's response has no frame number until a decoded frame
+            // is resolved. Initial target/format errors above echo the request.
+            responseFrame = 0;
         }
         else if (!loader.TryAppend(command, out error))
         {
-            _kittyStore.Loading = null;
+            // A rejected chunk leaves the bounded accumulator intact. The
+            // client may retry it or explicitly cancel with a delete command.
             return false;
         }
 
@@ -175,15 +184,11 @@ public sealed partial class BasicVtProcessor
             return true;
         }
 
-        uint imageId = responseCommand.ImageId;
-        if (imageId == 0)
-        {
-            imageId = _kittyStore.AllocateImageId(responseCommand.ImageNumber != 0);
-            if (responseCommand.ImageNumber == 0) respond = false;
-        }
-        responseId = imageId;
+        uint imageId = _kittyStore.LoadingImageId;
+        if (responseCommand.ImageId == 0 && responseCommand.ImageNumber == 0) respond = false;
         if (!_kittyStore.TryAddImage(_screen, imageId, responseCommand.ImageNumber,
-                decoded, decoded.Rgba.Length, transient: false, out error)) return false;
+                decoded, decoded.Rgba.Length, transient: (responseCommand.Get('N') & 1) != 0, out error)) return false;
+        responseId = imageId;
         if (responseCommand.Action == 'T')
             return TryDisplayKittyImage(responseCommand, out responseId, out error, imageId);
         return true;
@@ -195,6 +200,8 @@ public sealed partial class BasicVtProcessor
         imageId = loadedId != 0 ? loadedId : command.ImageId;
         error = "EINVAL: image ID or number required";
         if (imageId == 0 && command.ImageNumber == 0) return false;
+        error = "EINVAL: virtual placement cannot refer to a parent";
+        if (command.Get('U') != 0 && command.Get('P') != 0) return false;
         ManagedKittyGraphicsStore.Image? image = _kittyStore.Find(imageId, command.ImageNumber);
         error = "ENOENT: image not found";
         if (image is null) return false;
@@ -210,10 +217,13 @@ public sealed partial class BasicVtProcessor
                 (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
                 (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
             long target = (long)_cursorCol + geometry.Columns;
-            int rowsToMove = Math.Max(0, (int)Math.Min(int.MaxValue, geometry.Rows == 0 ? 0 : geometry.Rows - 1));
-            if (target >= _screen.Columns) rowsToMove++;
-            rowsToMove = Math.Min(rowsToMove, _screen.ViewportRows * 2);
-            for (int i = 0; i < rowsToMove; i++) LineFeed(wrapForced: false);
+            long requestedRows = Math.Max(0L, (long)geometry.Rows - 1) + (target >= _screen.Columns ? 1 : 0);
+            int rowsBeforeScroll = _cursorRow >= _scrollTop && _cursorRow <= _scrollBottom && CursorInsideHorizontalMargins
+                ? _scrollBottom - _cursorRow : 0;
+            // Bound untrusted dimensions to reaching the scroll-region bottom
+            // plus one screen of scrolling, as in Ghostty's graphics_exec.zig.
+            long rowsToMove = Math.Min(requestedRows, (long)rowsBeforeScroll + _screen.ViewportRows);
+            for (long i = 0; i < rowsToMove; i++) LineFeed(wrapForced: false);
             _cursorCol = target >= _screen.Columns ? 0 : (int)target;
             ResetDelayedWrap();
         }

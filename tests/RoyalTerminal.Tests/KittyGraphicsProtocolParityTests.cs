@@ -45,13 +45,47 @@ public sealed class KittyGraphicsProtocolParityTests
         {
             "a=t,f=32,i=1,s=1,v=1;/wAA/w==", "a=f,f=32,i=1,s=1,v=1,c=99;AAD//w=="
         }];
+        yield return ["virtual-parent-before-missing-image", new[]
+        {
+            "a=p,i=99,p=1,U=1,P=2", "a=p,I=99,p=2,U=2,P=3"
+        }];
+        yield return ["invalid-retransmission-retires-image", new[]
+        {
+            "a=T,i=1,p=1,s=1,v=1,C=1;/wAA/w==", "a=t,i=1,f=99,s=1,v=1;AAD//w==",
+            "a=p,i=1,p=1,C=1"
+        }];
+        yield return ["frame-errors-before-and-after-decoding", new[]
+        {
+            "a=t,i=1,s=1,v=1;/wAA/w==", "a=f,i=1,r=99,f=99,s=1,v=1;AAD//w==",
+            "a=f,i=1,r=99,s=1,v=1;AA==", "a=f,i=1,r=99,s=2,v=1;AAD//wAA//8=",
+            "a=f,i=1,r=99,s=1,v=1,c=99;AAD//w=="
+        }];
+        yield return ["chunked-frame-error-has-not-resolved-requested-frame", new[]
+        {
+            "a=t,i=1,s=1,v=1;/wAA/w==", "a=f,i=1,r=99,s=1,v=1,m=1;AA==", "m=0;AA=="
+        }];
+        yield return ["transmit-like-continuations-follow-initial-action", new[]
+        {
+            "a=T,i=1,p=1,s=1,v=1,C=1,m=1;/wAA", "a=f,i=99,r=99,m=0;/w==",
+            "a=f,i=1,r=99,s=1,v=1,m=1;AAD/", "a=T,i=99,p=99,m=0;/w==",
+            "a=a,i=1,c=2", "a=p,i=99,C=1"
+        }];
+        yield return ["implicit-id-reservation-survives-aborted-load", new[]
+        {
+            "a=t,s=1,v=1,m=1;/wAA", "a=d,d=a", "a=T,s=1,v=1,C=1;AAD//w==",
+            "a=p,i=2147483647,C=1", "a=p,i=2147483648,C=1"
+        }];
     }
 
     [Theory]
     [MemberData(nameof(Conversations))]
     public void RepliesMatchNativeGhostty(string name, string[] commands)
     {
-        if (!GhosttyVtProcessor.IsAvailable() || !GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;
+        if (!GhosttyVtProcessor.IsAvailable() || !GhosttyVtHelpers.GetBuildFeatures().KittyGraphics)
+        {
+            Assert.NotEqual("1", Environment.GetEnvironmentVariable("ROYALTERMINAL_REQUIRE_NATIVE_TESTS"));
+            Assert.Skip("Native Ghostty Kitty graphics runtime unavailable.");
+        }
         TerminalScreen managedScreen = new(8, 3, 10);
         TerminalScreen nativeScreen = new(8, 3, 10);
         using BasicVtProcessor managed = new(managedScreen);

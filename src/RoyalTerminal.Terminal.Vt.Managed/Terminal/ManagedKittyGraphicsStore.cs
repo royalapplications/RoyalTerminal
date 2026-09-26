@@ -101,6 +101,10 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         _images.Clear();
         Loading = null;
         LoadingImageId = 0;
+        LoadingTargetGeneration = 0;
+        _nextImageId = 2147483647;
+        _nextInternalPlacementId = 0;
+        _marginScrollRestores.Clear();
         _storedBytes = 0;
         _generation++;
     }

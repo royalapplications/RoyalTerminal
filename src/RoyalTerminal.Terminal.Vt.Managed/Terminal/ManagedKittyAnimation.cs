@@ -40,7 +40,7 @@ internal sealed class ManagedKittyAnimation
         out uint frameNumber, out string error)
     {
         uint requested = command.Get('r');
-        frameNumber = requested;
+        frameNumber = 0;
         error = "OK";
         KittyGraphicsDecodedImage root = RootImage;
         if (source.Width > root.Width || source.Height > root.Height)
