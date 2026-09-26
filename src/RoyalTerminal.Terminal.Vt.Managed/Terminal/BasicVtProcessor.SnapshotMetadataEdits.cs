@@ -39,6 +39,11 @@ public sealed partial class BasicVtProcessor
             pen = RecordSnapshotCursorStyle(CaptureSnapshotPen());
         }
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        if ((ApplySnapshotCursorStyleDrops() & (_inAltScreen ? 2 : 1)) != 0) pen = default;
+        // Native writes the cell's style before hyperlink map growth. That
+        // growth may drop the pen for later cells, not restyle this cell.
+        TerminalCell cell = default;
+        WriteCellFromPen(ref cell, codepoint, width);
         int cellHyperlink = _currentHyperlinkId;
         if (_screen.TracksSnapshotMetadata)
         {
@@ -49,9 +54,9 @@ public sealed partial class BasicVtProcessor
             // cursor independently; read its authoritative state afterward.
             _currentHyperlinkId = _screen.SnapshotCursorHyperlinkToken(_inAltScreen ? 1 : 0, _currentHyperlinkId);
         }
-        ref TerminalCell cell = ref row[column];
-        WriteCellFromPen(ref cell, codepoint, width);
         cell.HyperlinkId = cellHyperlink;
+        row[column] = cell;
+        ApplySnapshotCursorStyleDrops();
     }
 
     private void WriteStyledCell(TerminalRow row, int column, in TerminalCell cell)

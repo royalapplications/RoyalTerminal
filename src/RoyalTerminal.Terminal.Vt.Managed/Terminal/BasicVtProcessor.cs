@@ -463,6 +463,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         finally
         {
+            ApplySnapshotCursorStyleDrops();
             _inputBatchDepth--;
             // Match the native adapter's write-then-render order. Protocol
             // commands in one input batch must see a stable animation clock;
@@ -476,6 +477,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         consumed = 0;
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
+        ApplySnapshotCursorStyleDrops();
         RefreshTimedState();
         before = ModeState;
         if (data.IsEmpty || (stopAtGround && IsParserGround))
@@ -488,6 +490,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         for (var i = 0; i < data.Length; i++)
         {
+            // Prior metadata edits can drop a pen without an SGR. Observe it
+            // before reports, DECSC or another control reads the registers.
+            if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
             var b = data[i];
 
             // Only the final unfinished fragment needs retaining. Record starts
@@ -1234,6 +1239,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void PutChar(int codepoint)
     {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
         // Ghostty currently suppresses printable output to the unsupported
         // status line; controls and parser state still advance normally.
         if (_statusDisplay != 0) return;
@@ -1341,6 +1347,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
     {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
         cell.Codepoint = _charsets.MapPrintedCell(codepoint);
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
@@ -4132,7 +4139,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         => GetColorIdentity(_currentBgKind, _currentBgPaletteIndex, _currentBg);
 
     private TerminalCell CreateErasedCell()
-        => TerminalCell.Empty(_currentFg, _currentBg, CurrentBackgroundIdentity);
+    {
+        if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+        return TerminalCell.Empty(_currentFg, _currentBg, CurrentBackgroundIdentity);
+    }
 
     private void SetBackgroundPalette(int paletteIndex)
     {
@@ -4845,6 +4855,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(rows, 1);
+        ApplySnapshotCursorStyleDrops();
         // Ghostty Screen.resize guarantees unchanged state on failure. Stage
         // both buffers, even during a synchronized-output hold, and publish only
         // after cursor metadata, graphics and the size response are prepared.
@@ -5003,6 +5014,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 }
                 else ResetAttributes();
             }
+            // Inactive resize temporarily borrows _inAltScreen/coordinates,
+            // not the active pen. Its accepted pen was assigned above.
+            _screen.AcknowledgeSnapshotCursorStyle(key);
             ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateCursor : ManagedResizeCheckpoint.PrimaryCursor);
             return hyperlink;
         }

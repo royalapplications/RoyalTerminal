@@ -133,12 +133,17 @@ public sealed partial class BasicVtProcessor
         {
             _snapshotAlternatePen = restoredPen; _snapshotAlternateProtected = state.Protected; _snapshotAlternateHyperlink = linkToken;
         }
-        if ((state.Key == 1) != _inAltScreen) return;
+        if ((state.Key == 1) != _inAltScreen)
+        {
+            ApplySnapshotCursorStyleDrops();
+            return;
+        }
         (_cursorCol, _cursorRow, _delayedWrap) = (x, y, wrap);
         _currentProtected = state.Protected;
         _charsets = charset;
         InstallSnapshotPen(in pen);
         _currentHyperlinkId = linkToken;
+        ApplySnapshotCursorStyleDrops();
     }
 
     private SavedCursorState? DecodeSnapshotSavedCursor(GhosttySnapshotSavedCursor? source)

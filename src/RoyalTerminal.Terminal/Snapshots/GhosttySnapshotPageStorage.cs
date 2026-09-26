@@ -32,12 +32,15 @@ internal sealed class GhosttySnapshotPageStorage(GhosttySnapshotStyleStorage sty
         result = null;
         if (Graphemes.Rebuild(capacity.GraphemeBytes, out GhosttySnapshotGraphemeStorage? graphemes) != GhosttySnapshotGraphemeAddResult.Success ||
             Hyperlinks.Rebuild(capacity.HyperlinkBytes, capacity.StringBytes, out GhosttySnapshotHyperlinkStorage? hyperlinks) != GhosttySnapshotHyperlinkAddResult.Success ||
-            Styles.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? styles) != GhosttySnapshotSetAddResult.Success ||
-            restoreCursor && styles!.ChangeCursor(Styles.Cursor) != GhosttySnapshotSetAddResult.Success) return false;
-        // Screen.increaseCapacity restores style first, then tries the cursor
-        // hyperlink once. Duplicate string scratch can fail even when all cells
-        // cloned successfully; native drops that cursor link without retrying.
-        if (restoreCursor) _ = Hyperlinks.CopyCursorTo(hyperlinks!);
+            Styles.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? styles) != GhosttySnapshotSetAddResult.Success) return false;
+        // Screen.increaseCapacity commits the cell clone, then tries each
+        // cursor reference once. Failure drops only that cursor detail; it
+        // neither rejects the replacement nor prevents restoring the other.
+        if (restoreCursor)
+        {
+            _ = styles!.ChangeCursor(Styles.Cursor);
+            _ = Hyperlinks.CopyCursorTo(hyperlinks!);
+        }
         result = new(styles!, graphemes!, hyperlinks!);
         return true;
     }

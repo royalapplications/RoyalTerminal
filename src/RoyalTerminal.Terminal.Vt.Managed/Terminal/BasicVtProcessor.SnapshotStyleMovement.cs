@@ -8,6 +8,21 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    // Constant-time, allocation-free delivery of page-rebuild degradation. Do
+    // not infer it from IsCurrent: a deliberate SGR/restore can be in flight.
+    private byte ApplySnapshotCursorStyleDrops()
+    {
+        byte dropped = _screen.TakeSnapshotCursorStyleDrops();
+        if ((dropped & 1) != 0) _snapshotPrimaryPen = default;
+        if ((dropped & 2) != 0)
+        {
+            _snapshotAlternatePen = default;
+            _alternateEraseBackground = default;
+        }
+        if ((dropped & (_inAltScreen ? 2 : 1)) != 0) ResetAttributes();
+        return dropped;
+    }
+
     private SnapshotCursorStyleScope TrackSnapshotCursorMovement()
         => _screen.TracksSnapshotMetadata ? new(this) : default;
 
@@ -22,10 +37,12 @@ public sealed partial class BasicVtProcessor
     private GhosttySnapshotStyle RecordSnapshotCursorStyle(GhosttySnapshotStyle pen)
     {
         int key = _inAltScreen ? 1 : 0;
+        if ((ApplySnapshotCursorStyleDrops() & (1 << key)) != 0) pen = default;
         if (!_screen.SnapshotCursorStyleIsCurrent(key, _cursorRow, pen))
             pen = ChangeSnapshotStyle(key, _cursorRow, pen, pen);
         ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
         _currentHyperlinkId = _screen.SnapshotHyperlinkChanged(key, _cursorRow, pen, _currentHyperlinkId, ref counter);
+        if ((ApplySnapshotCursorStyleDrops() & (1 << key)) != 0) pen = default;
         return pen;
     }
 

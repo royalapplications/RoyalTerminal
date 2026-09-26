@@ -16,6 +16,10 @@ public sealed partial class TerminalScreen
 
     internal bool TracksSnapshotMetadata => _snapshotScrollbackQuota is not null || _snapshotRowGeometry;
 
+    internal byte TakeSnapshotCursorStyleDrops() => _snapshotPageTracker?.TakeCursorStyleDrops() ?? 0;
+
+    internal void AcknowledgeSnapshotCursorStyle(int key) => _snapshotPageTracker?.AcknowledgeCursorStyle(key);
+
     internal bool SnapshotCursorStyleIsCurrent(int key, int cursorRow, GhosttySnapshotStyle pen)
     {
         if (!TracksSnapshotMetadata) return true;

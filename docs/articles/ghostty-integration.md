@@ -206,6 +206,16 @@ authored but unrun; fixtures do not allocate huge native pages. These boundaries
 follow Ghostty `Screen.appendGrapheme`, `startHyperlink`, `cursorSetHyperlink` and
 `Terminal.print`; Windows Terminal and xterm.js have different storage models.
 
+Page replacement now distinguishes a failed cell clone from cursor-only style
+reinsertion failure. Like `Screen.increaseCapacity`, it commits the successful
+clone, defaults a refused cursor pen, and independently attempts hyperlink
+restoration once. A COW-owned notification updates active/dormant pen registers,
+including snapshot capture and later input, without discarding cell styles or
+protection. Explicit later SGR may establish a new pen. Deterministic crowded-probe
+regressions cover grapheme/link-driven growth, independent cursor details, saved
+cursors and COW ownership without forcing process OOM. These tests are authored
+but unrun; no new performance claim is made.
+
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can
 remove such a page only once it is wholly historical. A subsequent representable

@@ -45,9 +45,30 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     private readonly ConditionalWeakTable<GhosttySnapshotPageAllocation, State> _pages = new();
     private GhosttySnapshotPageAllocation? _primaryCursor, _alternateCursor;
+    // Rebuild can drop a cursor pen without a processor-initiated SGR. Keep
+    // this notification with the COW owner until its registers observe it.
+    private byte _cursorStyleDrops;
+
+    internal byte TakeCursorStyleDrops()
+    {
+        byte result = _cursorStyleDrops;
+        _cursorStyleDrops = 0;
+        return result;
+    }
+
+    internal void AcknowledgeCursorStyle(int key) => _cursorStyleDrops &= (byte)(key == 0 ? 2 : 1);
+
+    private void ObserveRebuiltCursor(GhosttySnapshotPageAllocation page,
+        GhosttySnapshotPageStorage previous, GhosttySnapshotPageStorage rebuilt)
+    {
+        if (previous.Styles.Cursor == default || rebuilt.Styles.Cursor != default) return;
+        if (ReferenceEquals(_primaryCursor, page)) _cursorStyleDrops |= 1;
+        if (ReferenceEquals(_alternateCursor, page)) _cursorStyleDrops |= 2;
+    }
 
     internal void DiscardCursor(int key)
     {
+        AcknowledgeCursorStyle(key);
         EndCursorHyperlink(key);
         if (key == 0) _primaryLinkPage = null; else _alternateLinkPage = null;
         GhosttySnapshotPageAllocation? page = key == 0 ? _primaryCursor : _alternateCursor;
@@ -106,6 +127,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             _primaryCursor = _primaryCursor, _alternateCursor = _alternateCursor,
             _primaryLinkPage = _primaryLinkPage, _alternateLinkPage = _alternateLinkPage,
             _primaryLinkToken = _primaryLinkToken, _alternateLinkToken = _alternateLinkToken,
+            _cursorStyleDrops = _cursorStyleDrops,
         };
         foreach (KeyValuePair<GhosttySnapshotPageAllocation, State> page in _pages)
         {
@@ -120,7 +142,10 @@ internal sealed partial class GhosttySnapshotPageTracker
         if (!_pages.TryGetValue(previous, out State? source)) return replacement;
         State state = source.Copy();
         if (state.Storage.Rebuild(replacement.Capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
+        {
+            ObserveRebuiltCursor(previous, state.Storage, rebuilt!);
             state.Storage = rebuilt!;
+        }
         else
             replacement = new(replacement.Capacity, state.Storage.Styles.Copy(), metadataOverflow: true,
                 restoredGraphemes: state.Storage.Graphemes.Copy(), restoredHyperlinks: state.Storage.Hyperlinks.Copy());
@@ -158,6 +183,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             success = SetPen(ref page, ref state, ref group, previousPen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
         if (success) success = SetPen(ref page, ref state, ref group, pen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
         if (key == 0) _primaryCursor = page; else _alternateCursor = page;
+        if (success) AcknowledgeCursorStyle(key);
         return success;
     }
 
@@ -302,6 +328,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (!preserveOnFailure) Overflow(ref page, state, group);
             return false;
         }
+        ObserveRebuiltCursor(page, state.Storage, rebuilt!);
         state.Storage = rebuilt!;
         Replace(ref page, new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy(),
             restoredHyperlinks: rebuilt.Hyperlinks.Copy()), state, group);

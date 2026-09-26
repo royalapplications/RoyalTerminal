@@ -37,6 +37,7 @@ public sealed partial class BasicVtProcessor
 
     private GhosttySnapshotStyle CaptureSnapshotPen()
     {
+        ApplySnapshotCursorStyleDrops();
         TerminalCell cell = new()
         {
             ForegroundIdentity = GetColorIdentity(_currentFgKind, _currentFgPaletteIndex, _currentFg),
@@ -95,6 +96,7 @@ public sealed partial class BasicVtProcessor
 
     private void CaptureSnapshotScreen(Stream output, int key, int pages, int historyRows, int maximumStringBytes)
     {
+        ApplySnapshotCursorStyleDrops();
         bool active = (key == 1) == _inAltScreen;
         bool alternate = key == 1;
         Span<byte> header = stackalloc byte[GhosttySnapshotScreenState.HeaderLength]; header.Clear();
