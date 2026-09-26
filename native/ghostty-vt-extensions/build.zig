@@ -57,26 +57,41 @@ pub fn build(b: *std.Build) !void {
             .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{.{
-        .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
-        .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
-    }});
-    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{ .{
-        // A clone can fail after retaining a styled/grapheme/link prefix.
-        // Reset it while the row is still in size.rows, then remap pins for
-        // earlier successful copies before destroying their source page.
-        .before = "                prev_page.size.rows -= 1;\n                copied -= 1;\n                break :prev;",
-        .after = "                prev_page.resetRow(dst_row);\n                prev_page.size.rows -= 1;\n                copied -= 1;\n                break;",
-    }, .{
-        .before = "        assert(copied == len);\n",
-        .after = "        assert(copied <= len);\n",
-    }, .{
-        .before = "            if (p.node != chunk.node or p.y >= len) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - len;",
-        .after = "            if (p.node != chunk.node or p.y >= copied) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - copied;",
-    }, .{
-        .before = "                new_page.size.rows -= 1;\n                break;",
-        .after = "                new_page.resetRow(dst_row);\n                new_page.size.rows -= 1;\n                break;",
-    } });
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{
+        .{
+            .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
+            .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
+        },
+        .{
+            // Style installation may have rebuilt the destination and restored
+            // the incoming hyperlink there. Release that temporary reference
+            // before detaching its pointer; startHyperlinkOnce calls endHyperlink
+            // and must never see a live ID paired with a null pointer.
+            .before = "    // On the new page, we need to migrate our hyperlink\n    if (self.cursor.hyperlink) |link| {\n",
+            .after = "    // On the new page, we need to migrate our hyperlink\n    if (self.cursor.hyperlink) |link| {\n        if (self.cursor.hyperlink_id != 0) {\n            const page = self.cursor.page_pin.node.page();\n            page.hyperlink_set.release(page.memory, self.cursor.hyperlink_id);\n            self.cursor.hyperlink_id = 0;\n        }\n",
+        },
+    });
+    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{
+        .{
+            // A clone can fail after retaining a styled/grapheme/link prefix.
+            // Reset it while the row is still in size.rows, then remap pins for
+            // earlier successful copies before destroying their source page.
+            .before = "                prev_page.size.rows -= 1;\n                copied -= 1;\n                break :prev;",
+            .after = "                prev_page.resetRow(dst_row);\n                prev_page.size.rows -= 1;\n                copied -= 1;\n                break;",
+        },
+        .{
+            .before = "        assert(copied == len);\n",
+            .after = "        assert(copied <= len);\n",
+        },
+        .{
+            .before = "            if (p.node != chunk.node or p.y >= len) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - len;",
+            .after = "            if (p.node != chunk.node or p.y >= copied) continue;\n            p.node = prev_node;\n            p.y += prev_page.size.rows - copied;",
+        },
+        .{
+            .before = "                new_page.size.rows -= 1;\n                break;",
+            .after = "                new_page.resetRow(dst_row);\n                new_page.size.rows -= 1;\n                break;",
+        },
+    });
     try addOverlay(b, sources, ghostty, "terminal/bitmap_allocator.zig", "bac61a65b5a3141ccfad2d9d0a6a452be7106a647182470fcf38e1289b5f86e1", &.{.{
         // The full-word loop checks its bounds, but it can finish (or be
         // skipped) with a partial-word remainder and i == bitmaps.len.
@@ -84,22 +99,26 @@ pub fn build(b: *std.Build) !void {
         .before = "            // If the number of available chunks at the start of this bitmap\n",
         .after = "            if (i >= bitmaps.len) return null;\n\n            // If the number of available chunks at the start of this bitmap\n",
     }});
-    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{ .{
-        .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
-        .after = "        const removed_idx: u32 = number - 1;",
-    }, .{
-        // Deleting an earlier frame renumbers the displayed frame but does
-        // not replace its pixels. Do this before clamping the old last index;
-        // otherwise the same frame spuriously changes generation/restarts its gap.
-        .before = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (anim.current_index > remaining) {",
-        .after = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (removed_idx < anim.current_index) {\n            anim.current_index -= 1;\n            self.markMutated(io);\n            return;\n        }\n        if (anim.current_index > remaining) {",
-    }, .{
-        // RGB-to-RGBA promotion is quota-exempt. A subsequent image admission
-        // can require reclaiming more than the limit, but never more than the
-        // actual retained bytes. The eviction loop already handles that case.
-        .before = "        assert(req <= self.total_limit);",
-        .after = "        assert(req <= self.total_bytes);",
-    } });
+    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{
+        .{
+            .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
+            .after = "        const removed_idx: u32 = number - 1;",
+        },
+        .{
+            // Deleting an earlier frame renumbers the displayed frame but does
+            // not replace its pixels. Do this before clamping the old last index;
+            // otherwise the same frame spuriously changes generation/restarts its gap.
+            .before = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (anim.current_index > remaining) {",
+            .after = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (removed_idx < anim.current_index) {\n            anim.current_index -= 1;\n            self.markMutated(io);\n            return;\n        }\n        if (anim.current_index > remaining) {",
+        },
+        .{
+            // RGB-to-RGBA promotion is quota-exempt. A subsequent image admission
+            // can require reclaiming more than the limit, but never more than the
+            // actual retained bytes. The eviction loop already handles that case.
+            .before = "        assert(req <= self.total_limit);",
+            .after = "        assert(req <= self.total_bytes);",
+        },
+    });
     try addOverlay(b, sources, ghostty, "terminal/stream_continuation.zig", "a86feef9e53dc62349e64ddb6d25f1d6d971b9813578a24e915e39daeb39a9a2", &.{.{
         .before = "        var scanner: BoundaryScanner = .init();\n        for (self.bytes.items) |c| {\n            if (scanner.next(c) == .omittable) continue;\n            try writer.writeByte(c);\n        }\n",
         .after = @embedFile("src/continuation_write.zig.inc"),
@@ -113,18 +132,22 @@ pub fn build(b: *std.Build) !void {
         .before = "                .conemu_sleep,\n",
         .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
     } });
-    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "cdfcf97647ae756fd314e25d7a3bff9df57125ae2e111168b764a07bf2593288", &.{ .{
-        .before = "    pub const Effects = struct {\n",
-        .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
-    }, .{
-        // Anchor to the Handler indentation. Test handlers declare the same
-        // function at a deeper indentation and must remain unmodified.
-        .before = "\n    fn desktopNotification(\n",
-        .after = "\n    pub fn royalDesktopNotification(self: *Handler, notification: ?osc.Command.KittyDesktopNotification) void {\n        const callback = self.effects.royal_notification orelse return;\n        callback(self, notification);\n    }\n\n    fn desktopNotification(\n",
-    }, .{
-        .before = "                self.terminal.fullReset();\n",
-        .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
-    } });
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "cdfcf97647ae756fd314e25d7a3bff9df57125ae2e111168b764a07bf2593288", &.{
+        .{
+            .before = "    pub const Effects = struct {\n",
+            .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
+        },
+        .{
+            // Anchor to the Handler indentation. Test handlers declare the same
+            // function at a deeper indentation and must remain unmodified.
+            .before = "\n    fn desktopNotification(\n",
+            .after = "\n    pub fn royalDesktopNotification(self: *Handler, notification: ?osc.Command.KittyDesktopNotification) void {\n        const callback = self.effects.royal_notification orelse return;\n        callback(self, notification);\n    }\n\n    fn desktopNotification(\n",
+        },
+        .{
+            .before = "                self.terminal.fullReset();\n",
+            .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
+        },
+    });
     try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "9b06653cb34f7407b510f25111cb45c83014a3adfc9c031c48ecc537c6f67136", &.{ .{
         .before = "const Effects = struct {\n",
         .after = "const Effects = struct {\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",

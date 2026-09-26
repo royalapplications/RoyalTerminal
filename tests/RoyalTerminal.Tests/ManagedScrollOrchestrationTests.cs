@@ -15,7 +15,7 @@ namespace RoyalTerminal.Tests;
 // uses Screen.cursorScrollRegionUp and PageList.eraseRow[Bounded]. WT scrolls
 // rectangles without that PAGE cursor lifetime, and xterm.js splices BufferLines.
 // Ghostty defines the allocator/rotation order tested here, not repeated DL.
-public sealed class ManagedScrollOrchestrationTests
+public sealed partial class ManagedScrollOrchestrationTests
 {
     [Theory]
     [InlineData("", 1, true)]
@@ -57,43 +57,65 @@ public sealed class ManagedScrollOrchestrationTests
     }
 
     [Theory]
-    [InlineData('S', false)]
-    [InlineData('T', false)]
-    [InlineData('S', true)]
-    [InlineData('T', true)]
-    public void TemporaryCursorVisitsTheTopPageAndReissuesItsImplicitLink(char operation, bool rectangle)
+    [InlineData('S', false, false)]
+    [InlineData('T', false, false)]
+    [InlineData('S', true, false)]
+    [InlineData('T', true, false)]
+    [InlineData('S', false, true)]
+    [InlineData('T', false, true)]
+    [InlineData('S', true, true)]
+    [InlineData('T', true, true)]
+    public void TemporaryCursorVisitsTheTopPageAndHonorsItsHyperlinkRestoreBudget(char operation, bool rectangle, bool provisioned)
     {
-        using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot(BlankRows(), 1));
+        RequireNative();
+        byte[] snapshot = Snapshot(BlankRows(), 1);
+        using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(snapshot);
+        using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
         string margins = rectangle ? "\u001b[?69h\u001b[2;7s" : "";
-        Process(terminal.Processor, margins + "\u001b[2;4r\u001b[4;4H\u001b[1m\u001b]8;;u\a");
+        string setup = (provisioned ? ProvisionPageHyperlinks() : "") + margins + "\u001b[2;4r\u001b[4;4H\u001b[1m\u001b]8;;u\a";
+        Process(terminal.Processor, setup);
+        native.Write(Encoding.UTF8.GetBytes(setup));
         TerminalScreen retained = terminal.Screen.CreateStateCopy();
         Assert.Equal(0, terminal.Screen.GetViewportRow(1).SnapshotAllocation!.Capacity.Styles);
 
         Process(terminal.Processor, $"\u001b[2{operation}");
+        native.Write(Encoding.UTF8.GetBytes($"\u001b[2{operation}"));
+        AssertNative(native, terminal);
 
         Assert.Equal((3, 3), (terminal.Processor.CursorCol, terminal.Processor.CursorRow));
         Assert.Equal(16, terminal.Screen.GetViewportRow(1).SnapshotAllocation!.Capacity.Styles);
         Assert.Equal(0, retained.GetViewportRow(1).SnapshotAllocation!.Capacity.Styles);
         GhosttySnapshotScreenState cursor = Cursor(terminal.Processor);
-        Assert.Equal(3U, cursor.HyperlinkImplicitCounter);
-        Assert.True(cursor.TryGetHyperlink(out GhosttySnapshotHyperlink link));
-        Assert.Equal(2U, link.ImplicitId);
+        Assert.Equal(provisioned ? 3U : 1U, cursor.HyperlinkImplicitCounter);
+        Assert.Equal(provisioned, cursor.TryGetHyperlink(out GhosttySnapshotHyperlink link));
+        if (provisioned) Assert.Equal(2U, link.ImplicitId);
         terminal.Processor.Process("X"u8);
+        native.Write("X"u8);
+        AssertNative(native, terminal);
         TerminalCell cell = terminal.Screen.GetViewportRow(3).ReadOnlyCells[3];
         Assert.Equal(CellAttributes.Bold, cell.Attributes);
-        Assert.True(terminal.Screen.TryGetHyperlink(cell.HyperlinkId, out TerminalHyperlink? written));
-        Assert.Equal(2U, written!.ImplicitId);
+        Assert.Equal(provisioned, terminal.Screen.TryGetHyperlink(cell.HyperlinkId, out TerminalHyperlink? written));
+        if (provisioned) Assert.Equal(2U, written!.ImplicitId);
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void FullScreenSuVisitsTheBottomBeforeRestoringTheVisibleCursor(bool alternate)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void FullScreenSuVisitsTheBottomBeforeRestoringTheVisibleCursor(bool alternate, bool provisioned)
     {
-        using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot(BlankRows(), 1, alternate));
-        Process(terminal.Processor, "\u001b[1;4H\u001b[1m\u001b]8;;u\a");
+        RequireNative();
+        byte[] snapshot = Snapshot(BlankRows(), 1, alternate);
+        using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(snapshot);
+        using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
+        string setup = (provisioned ? ProvisionPageHyperlinks() : "") + "\u001b[1;4H\u001b[1m\u001b]8;;u\a";
+        Process(terminal.Processor, setup);
+        native.Write(Encoding.UTF8.GetBytes(setup));
         GhosttySnapshotPageAllocation bottom = terminal.Screen.GetViewportRow(3).SnapshotAllocation!;
         Process(terminal.Processor, "\u001b[S");
+        native.Write("\u001b[S"u8);
+        AssertNative(native, terminal);
 
         Assert.Equal((3, 0), (terminal.Processor.CursorCol, terminal.Processor.CursorRow));
         Assert.Equal(alternate ? 4 : 5, terminal.Screen.TotalRows);
@@ -104,9 +126,9 @@ public sealed class ManagedScrollOrchestrationTests
         Assert.Equal(16, terminal.Screen.GetViewportRow(bottomRow).SnapshotAllocation!.Capacity.Styles);
         Assert.Equal(16, terminal.Screen.GetViewportRow(0).SnapshotAllocation!.Capacity.Styles);
         GhosttySnapshotScreenState cursor = Cursor(terminal.Processor);
-        Assert.Equal(alternate ? 3U : 4U, cursor.HyperlinkImplicitCounter);
-        Assert.True(cursor.TryGetHyperlink(out GhosttySnapshotHyperlink link));
-        Assert.Equal(alternate ? 2U : 3U, link.ImplicitId);
+        Assert.Equal(provisioned ? alternate ? 3U : 4U : 1U, cursor.HyperlinkImplicitCounter);
+        Assert.Equal(provisioned, cursor.TryGetHyperlink(out GhosttySnapshotHyperlink link));
+        if (provisioned) Assert.Equal(alternate ? 2U : 3U, link.ImplicitId);
     }
 
     [Theory]
@@ -288,7 +310,7 @@ public sealed class ManagedScrollOrchestrationTests
         }
     }
 
-    private static void AssertNative(GhosttyTerminal native, ManagedTerminalSnapshot managed)
+    private static void AssertNative(GhosttyTerminal native, ManagedTerminalSnapshot managed, string? context = null)
     {
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
         GhosttySnapshotReadyState ready = reader.ReadReady();
@@ -299,7 +321,8 @@ public sealed class ManagedScrollOrchestrationTests
         Assert.Equal(expected.State.CursorY, cursor.CursorY);
         Assert.Equal(expected.State.PendingWrap, cursor.PendingWrap);
         Assert.Equal(expected.State.Pen, cursor.Pen);
-        Assert.Equal(expected.State.HyperlinkImplicitCounter, cursor.HyperlinkImplicitCounter);
+        Assert.True(expected.State.HyperlinkImplicitCounter == cursor.HyperlinkImplicitCounter,
+            $"Input {context}: hyperlink counter expected {expected.State.HyperlinkImplicitCounter}, actual {cursor.HyperlinkImplicitCounter}");
         Assert.Equal(expected.State.TryGetHyperlink(out GhosttySnapshotHyperlink link), cursor.TryGetHyperlink(out GhosttySnapshotHyperlink actualLink));
         if (expected.State.TryGetHyperlink(out _)) Assert.Equal(link.ImplicitId, actualLink.ImplicitId);
         TerminalRowBuffer rows = managed.Screen.GetSnapshotRows(key)!;
@@ -363,6 +386,12 @@ public sealed class ManagedScrollOrchestrationTests
     }
 
     private static TerminalRow[] BlankRows() => [new(8), new(8), new(8), new(8)];
+
+    private static string ProvisionPageHyperlinks() =>
+        "\u001b[1;1H\u001b]8;id=seed;seed\a\u001b]8;;\a" +
+        "\u001b[2;1H\u001b]8;id=seed;seed\a\u001b]8;;\a" +
+        "\u001b[3;1H\u001b]8;id=seed;seed\a\u001b]8;;\a" +
+        "\u001b[4;1H\u001b]8;id=seed;seed\a\u001b]8;;\a";
 
     private static TerminalRow[] ContentRows()
     {

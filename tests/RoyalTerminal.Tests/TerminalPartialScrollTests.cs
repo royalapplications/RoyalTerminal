@@ -23,7 +23,7 @@ public sealed class TerminalPartialScrollTests
         TerminalScreenAnchor contentAnchor = screen.CreateAnchor(0, 1);
         for (int i = 0; i < 4; i++)
         {
-            TerminalRow blank = screen.AddRowAtActiveRow(3);
+            TerminalRow blank = GrowAndRotateSuffix(screen, 3);
             Assert.Same(blank, screen.GetViewportRow(3));
             Assert.Same(status, screen.GetViewportRow(4));
             Assert.True(status.WrapsToNext);
@@ -47,10 +47,10 @@ public sealed class TerminalPartialScrollTests
                 new TerminalRasterImagePlacement(id, TerminalRasterImageLayer.BelowText,
                     0, row, 0, 0, 1, 1, 0, 0, 1, 1, 10, 10));
         }
-        screen.AddRowAtActiveRow(3);
+        GrowAndRotateSuffix(screen, 3);
         Assert.Equal(2, screen.GetRasterImagePlacements()[0].AnchorRow);
         Assert.Equal(5, screen.GetRasterImagePlacements()[1].AnchorRow);
-        screen.AddRowAtActiveRow(3);
+        GrowAndRotateSuffix(screen, 3);
         Assert.Equal(1, screen.GetRasterImagePlacements()[0].AnchorRow);
         Assert.Equal(5, screen.GetRasterImagePlacements()[1].AnchorRow);
     }
@@ -65,5 +65,13 @@ public sealed class TerminalPartialScrollTests
         for (int i = 0; i < 1000; i++) processor.Process("\u001b[S"u8);
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.Equal(26, screen.TotalRows);
+    }
+
+    private static TerminalRow GrowAndRotateSuffix(TerminalScreen screen, int bottom)
+    {
+        TerminalRow blank = screen.AddRow();
+        screen.ShiftAnchorsBelowHistoryMargin(bottom);
+        screen.RotateViewportRowsDown(bottom, screen.ViewportRows - 1);
+        return blank;
     }
 }

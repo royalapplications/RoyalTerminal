@@ -15,7 +15,7 @@ namespace RoyalTerminal.Tests;
 // BufferLine have no Ghostty PAGE quota. The managed host deliberately contains
 // this fatal condition to one screen/processor: no successful copy, recovery
 // through VT reset, snapshot export, or publication of a failed output hold.
-public sealed class ManagedSnapshotRowCopyFailureTests
+public sealed partial class ManagedSnapshotRowCopyFailureTests
 {
     [Theory]
     [InlineData("insert", "grapheme")]

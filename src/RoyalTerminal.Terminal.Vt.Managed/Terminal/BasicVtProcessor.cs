@@ -1772,12 +1772,13 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ScrollIntoHistoryOneRow()
     {
         // A top-origin region creates history even with a bottom margin.
-        TerminalRow added = _scrollBottom == _screen.ViewportRows - 1
-            ? _screen.AddRow() : _screen.AddRowAtActiveRow(_scrollBottom);
+        TerminalRow added = _screen.AddRow();
         // Growth may cross/recycle a page. Migrate before painting its blank
         // row, and before another iteration can leave this intermediate page.
         RecordSnapshotCursorStyle();
-        if (_currentBgKind != SgrColorKind.Default)
+        if (_scrollBottom < _screen.ViewportRows - 1)
+            RotateHistorySuffixDownOneRow(added);
+        else if (_currentBgKind != SgrColorKind.Default)
             ClearRow(added, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
         _screen.InvalidateViewport();
     }

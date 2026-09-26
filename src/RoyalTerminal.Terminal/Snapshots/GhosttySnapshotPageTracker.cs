@@ -176,6 +176,8 @@ internal sealed partial class GhosttySnapshotPageTracker
         ThrowIfMutationFailed();
         if (cursorRow.SnapshotAllocation is not { } page || page.MetadataOverflow) return true;
         GhosttySnapshotPageAllocation? departing = key == 0 ? _primaryCursor : _alternateCursor;
+        byte[]? migratingHyperlink = departing is not null && !ReferenceEquals(departing, page)
+            ? screen.SnapshotHyperlinkEncoding(CursorHyperlinkToken(key, 0)) : null;
         if (departing is not null && !ReferenceEquals(departing, page) && _pages.TryGetValue(departing, out _))
         {
             List<TerminalRow> oldRows = Group(rows, departing);
@@ -192,7 +194,8 @@ internal sealed partial class GhosttySnapshotPageTracker
         if (!Synchronize(ref page, state, group, layout, screen)) return false;
         bool success = true;
         if (departing is null || !ReferenceEquals(departing, page))
-            success = SetPen(ref page, ref state, ref group, previousPen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
+            success = SetPen(ref page, ref state, ref group, previousPen, layout, rows, cursorRow, key, screen,
+                ref hyperlinkCounter, migratingHyperlink);
         if (success) success = SetPen(ref page, ref state, ref group, pen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
         if (key == 0) _primaryCursor = page; else _alternateCursor = page;
         if (success) AcknowledgeCursorStyle(key);
@@ -275,7 +278,8 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     private bool SetPen(ref GhosttySnapshotPageAllocation page, ref State state,
         ref List<TerminalRow> group, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout,
-        TerminalRowBuffer rows, TerminalRow cursorRow, int key, TerminalScreen screen, ref uint hyperlinkCounter)
+        TerminalRowBuffer rows, TerminalRow cursorRow, int key, TerminalScreen screen, ref uint hyperlinkCounter,
+        byte[]? migratingHyperlink = null)
     {
         GhosttySnapshotSetAddResult result = state.Storage.Styles.ChangeCursor(pen);
         if (result == GhosttySnapshotSetAddResult.Success) return true;
@@ -303,6 +307,17 @@ internal sealed partial class GhosttySnapshotPageTracker
         if (!GrowMetadata(ref page, state, group,
             result == GhosttySnapshotSetAddResult.OutOfMemory ? GhosttySnapshotCapacityDimension.Styles : null,
             layout, preserveOnFailure: true)) return false;
+        // cursorChangePin keeps the incoming URI/ID alive while installing
+        // its style on the destination. If that grows/rehashes the page,
+        // Screen.increaseCapacity restores that old ID once, BEFORE retrying
+        // the style and doing the normal hyperlink migration/reissue. Failure
+        // drops the link without growing its tables or consuming an implicit
+        // ID. Success leaves the temporary reference for StartCursor to release.
+        if (migratingHyperlink is not null &&
+            state.Storage.Hyperlinks.StartCursor(migratingHyperlink, migratingHyperlink) != GhosttySnapshotHyperlinkAddResult.Success)
+        {
+            if (key == 0) _primaryLinkToken = 0; else _alternateLinkToken = 0;
+        }
         return state.Storage.Styles.ChangeCursor(pen) == GhosttySnapshotSetAddResult.Success;
     }
 

@@ -307,8 +307,28 @@ host hidden-column policy is retained. These decisions follow Ghostty
 `Page.cloneFrom/clonePartialRowFrom`; WT ROW and xterm.js BufferLine do not define
 its page allocator contract. Forty additional mapping, retry, failure, COW,
 tail-reuse, huge-hint and native continuation cases are authored, pending execution.
-The broader mutation audit, including top-origin history rotation across page
-boundaries, remains unfinished.
+Top-origin history scrolling with a bottom margin now also rotates within each
+page. It first appends the tail and migrates the cursor to its next logical row,
+then visits the stationary suffix tail-first, cloning only the rows that cross
+page boundaries. It clears the recycled cursor row after those copies. This
+preserves contiguous allocation ownership, physical slots and the native order
+of cursor-link migration, metadata growth and copy retries. Unchanged same-page
+cell arrays remain shared with COW readers. Host anchors and raster placements
+below the margin shift once after any history pruning; held output publishes the
+rows and allocators together. Exhausted boundary copies use the existing fatal
+owner/no-publication contract. Cursor-page entry also retains the incoming
+hyperlink's original identity through style installation: if that grows or
+rehashes the destination page, the link is restored once before the style retry
+and normal link migration. Refusal drops only the link, without growing its
+tables or consuming an implicit ID; successful restoration is released by the
+subsequent migration. This also applies to ordinary cursor movement, with
+explicit/implicit links and provisioned/empty destination storage.
+Ghostty `Screen.cursorScrollAboveRotate` defines
+the page contract; Windows Terminal pans then scrolls the suffix, and
+[xterm.js BufferService.scroll](https://github.com/xtermjs/xterm.js/blob/master/src/common/services/BufferService.ts)
+inserts a line without page-local allocators. New ownership, pruning, COW, hold,
+pressure/failure and native continuation cases cover fresh and reused tails.
+The remaining mutation audit and performance profiling are still outstanding.
 
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can

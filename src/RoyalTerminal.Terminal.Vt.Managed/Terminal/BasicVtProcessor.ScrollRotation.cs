@@ -8,6 +8,43 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    private void RotateHistorySuffixDownOneRow(TerminalRow added)
+    {
+        // Screen.cursorScrollAboveRotate first advances the cursor into its
+        // destination page (done by the caller), then visits pages tail-first.
+        // Keep each allocation contiguous: moving the new tail row directly
+        // to the margin would change cursor ownership and bypass boundary-copy
+        // pressure. Only one row per page boundary is cloned; same-page rows
+        // keep their cell arrays, physical metadata slots and COW ownership.
+        _screen.ShiftAnchorsBelowHistoryMargin(_scrollBottom);
+        int end = _screen.ViewportRows - 1;
+        while (end >= _scrollBottom)
+        {
+            TerminalRow last = _screen.GetViewportRow(end);
+            if (_screen.TracksSnapshotMetadata && last.SnapshotAllocation is null)
+            {
+                using GhosttySnapshotPageTracker.RowEdit observed = _screen.EditSnapshotRowMetadata(last);
+            }
+            GhosttySnapshotPageAllocation? page = last.SnapshotAllocation;
+            int start = end;
+            while (start > _scrollBottom &&
+                ReferenceEquals(_screen.GetViewportRow(start - 1).SnapshotAllocation, page)) start--;
+
+            _screen.RotateViewportRowsDown(start, end);
+            if (start > _scrollBottom)
+                CopyRow(_screen.GetViewportRow(start - 1), last, preserveWrap: true);
+            else
+            {
+                if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
+                // AddRow already initialized the fresh tail. The same-page
+                // fast path must not clear an unchanged blank row twice.
+                if (!ReferenceEquals(last, added) || _currentBgKind != SgrColorKind.Default)
+                    ClearRow(last, _screen.DefaultForeground, _currentBg, CurrentBackgroundIdentity);
+            }
+            end = start - 1;
+        }
+    }
+
     private void RotateScrollRegionUpOneRow()
     {
         // Screen.cursorScrollRegionUp / PageList.eraseRow[Bounded] retain the

@@ -30,26 +30,38 @@ public sealed partial class TerminalScreen
     }
 
     /// <summary>
-    /// Creates history above a top-origin scrolling region, leaving rows below
-    /// its bottom margin stationary. Caller holds the screen lock.
+    /// Rotates row ownership down within one viewport page slice, retaining
+    /// every row's allocator and physical cell slot. Caller holds the lock and
+    /// owns boundary copies, clearing and anchor movement.
     /// </summary>
-    internal TerminalRow AddRowAtActiveRow(int bottom)
+    internal void RotateViewportRowsDown(int top, int bottom)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(top);
+        ArgumentOutOfRangeException.ThrowIfLessThan(bottom, top);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(bottom, ViewportRows);
+        int first = GetAbsoluteRowForViewportRow(top), last = GetAbsoluteRowForViewportRow(bottom);
+        TerminalRow recycled = _rows[last];
+        for (int row = last; row > first; row--)
+        {
+            _rows[row] = _rows[row - 1];
+            _rows[row].IsDirty = true;
+        }
+        _rows[first] = recycled;
+        recycled.IsDirty = true;
+    }
+
+    /// <summary>
+    /// Keeps anchors below a top-origin history region stationary on screen
+    /// after AddRow and before its suffix rotates down. History pruning was
+    /// already accounted for by AddRow. Caller holds the screen lock.
+    /// </summary>
+    internal void ShiftAnchorsBelowHistoryMargin(int bottom)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(bottom);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(bottom, ViewportRows);
-        TerminalRow blank = AddRow();
-        int insertion = TotalRows - ViewportRows + bottom;
-        // Like Ghostty cursorScrollAbove: rotate only the suffix below the
-        // margin, not the history or cell arrays. Metadata and shared storage
-        // remain attached to their logical rows.
-        for (int row = TotalRows - 1; row > insertion; row--)
-            _rows[row] = _rows[row - 1];
-        _rows[insertion] = blank;
-
-        // AddRow already accounted for history pruning. The suffix originally
-        // below the margin occupies the insertion position before rotation.
         if (bottom < ViewportRows - 1)
         {
+            int insertion = GetAbsoluteRowForViewportRow(bottom);
             _anchorRevision++;
             foreach ((TerminalScreenAnchor token, TrackedCell original) in _trackedAnchors)
             {
@@ -63,6 +75,5 @@ public sealed partial class TerminalScreen
                     _rasterPlacements[i] = placement.WithAnchorRow(placement.AnchorRow + 1);
             }
         }
-        return blank;
     }
 }
