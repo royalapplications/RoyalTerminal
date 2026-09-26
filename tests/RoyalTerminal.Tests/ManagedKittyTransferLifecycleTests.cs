@@ -38,9 +38,11 @@ public sealed class ManagedKittyTransferLifecycleTests
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, retained!.RgbaPixels);
         session.Send("a=p,i=1,C=1");
         Assert.Equal("\x1b_Gi=1;ENOENT: image not found\x1b\\", session.Replies[^1]);
-        // Relative placements are removed, but the child's independent data survives.
+        // Retransmission uses an uppercase ID delete before loading, so an
+        // orphan without another placement loses its image data as well.
         session.Send("a=p,i=2,C=1");
-        Assert.Equal(2, Assert.Single(session.Screen.GetKittyPlacements().ToArray()).ImageId);
+        Assert.Equal("\x1b_Gi=2;ENOENT: image not found\x1b\\", session.Replies[^1]);
+        Assert.Empty(session.Screen.GetKittyPlacements().ToArray());
     }
 
     [Theory]

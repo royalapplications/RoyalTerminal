@@ -2188,6 +2188,15 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 continue;
             }
 
+            // The C API reports grid visibility even for empty source crops
+            // and zero-sized destinations. Skia cannot draw either; omit them
+            // before decoding/caching pixels, as the managed publisher does.
+            // Keep the storage placement and placeholder target above intact:
+            // later replacement, deletion and cursor movement still use them.
+            if (renderInfo.SourceWidth == 0 || renderInfo.SourceHeight == 0 ||
+                renderInfo.PixelWidth == 0 || renderInfo.PixelHeight == 0)
+                continue;
+
             if (!CacheKittyImage(imageId, image, contentUnchanged, ref imagesChanged)) continue;
 
             int zIndex = _kittyPlacementIterator.GetZIndex();

@@ -1704,14 +1704,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !_inAltScreen;
         bool rotate = !down && !HasHorizontalMargins &&
             (index || _inAltScreen && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
-        bool adjustImages = _kittyStore.PlacementCount > 0 &&
-            (_scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins);
+        bool imageMargins = _scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins;
+        bool adjustImages = _kittyStore.PlacementCount > 0 && (imageMargins || down || rotate && !history);
         ulong revision = _kittyStore.Revision;
-        if (adjustImages)
+        if (adjustImages && imageMargins)
             _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
                 (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
                 windowShift: !down && _scrollTop == 0 && !_inAltScreen && !HasHorizontalMargins,
                 left: _scrollLeft, right: RightMargin);
+        else if (adjustImages)
+            _kittyStore.BeginPinScroll(_screen, down ? 0 : -count, index && _screen.ViewportRows > 1);
         try
         {
             // SU/SD use a temporary cursor; page entry can grow metadata or
@@ -4299,7 +4301,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 3: // Scrollback only
-                _screen.ClearScrollback();
+                bool restoreImagePins = _kittyStore.PlacementCount > 0 && _kittyStore.BeginHistoryErase(_screen);
+                try { _screen.ClearScrollback(); }
+                finally { if (restoreImagePins) _kittyStore.EndMarginScroll(_screen); }
                 break;
 
             case 22: // Kitty extension: move viewport into scrollback and clear display

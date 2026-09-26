@@ -18,7 +18,7 @@ internal sealed partial class ManagedKittyGraphicsStore
 
     internal bool DeleteById(TerminalScreen screen, uint imageId, uint placementId, bool deleteUnused)
     {
-        if (imageId == 0) return false;
+        if (imageId == 0 || !_images.ContainsKey(imageId)) return false;
         bool changed = DeleteMatchingPlacements(screen, (key, _) => key.ImageId == imageId &&
             (placementId == 0 || !key.Internal && key.Id == placementId), deleteUnused);
         if (deleteUnused && (placementId == 0 || changed))

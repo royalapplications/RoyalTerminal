@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Buffers;
-using System.Collections.Immutable;
 using System.Text;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -88,10 +87,12 @@ internal ref struct TerminalKittyPlaceholderScanner(ReadOnlySpan<TerminalCell> c
 
     // Kitty rowcolumn-diacritics.txt, identical to the pinned Ghostty graphics_unicode.zig table.
     // Materialize once: RuntimeHelpers.CreateSpan's RVA field-handle path allocates
-    // in unoptimized builds on some runtimes. ImmutableArray keeps every scan allocation-free.
-    internal static ReadOnlySpan<int> Diacritics => DiacriticTable.AsSpan();
+    // in unoptimized builds on some runtimes. Keep the array directly rooted:
+    // a static ImmutableArray field on this ref struct lost its backing array
+    // during allocation churn on .NET 10 ARM64. Never expose a writable alias.
+    internal static ReadOnlySpan<int> Diacritics => DiacriticTable;
 
-    private static readonly ImmutableArray<int> DiacriticTable =
+    private static readonly int[] DiacriticTable =
     [
         0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F,
         0x0346, 0x034A, 0x034B, 0x034C, 0x0350, 0x0351, 0x0352, 0x0357,

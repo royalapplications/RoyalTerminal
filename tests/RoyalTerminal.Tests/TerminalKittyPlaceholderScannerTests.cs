@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
+using System.Runtime.CompilerServices;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
@@ -11,6 +12,29 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalKittyPlaceholderScannerTests
 {
     private const string P = "\U0010EEEE";
+
+    [Fact]
+    public void DiacriticTableSurvivesCompactingCollections()
+    {
+        // Load the scanner without accessing the lazily initialized table,
+        // then promote existing objects before its first diacritic lookup.
+        Assert.Equal(0u, Scan(new TerminalCell[1]));
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        int[] expected = CopyDiacritics();
+        for (int generation = 0; generation < 8; generation++)
+        {
+            GC.Collect(generation % (GC.MaxGeneration + 1), GCCollectionMode.Forced, blocking: true, compacting: true);
+            // Keep the expected values in a separate array, not a span that
+            // would itself root the table and hide a static lifetime problem.
+            Assert.Equal(expected, CopyDiacritics());
+            TerminalKittyPlaceholderScanner scanner = new([Cell("\u0305\u030D\u030E")]);
+            Assert.True(scanner.TryReadNext(out TerminalKittyPlaceholderRun run));
+            Assert.Equal(new(0, 33554474, 0, 1, 0, 1), run);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int[] CopyDiacritics() => TerminalKittyPlaceholderScanner.Diacritics.ToArray();
 
     [Theory]
     [InlineData(false)]

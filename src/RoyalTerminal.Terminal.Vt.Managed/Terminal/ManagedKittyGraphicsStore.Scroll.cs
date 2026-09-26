@@ -9,6 +9,43 @@ internal sealed partial class ManagedKittyGraphicsStore
 {
     private readonly List<MarginScrollRestore> _marginScrollRestores = [];
 
+    // Marginless SD copies text into fixed native rows (pins stay put).
+    // A no-history SU/IND uses PageList.eraseRow: pins below the erased row
+    // move upward, but pins already on row zero survive without cropping.
+    // The host's generic text anchors instead follow/discard row contents.
+    internal void BeginPinScroll(TerminalScreen screen, int delta, bool resetTopColumn)
+    {
+        _marginScrollRestores.Clear();
+        int activeTop = screen.GetAbsoluteRowForViewportRow(0);
+        foreach (Placement placement in _placements.Values)
+        {
+            if (placement.Anchor is not { } anchor || !screen.TryResolveAnchor(anchor, out var origin)) continue;
+            int row = origin.Row - activeTop;
+            if (row < 0 || row >= screen.ViewportRows) continue;
+            // IND's bounded rotation additionally resets a pin already at
+            // the physical origin to column zero; SU's eraseRow does not.
+            int column = resetTopColumn && row == 0 ? 0 : origin.Column;
+            _marginScrollRestores.Add(new(anchor, column, Math.Max(0, row + delta)));
+        }
+    }
+
+    // ED3 uses PageList.eraseHistory, whose removed pins migrate to the
+    // first surviving page without becoming garbage (including whole-page
+    // erasure). Preserve this independently of generic host text anchors.
+    internal bool BeginHistoryErase(TerminalScreen screen)
+    {
+        _marginScrollRestores.Clear();
+        int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
+        if (activeTop == 0) return false;
+        foreach (Placement placement in _placements.Values)
+        {
+            if (placement.Anchor is not { } anchor || !screen.TryResolveAnchor(anchor, out var origin)) continue;
+            int row = origin.Row - activeTop;
+            _marginScrollRestores.Add(new(anchor, row < 0 ? 0 : origin.Column, Math.Max(0, row)));
+        }
+        return _marginScrollRestores.Count > 0;
+    }
+
     // Mirrors ImageStorage.scrollMarginsBegin/end. Record final positions before
     // generic row movement can prune pins, then restore them after rows settle.
     // Virtual placements follow text; relative placements follow their root.

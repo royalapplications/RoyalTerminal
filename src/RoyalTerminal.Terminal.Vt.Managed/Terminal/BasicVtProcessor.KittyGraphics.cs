@@ -125,7 +125,7 @@ public sealed partial class BasicVtProcessor
             // Ghostty retires the previous image at the start of an explicit
             // retransmission, including one whose format or medium is invalid.
             if (command.ImageId != 0 && command.Action is 't' or 'T')
-                _kittyStore.RemoveImage(_screen, command.ImageId);
+                _kittyStore.DeleteById(_screen, command.ImageId, 0, deleteUnused: true);
             if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                     _options.KittyGraphicsMaxImageBytes, out loader, out error,
                     _options.KittyGraphicsMediumReader)) return false;
@@ -244,7 +244,7 @@ public sealed partial class BasicVtProcessor
             return _kittyStore.DeleteById(_screen, command.ImageId, command.PlacementId, action == 'I');
         if (action is 'n' or 'N')
         {
-            ManagedKittyGraphicsStore.Image? image = _kittyStore.Find(0, command.ImageNumber);
+            ManagedKittyGraphicsStore.Image? image = _kittyStore.FindByNumber(command.ImageNumber);
             return image is not null && _kittyStore.DeleteById(_screen, image.Id,
                 command.PlacementId, action == 'N');
         }
@@ -284,7 +284,7 @@ public sealed partial class BasicVtProcessor
             ManagedKittyGraphicsStore.Image? image = _kittyStore.Find(command.ImageId, command.ImageNumber);
             if (image is null) return false;
             if (!image.Animation.DeleteFrame(command.Get('r'), out bool visibleChanged))
-                return action == 'F' && _kittyStore.RemoveImage(_screen, image.Id);
+                return action == 'F' && _kittyStore.DeleteById(_screen, image.Id, 0, deleteUnused: true);
             _kittyStore.CommitAnimationBytes(image);
             if (visibleChanged) _kittyStore.MarkContentChanged(image);
             return visibleChanged;

@@ -53,6 +53,13 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     {
         if (id != 0) return _images.GetValueOrDefault(id);
         if (number == 0) return null;
+        return FindByNumber(number);
+    }
+
+    // Unlike ID-or-number addressing, d=n/N accepts number zero and selects
+    // the newest unnumbered image (Ghostty ImageStorage.imageByNumber).
+    internal Image? FindByNumber(uint number)
+    {
         Image? newest = null;
         foreach (Image image in _images.Values)
             if (image.Number == number && (newest is null || image.Generation > newest.Generation)) newest = image;
