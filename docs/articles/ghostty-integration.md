@@ -149,6 +149,20 @@ follow Ghostty `Screen.cursorChangePin`, `Screen.cursorCopy` and
 `Terminal.restoreCursor`/`switchScreenMode`; Windows Terminal and xterm.js have
 different storage models and no equivalent PAGE allocation contract.
 
+Screen-switch cursor copies now have their own failure boundary. If installing
+the entering style at the dormant destination fails, the destination keeps its
+position, pending wrap, pen, protection, cursor shape, semantic state and implicit
+hyperlink counter. The old pen is reacquired in the surviving allocator rather
+than restoring a stale page-local ID; a second allocation failure safely falls
+back to default. Any completed page split, buffer switch, required clear, charset
+transfer and hyperlink closure remains committed. Failure only when subsequently
+moving to the copied position still uses the normal movement fallback, not cursor
+rollback. Mode 1049 clears reset the dormant pending-wrap flag before a failed
+copy; a successful copy retains the entering cursor's wrap state. Erase operations
+own their wrap reset, including mode-switch clears, while history-only ED3 and
+ignored ED/EL parameters leave it unchanged. Cursor-copy, COW, split, output-hold
+and native wrap-continuation tests are authored but unrun.
+
 Streaming tail line feeds assign slots using an owner-local high-water mark
 instead of measuring the full history for every new row. Checkpoint-assigned
 slots update that mark, and COW forks preserve independent ownership. Page

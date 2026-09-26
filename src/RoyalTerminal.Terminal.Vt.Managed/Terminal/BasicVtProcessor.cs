@@ -3470,8 +3470,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'G': // CHA
             case 'H': // CUP
             case 'f': // HVP
-            case 'J': // ED
-            case 'K': // EL
             case 'L': // IL
             case 'M': // DL
             case 'P': // DCH
@@ -3933,10 +3931,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _savedMainCursorRow = _cursorRow;
         _savedMainDelayedWrap = _delayedWrap;
         CaptureDepartingSnapshotCursor();
-        _alternateSemanticPen = _primarySemanticPen;
         _primaryCharsets = _charsets;
-        _alternateCursorStyle = _primaryCursorStyle;
-        _alternateHyperlinkImplicitCounter = _primaryHyperlinkImplicitCounter;
         _currentHyperlinkId = 0;
         _inAltScreen = true;
         _screen.SwitchToAlternateBuffer(clear: false);
@@ -3950,10 +3945,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _delayedWrap = _savedMainDelayedWrap;
         }
 
-        // cursorCopy loads the entering style at the dormant cursor's page
-        // before moving to the copied position. Preserve that allocation event.
-        if (_screen.TracksSnapshotMetadata)
-            ChangeSnapshotStyle(1, _savedAlternateCursorRow, _snapshotAlternatePen, CaptureSnapshotPen());
+        CopyEnteringScreenCursor(1, destinationWasCleared: clearAlt);
 
         // Scrolling margins are terminal-wide and survive screen switches.
     }
@@ -3971,12 +3963,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.ScrollOffset = 0;
         }
 
-        if (copyCursor)
-        {
-            _primaryCursorStyle = _alternateCursorStyle;
-            _primarySemanticPen = _alternateSemanticPen;
-            _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter;
-        }
         _screen.SwitchToPrimaryBuffer();
         _alternateCharsets = _charsets;
         _currentHyperlinkId = 0;
@@ -4000,8 +3986,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             InstallSnapshotPen(in pen);
             _currentProtected = _snapshotPrimaryProtected;
         }
-        else if (_screen.TracksSnapshotMetadata)
-            ChangeSnapshotStyle(0, _savedMainCursorRow, _snapshotPrimaryPen, CaptureSnapshotPen());
+        else CopyEnteringScreenCursor(0);
 
         // Scrolling margins are terminal-wide and survive screen switches.
 
@@ -4175,6 +4160,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void EraseInDisplay(int mode, bool selective = false)
     {
         ClampCursor();
+        // ED3 erases only history and must retain pending wrap. Put this at
+        // the operation boundary so mode-switch clears behave like CSI ED.
+        if (mode is >= 0 and <= 2 or 22) ResetDelayedWrap();
         if ((selective || ProtectionMode == CharacterProtectionMode.Iso) && mode is >= 0 and <= 2)
         {
             EraseProtectedDisplay(mode);
@@ -4257,6 +4245,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void EraseInLine(int mode, bool selective = false)
     {
+        if (mode is < 0 or > 2) return;
+        ResetDelayedWrap();
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
         if (selective || ProtectionMode == CharacterProtectionMode.Iso)

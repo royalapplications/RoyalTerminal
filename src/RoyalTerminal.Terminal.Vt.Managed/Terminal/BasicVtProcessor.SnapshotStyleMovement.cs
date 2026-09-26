@@ -35,8 +35,9 @@ public sealed partial class BasicVtProcessor
         ref uint counter = ref (key == 0 ? ref _primaryHyperlinkImplicitCounter : ref _alternateHyperlinkImplicitCounter);
         if (!_screen.SnapshotStyleChanged(key, row, previous, current, ref counter))
         {
-            // Screen.setAttribute restores the previous pen; DECRC, cursorCopy
-            // and page movement instead degrade to default on capacity failure.
+            // Screen.setAttribute restores the previous pen; DECRC and page
+            // movement instead degrade to default on capacity failure. Screen
+            // cursorCopy has a separate destination-cursor rollback boundary.
             current = restorePreviousOnFailure && _screen.SnapshotStyleChanged(key, row, default, previous, ref counter)
                 ? previous : default;
             _screen.SnapshotStyleChanged(key, row, default, current, ref counter);

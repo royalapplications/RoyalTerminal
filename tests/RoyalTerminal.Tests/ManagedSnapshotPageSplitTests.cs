@@ -13,7 +13,7 @@ namespace RoyalTerminal.Tests;
 // define metadata pressure, source retention and suffix cloning. WT's circular
 // TextBuffer and xterm.js Buffer/CircularList have no PAGE allocator equivalent.
 // Preserve their visible row/anchor order while following Ghostty's split rule.
-public sealed class ManagedSnapshotPageSplitTests
+public sealed partial class ManagedSnapshotPageSplitTests
 {
     private static GhosttySnapshotStyle Bold => new(default, default, default, 1);
     private static GhosttySnapshotStyle Italic => new(default, default, default, 2);
