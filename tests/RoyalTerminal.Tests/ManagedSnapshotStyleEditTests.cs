@@ -215,7 +215,7 @@ public sealed class ManagedSnapshotStyleEditTests
                 if (onePage)
                 {
                     using MemoryStream output = new();
-                    GhosttySnapshotLivePage.Capture(rows, screen, 4).WritePayloadTo(output);
+                    GhosttySnapshotLivePage.Capture(rows, screen, checked(4 * rows.Length)).WritePayloadTo(output);
                     records.Add(new(tag, output.ToArray()));
                 }
                 else foreach (TerminalRow row in rows)

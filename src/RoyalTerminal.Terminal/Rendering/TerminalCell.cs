@@ -1337,7 +1337,7 @@ public sealed partial class TerminalScreen
             // Once a row leaves scrollback, retain its storage for the new bottom
             // row. Clearing all metadata prevents stale wrap/resize state.
             row = _rows[0];
-            _rows.RemoveFirst(Math.Min(removedRows, _rows.Count));
+            RemoveRows(0, Math.Min(removedRows, _rows.Count));
             // Reusing the CLR array is not retaining the historical native page.
             // Admission assigns the recycled row to the new tail's capacity.
             row.SnapshotAllocation = null;
@@ -1353,7 +1353,7 @@ public sealed partial class TerminalScreen
         _rows.Add(row);
         if (maxRows == 0)
         {
-            _rows.RemoveFirst(_rows.Count);
+            RemoveRows(0, _rows.Count);
         }
 
         if (removedRows > 0)
@@ -1500,6 +1500,7 @@ public sealed partial class TerminalScreen
             rows.Add(_rows[rowIndex]);
         }
 
+        RetireSnapshotRows(0, firstViewportRow);
         _rows = rows;
         EnsureMinimumRows(ViewportRows);
         ShiftRasterGraphicsAfterTopRowsRemoved(scrollbackRows);
@@ -1536,6 +1537,7 @@ public sealed partial class TerminalScreen
             rows.Add(new TerminalRow(Columns, DefaultForeground, DefaultBackground));
         }
 
+        RetireSnapshotRows(0, _rows.Count);
         _rows = rows;
         ClearRasterGraphics();
         ClearKittyGraphics();
@@ -1633,7 +1635,7 @@ public sealed partial class TerminalScreen
             return 0;
         }
 
-        _rows.RemoveRange(_rows.Count - removableRows, removableRows);
+        RemoveRows(_rows.Count - removableRows, removableRows);
         PruneAnchorsFromRow(_rows.Count, _alternateBufferActive);
         ScrollOffset = 0;
         InvalidateAll();
@@ -1705,6 +1707,8 @@ public sealed partial class TerminalScreen
             TerminalRow row = _rows[i];
             if (row.PreservedColumns > row.Columns)
             {
+                using GhosttySnapshotStyleTracker.RowEdit styles = EditSnapshotRowStyles(row);
+                styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
                 row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
             }
         }
@@ -1724,7 +1728,7 @@ public sealed partial class TerminalScreen
         EnsureMinimumRows(ViewportRows);
         if (_rows.Count > ViewportRows)
         {
-            _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+            RemoveRows(ViewportRows, _rows.Count - ViewportRows);
             PruneAnchorsFromRow(ViewportRows, _alternateBufferActive);
         }
 
@@ -1738,7 +1742,7 @@ public sealed partial class TerminalScreen
         PruneAnchorsFromRow(0, _alternateBufferActive);
         for (int rowIndex = 0; rowIndex < _rows.Count; rowIndex++)
         {
-            _rows[rowIndex].Clear(DefaultForeground, DefaultBackground);
+            ClearRow(_rows[rowIndex]);
         }
     }
 
@@ -1746,7 +1750,7 @@ public sealed partial class TerminalScreen
     {
         for (int rowIndex = 0; rowIndex < ViewportRows; rowIndex++)
         {
-            GetViewportRow(rowIndex).Clear(DefaultForeground, DefaultBackground);
+            ClearRow(GetViewportRow(rowIndex));
         }
     }
 
@@ -1761,7 +1765,7 @@ public sealed partial class TerminalScreen
         int overflowRows = Math.Max(0, _rows.Count + rowCount - maxRows);
         if (overflowRows > 0)
         {
-            _rows.RemoveFirst(overflowRows);
+            RemoveRows(0, overflowRows);
             ShiftRasterGraphicsAfterTopRowsRemoved(overflowRows);
         }
 
@@ -1951,16 +1955,18 @@ public sealed partial class TerminalScreen
 
             int rowStart = Math.Min(startColumn, row.Columns - 1);
             int rowEnd = Math.Min(endColumn, row.Columns - 1);
-            if (rowStart > 0 && row[rowStart].Width == 0 && !row[rowStart].IsWideSpacerHead)
+            if (rowStart > 0 && row.ReadOnlyCells[rowStart].Width == 0 && !row.ReadOnlyCells[rowStart].IsWideSpacerHead)
             {
                 rowStart--;
             }
 
-            if (rowEnd + 1 < row.Columns && row[rowEnd].Width == 2)
+            if (rowEnd + 1 < row.Columns && row.ReadOnlyCells[rowEnd].Width == 2)
             {
                 rowEnd++;
             }
 
+            using GhosttySnapshotStyleTracker.RowEdit styles = EditSnapshotRowStyles(row);
+            styles.Clear(rowStart, rowEnd - rowStart + 1);
             for (int column = rowStart; column <= rowEnd; column++)
             {
                 ClearCellTextPreservingColors(ref row[column]);
@@ -1995,7 +2001,7 @@ public sealed partial class TerminalScreen
         int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
         if (overflowRows > 0)
         {
-            _rows.RemoveFirst(overflowRows);
+            RemoveRows(0, overflowRows);
             removedRows = overflowRows;
         }
 
@@ -2203,11 +2209,11 @@ public sealed partial class TerminalScreen
                     // Native no-scrollback screens erase the history created
                     // by shrinking: retain the bottom active rows, not the top.
                     removedRows = _rows.Count - ViewportRows;
-                    _rows.RemoveFirst(removedRows);
+                    RemoveRows(0, removedRows);
                 }
                 else
                 {
-                    _rows.RemoveRange(ViewportRows, _rows.Count - ViewportRows);
+                    RemoveRows(ViewportRows, _rows.Count - ViewportRows);
                 }
             }
         }
@@ -2216,7 +2222,7 @@ public sealed partial class TerminalScreen
             int overflowRows = _rows.Count - (ViewportRows + _scrollbackLimit);
             if (overflowRows > 0)
             {
-                _rows.RemoveFirst(overflowRows);
+                RemoveRows(0, overflowRows);
                 removedRows = overflowRows;
             }
         }

@@ -63,6 +63,25 @@ public sealed partial class TerminalScreen
     internal void SnapshotStyleAllocationReplaced(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)
         => _snapshotStyleTracker?.AllocationReplaced(previous, replacement);
 
-    internal void SnapshotStyleRowsObserved(GhosttySnapshotPageAllocation page, int nextSlot)
-        => _snapshotStyleTracker?.ObserveRowSlots(page, nextSlot);
+    internal void SnapshotStyleRowsObserved(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows)
+        => _snapshotStyleTracker?.ObserveRowSlots(page, rows);
+
+    private void RetireSnapshotRows(int start, int count)
+    {
+        if (!TracksSnapshotStyles || count == 0) return;
+        (_snapshotStyleTracker ??= new()).RetireRows(_rows, start, count);
+    }
+
+    private void RemoveRows(int start, int count)
+    {
+        RetireSnapshotRows(start, count);
+        _rows.RemoveRange(start, count);
+    }
+
+    private void ClearRow(TerminalRow row)
+    {
+        using GhosttySnapshotStyleTracker.RowEdit styles = row.SnapshotAllocation is null ? default : EditSnapshotRowStyles(row);
+        styles.Clear(0, row.PreservedColumns);
+        row.Clear(DefaultForeground, DefaultBackground);
+    }
 }

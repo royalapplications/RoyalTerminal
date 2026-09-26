@@ -15,14 +15,30 @@ internal sealed partial class GhosttySnapshotStyleTracker
     internal sealed class State(GhosttySnapshotStyleStorage storage)
     {
         internal GhosttySnapshotStyleStorage Storage = storage;
-        internal readonly Dictionary<int, ulong> Revisions = [];
+        // Keys also own occupied row slots. Null means the cells still need
+        // reconciliation, not that the slot is available for another row.
+        internal readonly Dictionary<int, ulong?> Revisions = [];
         internal int NextRowSlot;
         internal bool Shared;
         internal State Copy()
         {
             State copy = new(Storage.Copy()) { NextRowSlot = NextRowSlot };
-            foreach ((int row, ulong revision) in Revisions) copy.Revisions.Add(row, revision);
+            foreach ((int row, ulong? revision) in Revisions) copy.Revisions.Add(row, revision);
             return copy;
+        }
+
+        internal void ObserveSlot(int slot)
+        {
+            Revisions.TryAdd(slot, null);
+            NextRowSlot = Math.Max(NextRowSlot, slot + 1);
+        }
+
+        internal void RetireSlot(int slot)
+        {
+            Revisions.Remove(slot);
+            // Prefix holes are not reusable while later slots remain occupied.
+            // Reset tail rows are, even when logical rows have been rotated.
+            while (NextRowSlot > 0 && !Revisions.ContainsKey(NextRowSlot - 1)) NextRowSlot--;
         }
     }
 
@@ -58,7 +74,7 @@ internal sealed partial class GhosttySnapshotStyleTracker
         {
             row.SnapshotAllocation = previous;
             row.SnapshotAllocationRow = slot;
-            state.NextRowSlot = slot + 1;
+            state.ObserveSlot(slot);
         }
         else
         {
@@ -69,10 +85,15 @@ internal sealed partial class GhosttySnapshotStyleTracker
         return true;
     }
 
-    internal void ObserveRowSlots(GhosttySnapshotPageAllocation page, int nextSlot)
+    internal void ObserveRowSlots(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows)
     {
-        if (_pages.TryGetValue(page, out State? state) && nextSlot > state.NextRowSlot)
-            Exclusive(page, state).NextRowSlot = nextSlot;
+        if (!_pages.TryGetValue(page, out State? state)) return;
+        foreach (TerminalRow row in rows)
+        {
+            if (state.Revisions.ContainsKey(row.SnapshotAllocationRow)) continue;
+            state = Exclusive(page, state);
+            state.ObserveSlot(row.SnapshotAllocationRow);
+        }
     }
 
     internal GhosttySnapshotStyleTracker Copy()
@@ -96,7 +117,7 @@ internal sealed partial class GhosttySnapshotStyleTracker
             state.Storage = rebuilt;
         // Reconcile mutated rows before the next pen update. A checkpoint can
         // replace capacity after a bulk edit that has not yet reached an SGR.
-        state.Revisions.Clear();
+        foreach (int slot in state.Revisions.Keys) state.Revisions[slot] = null;
         _pages.Remove(previous);
         _pages.Add(replacement, state);
         ReplaceCursorIdentity(previous, replacement);
@@ -140,7 +161,7 @@ internal sealed partial class GhosttySnapshotStyleTracker
         {
             state = Exclusive(page, state);
         }
-        foreach (TerminalRow row in rows) state.NextRowSlot = Math.Max(state.NextRowSlot, row.SnapshotAllocationRow + 1);
+        foreach (TerminalRow row in rows) state.ObserveSlot(row.SnapshotAllocationRow);
         return state;
     }
 
@@ -159,10 +180,12 @@ internal sealed partial class GhosttySnapshotStyleTracker
         HashSet<int> retained = [];
         foreach (TerminalRow row in group) retained.Add(row.SnapshotAllocationRow);
         state.Storage.RetainRows(retained, page.Capacity.Columns);
+        foreach (int slot in state.Revisions.Keys)
+            if (!retained.Contains(slot)) state.RetireSlot(slot);
         foreach (TerminalRow row in group)
         {
             int slot = row.SnapshotAllocationRow;
-            if (state.Revisions.TryGetValue(slot, out ulong revision) && revision == row.SnapshotStyleRevision) continue;
+            if (state.Revisions.TryGetValue(slot, out ulong? revision) && revision == row.SnapshotStyleRevision) continue;
             ReadOnlySpan<TerminalCell> cells = row.ReadOnlyPreservedCells;
             for (int column = 0; column < cells.Length; column++)
             {

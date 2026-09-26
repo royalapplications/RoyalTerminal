@@ -12,7 +12,7 @@ internal sealed partial class GhosttySnapshotStyleTracker
         if (row.SnapshotAllocation is not { MetadataOverflow: false } page) return default;
         State state;
         if (_pages.TryGetValue(page, out State? known) &&
-            known.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong revision) && revision == row.SnapshotStyleRevision)
+            known.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong? revision) && revision == row.SnapshotStyleRevision)
             state = Exclusive(page, known);
         else
         {

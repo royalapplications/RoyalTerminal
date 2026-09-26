@@ -36,7 +36,7 @@ public sealed partial class TerminalScreen
                 }
             }
             if (pinned) break;
-            _rows.RemoveRange(last, 1);
+            RemoveRows(last, 1);
         }
     }
 
