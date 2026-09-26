@@ -14,3 +14,11 @@ internal interface IDesktopNotificationBackend : IAsyncDisposable
     ValueTask ShowAsync(TerminalNotificationRequest request, Action<TerminalNotificationFeedback> feedback, CancellationToken cancellationToken);
     ValueTask CloseAsync(Guid token, CancellationToken cancellationToken);
 }
+
+// Backends with native-owned late cleanup can honor ShowAsync's token when a
+// pane closes. CancelPending interrupts all managed delivery waits during window
+// shutdown; it must not answer or dismiss the user's OS authorization dialog.
+internal interface IDesktopNotificationCancellation
+{
+    void CancelPending();
+}

@@ -58,9 +58,10 @@ Both VT adapters implement `ITerminalNotificationSource`; embedders can configur
 `TerminalControl.NotificationHost` with a nonblocking `ITerminalNotificationHost`.
 OSC 99 queries advertise only the backend's actual capabilities. Without a host,
 notifications and support queries are silently ignored. The default application
-now installs a Linux freedesktop backend for live sessions, shared by both engines;
-capture replay never installs a desktop presenter. macOS/Windows presenters remain
-unfinished. Linux runtime/platform sign-off is pending, not a claim of verified delivery.
+now installs Linux freedesktop and macOS UserNotifications backends for live sessions,
+shared by both engines; capture replay never installs a desktop presenter. The Windows
+presenter remains unfinished. New platform implementations await runtime sign-off;
+this is not a claim of verified desktop delivery.
 
 The shared protocol implements chunked title/body/buttons/icon assembly, strict
 safe UTF-8 and base64 input, application/type metadata, occasions, urgency, sound,
@@ -139,6 +140,45 @@ command without adding an upstream action enum value. Callback, protocol and
 headless lifecycle tests have been added; execution awaits full validation.
 Linux resource resolution follows the [icon theme specification](https://specifications.freedesktop.org/icon-theme/latest/)
 and [sound theme specification](https://specifications.freedesktop.org/sound-theme/latest-single/).
+
+The macOS presenter uses a separate universal arm64/x64 host bridge bundled in the
+Avalonia application package; it does not depend on the selected VT engine or add
+Ghostty VT exports. Apple UserNotifications requires a real `.app` bundle with a
+bundle identifier. Missing native assets, unbundled command-line hosts, denied
+authorization and a notification-center delegate owned by another embedding host
+leave support unavailable. Initialization and support queries never prompt for
+permission: only a real delivery can request alert/sound authorization.
+
+Source-generated JSON carries bounded requests to a native per-client owner. Native
+completion blocks never call managed function pointers. An owned managed poller
+reads completion/activation and delivered-notification state, so callbacks from
+superseded requests or previous sessions cannot activate the current pane. Delivered
+replacements reuse their OS ID with a new revision token; a still-pending replacement
+gets a different ID so late cancellation cannot remove its successor. Categories
+retain other applications' registered categories and are removed on owner teardown.
+Actions preserve button indices; the shared protocol decides whether to focus the
+originating pane. The OS can still activate the application for its default action.
+
+macOS icon names use standard system symbols or application bundle icons, in order,
+then bounded single-frame PNG data. Attachment preparation/file writes run off the
+AppKit queue and use generated private temporary directories, removed on completion
+or cancellation. Only system/silent sounds are advertised, matching the upstream
+macOS presenters. Low urgency is passive; normal/high preserve ordinary notification
+policy without requesting a critical-alert entitlement. All-close-event and full
+urgency capability flags are deliberately absent. Delivered-state polling provides
+an eventually refreshed alive cache (two missing observations after a delivery
+grace period); `c=1` receives the protocol's `untracked` response.
+
+Closing a pane cancels its outstanding delivery wait without stopping other panes;
+one native authorization wait serves the remaining requests without retaining the
+cancelled payloads. Window close cancels all waits and awaits native cleanup.
+An OS add completion that exceeds the bounded shutdown wait remains natively owned
+and removes its own late request, without retaining a managed callback or handle.
+Objective-C tests use a fake center for replacement/cancellation/delegate lifetimes;
+managed tests use a fake transport. The universal bridge build and native tests are
+wired into macOS CI and its artifact into cross-platform NuGet packaging. Build,
+test execution, package inspection and real permission/activation sign-off remain
+pending until the full validation phase.
 
 ## Ghostty-compatible shaders
 

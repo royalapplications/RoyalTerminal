@@ -46,7 +46,13 @@ internal sealed class DesktopNotificationService : IDisposable
 
     internal void Close(Guid token)
     {
-        lock (_sync) if (_entries.TryGetValue(token, out Entry? entry)) entry.Close = true;
+        CancellationTokenSource? pending = null;
+        lock (_sync)
+            if (_entries.TryGetValue(token, out Entry? entry))
+            { entry.Close = true; pending = entry.PendingDelivery; }
+        // Backends with native-owned late cleanup can cancel a permission wait
+        // for one pane without stopping notifications in the rest of the window.
+        try { pending?.Cancel(); } catch (ObjectDisposedException) { }
         _wake.Writer.TryWrite(true);
     }
 
@@ -64,6 +70,7 @@ internal sealed class DesktopNotificationService : IDisposable
             Volatile.Write(ref _capabilities, 0);
         }
         try { _stop.Cancel(); } catch (ObjectDisposedException) { }
+        if (_backend is IDesktopNotificationCancellation cancellable) cancellable.CancelPending();
         _wake.Writer.TryComplete();
         // Completion owns backend cleanup; disposing a window never waits on DBus.
     }
@@ -107,11 +114,19 @@ internal sealed class DesktopNotificationService : IDisposable
                         continue;
                     }
                     if (entry.Shown) continue;
+                    CancellationTokenSource? pending;
+                    lock (_sync)
+                    {
+                        if (entry.Close || entry.Completed || _disposed) continue;
+                        pending = _backend is IDesktopNotificationCancellation
+                            ? CancellationTokenSource.CreateLinkedTokenSource(_stop.Token) : null;
+                        entry.PendingDelivery = pending;
+                    }
                     try
                     {
-                        // Finish an in-flight (backend-bounded) show during shutdown:
-                        // only its reply gives us the OS ID needed for cleanup.
-                        await _backend.ShowAsync(entry.Request, feedback => Feedback(entry, feedback), CancellationToken.None).ConfigureAwait(false);
+                        // Linux must obtain the reply's OS ID before cleanup.
+                        // Native-owned cancellation backends can stop waiting now.
+                        await _backend.ShowAsync(entry.Request, feedback => Feedback(entry, feedback), pending?.Token ?? CancellationToken.None).ConfigureAwait(false);
                         entry.Shown = true;
                         // Only a successful replacement retires the old backend revision.
                         if (entry.Request.ReplacesToken is Guid old)
@@ -127,6 +142,11 @@ internal sealed class DesktopNotificationService : IDisposable
                             lock (_sync) if (_entries.Remove(old, out Entry? replaced)) _bytes -= replaced.Size;
                         }
                         Feedback(entry, new(TerminalNotificationEvent.Failed));
+                    }
+                    finally
+                    {
+                        lock (_sync) entry.PendingDelivery = null;
+                        pending?.Dispose();
                     }
                 }
                 // Periodic wake also notices a disconnected backend with no active requests.
@@ -195,6 +215,7 @@ internal sealed class DesktopNotificationService : IDisposable
         internal readonly Action<TerminalNotificationFeedback> Callback = callback;
         internal readonly int Size = size;
         internal readonly long Sequence = sequence;
+        internal CancellationTokenSource? PendingDelivery;
         internal bool Close, Completed, Shown, FeedbackDelivered;
     }
 }

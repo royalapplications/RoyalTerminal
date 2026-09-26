@@ -166,6 +166,22 @@ jobs:
         if: matrix.arch == 'arm64'
         run: bash scripts/build-unix-pty.sh
 
+      - name: Build macOS notification bridge
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-macos-notifications.sh
+
+      - name: Upload macOS notification bridge
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/libroyalterminal-notifications.dylib
+          if-no-files-found: error
+
+      - name: Test macOS notification bridge without desktop delivery
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-macos-notifications.sh test
+
       - name: Upload macOS PTY launcher
         if: matrix.arch == 'arm64'
         uses: actions/upload-artifact@v7
@@ -480,6 +496,12 @@ jobs:
         with:
           name: unix-pty-launcher
           path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/
+
+      - name: Download macOS notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/
 
       - name: Download macOS arm64 native
         uses: actions/download-artifact@v4

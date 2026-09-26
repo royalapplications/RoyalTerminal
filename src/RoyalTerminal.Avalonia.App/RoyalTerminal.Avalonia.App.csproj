@@ -37,4 +37,20 @@
     <PackageReference Include="Xaml.Behaviors.Avalonia" />
   </ItemGroup>
 
+  <!-- Universal macOS host bridge, independent of which VT engine is selected. -->
+  <ItemGroup>
+    <None Include="runtimes/osx/native/libroyalterminal-notifications.dylib" Pack="true" PackagePath="runtimes/osx/native/"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="libroyalterminal-notifications.dylib"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) Or Exists('runtimes/osx/native/libroyalterminal-notifications.dylib')" />
+  </ItemGroup>
+  <Target Name="BuildMacOsNotificationBridge" BeforeTargets="PrepareForBuild"
+          Inputs="$(MSBuildProjectDirectory)/../../native/macos-notifications/notifications.m;$(MSBuildProjectDirectory)/../../native/macos-notifications/notifications.h;$(MSBuildProjectDirectory)/../../scripts/build-macos-notifications.sh"
+          Outputs="$(MSBuildProjectDirectory)/runtimes/osx/native/libroyalterminal-notifications.dylib"
+          Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/../../scripts/build-macos-notifications.sh&quot;" />
+  </Target>
+  <Target Name="RequireMacOsNotificationBridgeForPack" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/runtimes/osx/native/libroyalterminal-notifications.dylib')"
+           Text="Build the macOS notification bridge with scripts/build-macos-notifications.sh on macOS (or download its CI artifact) before packing." />
+  </Target>
 </Project>

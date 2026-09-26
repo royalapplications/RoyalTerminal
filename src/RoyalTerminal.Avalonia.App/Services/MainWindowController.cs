@@ -3139,14 +3139,19 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
-        if (notificationsEnabled && OperatingSystem.IsLinux())
+        if (notificationsEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             if (_desktopNotifications is null)
             {
-                DesktopThemeFiles files = new();
-                LinuxDesktopThemeEnvironment themes = new(files, Environment.GetEnvironmentVariable, LinuxDesktopThemeSettings.Read);
-                FreedesktopNotificationResources resources = new(files, themes.Read, TimeProvider.System);
-                _desktopNotifications = new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection(), resources));
+                if (OperatingSystem.IsMacOS())
+                    _desktopNotifications = new(new MacOsDesktopNotificationBackend(static () => new MacNotificationTransport()));
+                else
+                {
+                    DesktopThemeFiles files = new();
+                    LinuxDesktopThemeEnvironment themes = new(files, Environment.GetEnvironmentVariable, LinuxDesktopThemeSettings.Read);
+                    FreedesktopNotificationResources resources = new(files, themes.Read, TimeProvider.System);
+                    _desktopNotifications = new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection(), resources));
+                }
             }
             DesktopNotificationHost host = new(_desktopNotifications, _window, control, () =>
             {
