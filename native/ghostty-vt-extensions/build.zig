@@ -16,6 +16,11 @@ pub fn build(b: *std.Build) !void {
     });
     const module = ghostty.module("ghostty-vt-c");
 
+    // A fresh Zig configure pass records lazy packages before their modules
+    // exist. Let the build runner fetch them and reconfigure before inspecting
+    // Wuffs' nested imports; do not turn a cache miss into a build failure.
+    if (b.graph.needed_lazy_dependencies.count() != 0) return;
+
     // Wuffs uses per-function target attributes to emit AVX2 pixel routines
     // even for a baseline module with Ghostty's SIMD bundle disabled. Keep
     // the Windows no-AVX compatibility artifact genuinely instruction-clean;
