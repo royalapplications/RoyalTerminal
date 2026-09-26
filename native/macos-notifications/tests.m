@@ -95,6 +95,21 @@ static BOOL Completed(RTNotificationClient *client, long long sequence, BOOL suc
     return NO;
 }
 
+static void TestBrokerDoesNotOwnItsCenter(void) {
+    __weak RTTestCenter *weakCenter;
+    RTNotificationClient *client;
+    @autoreleasepool {
+        RTTestCenter *center = [RTTestCenter new];
+        weakCenter = center;
+        client = Client(center);
+        objc_setAssociatedObject(center, &RTBrokerKey, client.broker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        assert(client.broker.center == (UNUserNotificationCenter *)center);
+    }
+    assert(weakCenter == nil);
+    assert(client.broker.center == nil);
+    [client stop];
+}
+
 static void TestReplacementAndStaleActivation(void) {
     RTTestCenter *center = [RTTestCenter new]; RTNotificationClient *client = Client(center);
     NSString *first = @"11111111111111111111111111111111", *second = @"22222222222222222222222222222222";
@@ -276,6 +291,7 @@ static void TestLateImageSubmissionOwnsAttachmentCleanup(void) {
 
 int main(void) {
     @autoreleasepool {
+        TestBrokerDoesNotOwnItsCenter();
         TestReplacementAndStaleActivation();
         TestStopOwnsLateDelivery();
         TestAuthorizationDenialAndBounds();

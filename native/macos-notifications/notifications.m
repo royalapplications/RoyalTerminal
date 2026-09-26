@@ -29,7 +29,11 @@
 // One broker per UN center, attached to that center rather than mutable static
 // state. Do not take over another embedding application's notification delegate.
 @interface RTNotificationBroker : NSObject <UNUserNotificationCenterDelegate>
-@property(strong) UNUserNotificationCenter *center;
+// The shared system center owns its broker through the associated object.
+// The reverse edge must be weak, also avoiding center -> pending completion
+// -> client -> broker -> center cycles. Completions still own the client until
+// late delivery/attachment cleanup has finished after managed handle release.
+@property(weak) UNUserNotificationCenter *center;
 @property(strong) NSHashTable<RTNotificationClient *> *clients;
 - (void)updateCategories:(void (^)(void))completion;
 @end

@@ -117,8 +117,10 @@ pub fn build(b: *std.Build) !void {
         .before = "    pub const Effects = struct {\n",
         .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
     }, .{
-        .before = "    fn desktopNotification(\n",
-        .after = "    pub fn royalDesktopNotification(self: *Handler, notification: ?osc.Command.KittyDesktopNotification) void {\n        const callback = self.effects.royal_notification orelse return;\n        callback(self, notification);\n    }\n\n    fn desktopNotification(\n",
+        // Anchor to the Handler indentation. Test handlers declare the same
+        // function at a deeper indentation and must remain unmodified.
+        .before = "\n    fn desktopNotification(\n",
+        .after = "\n    pub fn royalDesktopNotification(self: *Handler, notification: ?osc.Command.KittyDesktopNotification) void {\n        const callback = self.effects.royal_notification orelse return;\n        callback(self, notification);\n    }\n\n    fn desktopNotification(\n",
     }, .{
         .before = "                self.terminal.fullReset();\n",
         .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
