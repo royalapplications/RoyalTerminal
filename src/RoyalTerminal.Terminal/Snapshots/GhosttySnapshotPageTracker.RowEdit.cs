@@ -75,6 +75,33 @@ internal sealed partial class GhosttySnapshotPageTracker
                 owner.Overflow(ref page, state, group);
         }
 
+        // Terminal.print's widening wrap is not a row clone: within one page
+        // it moves the slice, while across pages it appends each old suffix
+        // before releasing the source. Replacement scratch and any growth must
+        // therefore occur with the source still live. The destination is the
+        // newly printed base (no suffix); callers commit both payloads next.
+        internal void TransferGraphemeFrom(RowEdit source, int sourceColumn, int destinationColumn)
+        {
+            if (owner is not null && row.SnapshotAllocation is { MetadataOverflow: false } page)
+            {
+                if (source.Owner is null)
+                    owner.Overflow(ref page, state, Group(rows, page));
+                else if (ReferenceEquals(state, source.AllocatorState))
+                    state.Storage.Graphemes.Swap(checked(source.Offset + sourceColumn), checked(Offset + destinationColumn));
+                else
+                {
+                    int length = source.AllocatorState.Storage.Graphemes.SuffixLength(checked(source.Offset + sourceColumn));
+                    for (int i = 0; i < length && row.SnapshotAllocation is { MetadataOverflow: false }; i++)
+                        AppendGrapheme(destinationColumn);
+                }
+            }
+            // Even unrepresentable destinations keep rendering; the source's
+            // visible suffix is removed, so its independently tracked slice
+            // must be released too. Same-page moves have already removed it.
+            if (source.Owner is not null)
+                source.AllocatorState.Storage.Graphemes.Clear(checked(source.Offset + sourceColumn));
+        }
+
         internal void Swap(int left, int right)
         {
             if (owner is null) return;

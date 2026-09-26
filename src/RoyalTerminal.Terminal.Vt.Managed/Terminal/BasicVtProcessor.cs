@@ -1462,39 +1462,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         if (newWidth == 2 && targetColIndex >= CursorRightLimit)
         {
-            // A selector can widen a base already printed in the last column.
-            // Ghostty moves the entire styled grapheme to the next line.
             if (!_autoWrap || _screen.Columns < 2) return true;
-            TerminalCell moved = targetCell;
-            int movedCodepoint = moved.Codepoint;
-            Span<char> widenedSuffix = stackalloc char[2];
-            int widenedLength = new Rune(codepoint).EncodeToUtf16(widenedSuffix);
-            string widenedText = string.Concat(currentText, widenedSuffix[..widenedLength]);
-            ClearPreservedCellsForMutation(targetRow);
-            ClearRasterGraphicsForTextMutation(targetRowIndex, targetColIndex, 1);
-            TerminalCell spacerHead = targetCell;
-            if (targetCell.Grapheme is null) WriteCellFromPen(ref spacerHead, 0, 0);
-            spacerHead.Codepoint = 0;
-            spacerHead.Grapheme = null;
-            bool atScreenEdge = targetColIndex == _screen.Columns - 1;
-            spacerHead.Width = atScreenEdge ? (byte)0 : (byte)1;
-            spacerHead.IsWideSpacerHead = atScreenEdge;
-            WriteStyledCell(targetRow, targetColIndex, in spacerHead);
-            targetRow.IsDirty = true;
-            _delayedWrap = false;
-            LineFeed(wrapForced: atScreenEdge, softWrap: true);
-            _cursorCol = _scrollLeft;
-            WriteCellFromPen(ref moved, movedCodepoint, 2);
-            moved.Grapheme = widenedText;
-            TerminalRow destination = _screen.GetViewportRow(_cursorRow);
-            ClearPreservedCellsForMutation(destination);
-            ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
-            ClearCellAndWideArtifacts(destination, _scrollLeft);
-            ClearCellAndWideArtifacts(destination, _scrollLeft + 1);
-            WriteStyledCell(destination, _scrollLeft, in moved);
-            WriteCellFromPen(destination, _scrollLeft + 1, 0, 0);
-            destination.IsDirty = true;
-            AdvanceCursorAfterGraphic(2);
+            WidenGraphemeAcrossWrap(targetRow, targetRowIndex, targetColIndex, in targetCell, codepoint);
             return true;
         }
 
@@ -1618,6 +1587,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (rowIndex < 0 || rowIndex >= _screen.ViewportRows) return;
         TerminalRow previous = _screen.GetViewportRow(rowIndex);
         if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
+        using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(previous);
         ref TerminalCell head = ref previous[previous.Columns - 1];
         head.IsWideSpacerHead = false;
         head.Width = 1;
