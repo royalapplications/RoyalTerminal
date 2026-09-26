@@ -89,7 +89,11 @@ allocation frees its explicit ID, and the fixed hyperlink-cell map admits cells 
 row order. Raw accepted tables remain independent of the live result. Temporary
 sets/bitmaps are discarded after parsing; only accepted IDs and suffixes remain.
 Managed bitmap searches safely reject an oversized span at the last word rather
-than reading past the bitmap. Windows Terminal and xterm.js do not use this native
+than reading past the bitmap. A hash-checked native correctness overlay now applies
+the same end check to the pinned allocator, without changing its allocation order
+or consuming bits on failure. Native/managed regressions cover oversized URI and
+explicit-ID spans, occupied prefixes and complete reuse after failure; the native
+rebuild and execution remain pending. Windows Terminal and xterm.js do not use this native
 PAGE contract, so Ghostty defines these restore decisions. Golden hash vectors,
 bitmap/set lifecycle cases, adversarial hash collisions, seeded native comparisons
 and post-restore overwrite tests are added but unrun. Event-level accounting and

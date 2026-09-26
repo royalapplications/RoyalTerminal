@@ -9,7 +9,7 @@ Both shared and static libraries include them.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies seven corrections to pinned upstream
+The generated source copy also applies eight corrections to pinned upstream
 `622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -65,9 +65,19 @@ fails the build until reviewed. The submodule checkout is never changed.
   bypassed dirty publication. A focused clean-frame EL regression is written;
   validation of this sixth overlay is deferred until after the requested push.
 
+- `bitmap_allocator.zig`: check the final bitmap index before examining the
+  partial-word remainder of a large allocation. The complete-word loop can end
+  at `bitmaps.len`, or be skipped entirely (for example, 65 chunks requested from
+  one 64-bit word). Return allocation failure without changing any bitmap bits
+  instead of reading past the slice. Snapshot hyperlink IDs and URIs exercise
+  this through their fixed-capacity string allocator. One-word, multiword and
+  occupied-prefix cases check omission of the oversized link and successful use
+  of all remaining space by the next entry. This eighth correction and its
+  native/managed comparisons are source-reviewed; execution remains pending.
+
 Five earlier corrections were reproduced through the native C API before
-correction and have focused tests. The dirty-wrap and eviction-quota corrections
-above still await execution. No public upstream issue is claimed. Reassess and
+correction and have focused tests. The dirty-wrap, eviction-quota and bitmap-bounds
+corrections above still await execution. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
 ## OSC 99 host bridge
@@ -76,7 +86,7 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the seven correctness fixes.
+These are host integration additions, separate from the eight correctness fixes.
 Native rebuild and callback/lifetime tests are pending implementation-phase validation.
 
 The sixteen additional C exports are declared in

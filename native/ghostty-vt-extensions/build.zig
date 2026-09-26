@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) !void {
         .exclude_extensions = &.{
             b.pathJoin(&.{ "terminal", "Terminal.zig" }),
             b.pathJoin(&.{ "terminal", "Screen.zig" }),
+            b.pathJoin(&.{ "terminal", "bitmap_allocator.zig" }),
             b.pathJoin(&.{ "terminal", "kitty", "graphics_storage.zig" }),
             b.pathJoin(&.{ "terminal", "stream_continuation.zig" }),
             b.pathJoin(&.{ "terminal", "stream.zig" }),
@@ -58,6 +59,13 @@ pub fn build(b: *std.Build) !void {
     try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{.{
         .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
         .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
+    }});
+    try addOverlay(b, sources, ghostty, "terminal/bitmap_allocator.zig", "bac61a65b5a3141ccfad2d9d0a6a452be7106a647182470fcf38e1289b5f86e1", &.{.{
+        // The full-word loop checks its bounds, but it can finish (or be
+        // skipped) with a partial-word remainder and i == bitmaps.len.
+        // Report allocation pressure before inspecting that nonexistent word.
+        .before = "            // If the number of available chunks at the start of this bitmap\n",
+        .after = "            if (i >= bitmaps.len) return null;\n\n            // If the number of available chunks at the start of this bitmap\n",
     }});
     try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{ .{
         .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",

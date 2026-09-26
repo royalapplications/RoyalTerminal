@@ -102,6 +102,43 @@ public sealed class ManagedSnapshotMetadataPressureTests
         Assert.NotEqual(0, row.ReadOnlyCells[1].HyperlinkId);
     }
 
+    [Theory]
+    [InlineData(2048U, 0, 2049, false)]
+    [InlineData(2048U, 0, 2049, true)]
+    [InlineData(4096U, 0, 4097, false)]
+    [InlineData(4096U, 32, 4065, false)]
+    [InlineData(4096U, 2016, 2081, true)]
+    [InlineData(6144U, 0, 6145, false)]
+    [InlineData(6144U, 2016, 4129, false)]
+    [InlineData(6144U, 4064, 2081, true)]
+    public void OversizedLinkSpanIsDroppedWithoutConsumingTheRemainingStrings(uint capacity, int prefix, int oversized, bool explicitId)
+    {
+        GhosttySnapshotPage page = Read(LargeSpanPayload(capacity, prefix, oversized, explicitId));
+        TerminalRow row = Live(page);
+        Assert.Equal(prefix != 0, row.ReadOnlyCells[0].HyperlinkId != 0);
+        Assert.Equal(0, row.ReadOnlyCells[1].HyperlinkId);
+        Assert.NotEqual(0, row.ReadOnlyCells[2].HyperlinkId);
+        Assert.True(page.TryGetHyperlink(2, out GhosttySnapshotHyperlink raw));
+        Assert.Equal(oversized, explicitId ? raw.ExplicitId.Length : raw.Uri.Length);
+    }
+
+    [Fact]
+    public void NativeOversizedLinkSpansReturnAllocationFailureAtTheLastBitmapWord()
+    {
+        RequireNative();
+        // The pinned allocator lacked a bounds check after searching complete
+        // words. These cases require the repository-owned native overlay, not
+        // a plain upstream binary: failure must omit detail, never read OOB.
+        CompareNative(LargeSpanPayload(2048, 0, 2049, false));
+        CompareNative(LargeSpanPayload(2048, 0, 2049, true));
+        CompareNative(LargeSpanPayload(4096, 0, 4097, false));
+        CompareNative(LargeSpanPayload(4096, 32, 4065, false));
+        CompareNative(LargeSpanPayload(4096, 2016, 2081, true));
+        CompareNative(LargeSpanPayload(6144, 0, 6145, false));
+        CompareNative(LargeSpanPayload(6144, 2016, 4129, false));
+        CompareNative(LargeSpanPayload(6144, 4064, 2081, true));
+    }
+
     [Fact]
     public void HyperlinkCellMapAdmitsOnlyItsNativeLoadInRowOrder()
     {
@@ -249,6 +286,18 @@ public sealed class ManagedSnapshotMetadataPressureTests
     private static GhosttySnapshotPage Read(byte[] payload) => GhosttySnapshotPage.Read(payload, 65535, 1024, 4 * 1024 * 1024);
     private static TerminalRow Live(GhosttySnapshotPage page) => Assert.Single(GhosttySnapshotLivePage.Decode(page, new(page.Grid.Columns, 1)));
     private static byte[] Filled(int length, byte value) { byte[] bytes = new byte[length]; Array.Fill(bytes, value); return bytes; }
+
+    private static byte[] LargeSpanPayload(uint capacity, int prefix, int oversized, bool explicitId)
+    {
+        List<Link> links = [];
+        if (prefix != 0) links.Add(new(1, 1, null, Filled(prefix, 65)));
+        links.Add(explicitId
+            ? new(2, 0, Filled(oversized, 66), [67])
+            : new(2, 2, null, Filled(oversized, 66)));
+        // Fill all remaining chunks to detect partial allocation on failure.
+        links.Add(new(3, 3, null, Filled(checked((int)capacity - prefix), 68)));
+        return Payload(stringCapacity: capacity, links: links.ToArray(), linkIds: [1, 2, 3, 0]);
+    }
 
     private static byte[] Payload(int columns = 4, ushort styleCapacity = 8, ushort linkCapacity = 192, uint stringCapacity = 2048,
         (ushort Id, GhosttySnapshotStyle Style)[]? styles = null, Link[]? links = null, ushort[]? styleIds = null, ushort[]? linkIds = null)

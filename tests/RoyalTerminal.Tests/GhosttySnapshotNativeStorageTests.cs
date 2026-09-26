@@ -90,6 +90,29 @@ public sealed class GhosttySnapshotNativeStorageTests
         Assert.False(tooSmall.TryAllocate(65 * 32, out _));
     }
 
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(2, 0)]
+    [InlineData(2, 1)]
+    [InlineData(2, 63)]
+    [InlineData(3, 0)]
+    [InlineData(3, 63)]
+    [InlineData(3, 64)]
+    [InlineData(3, 127)]
+    public void LargeSpanPastLastWordLeavesAllAvailableChunksUntouched(int words, int prefixChunks)
+    {
+        foreach (int chunkBytes in new[] { 16, 32 })
+        {
+            GhosttySnapshotBitmap bitmap = new((uint)(words * 64 * chunkBytes), chunkBytes);
+            if (prefixChunks != 0) Assert.True(bitmap.TryAllocate(prefixChunks * chunkBytes, out _));
+            int remaining = words * 64 - prefixChunks;
+            Assert.False(bitmap.TryAllocate((remaining + 1) * chunkBytes, out _));
+            Assert.True(bitmap.TryAllocate(remaining * chunkBytes, out var tail));
+            Assert.Equal(new GhosttySnapshotBitmap.Slice(prefixChunks, remaining), tail);
+            Assert.False(bitmap.TryAllocate(1, out _));
+        }
+    }
+
     [Fact]
     public void DeadSetItemsRemainUntilTrimOrProbeReclaimsThem()
     {
