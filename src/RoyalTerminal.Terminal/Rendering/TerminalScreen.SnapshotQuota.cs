@@ -39,7 +39,7 @@ public sealed partial class TerminalScreen
     // Called after appending an empty row, before the printer initializes its
     // style. Tail-slot assignment is constant-time on the streaming fast path.
     // Return the prefix count so the caller adjusts anchors exactly once.
-    private int RemoveSnapshotQuotaRowsAfterGrowth()
+    private int RemoveSnapshotQuotaRowsAfterGrowth(GhosttySnapshotScrollbackQuota? growthQuota = null)
     {
         if (!TracksSnapshotMetadata || _rows.Count < 2 || !HasNativeSnapshotGeometry) return 0;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
@@ -47,15 +47,16 @@ public sealed partial class TerminalScreen
         if (tail.SnapshotAllocation is null && !(_snapshotPageTracker ??= new()).AssignTailRow(_rows, _rows.Count - 1, layout))
             _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
         bool newPage = !ReferenceEquals(tail.SnapshotAllocation, _rows[_rows.Count - 2].SnapshotAllocation);
-        return RemoveSnapshotQuotaRows(newPage ? GhosttySnapshotQuotaCheckpoint.PageGrowth : GhosttySnapshotQuotaCheckpoint.RowGrowth);
+        return RemoveSnapshotQuotaRows(newPage ? GhosttySnapshotQuotaCheckpoint.PageGrowth : GhosttySnapshotQuotaCheckpoint.RowGrowth, growthQuota);
     }
 
     private bool HasNativeSnapshotGeometry => Columns is >= 1 and <= ushort.MaxValue && ViewportRows is >= 1 and <= ushort.MaxValue;
 
-    private int RemoveSnapshotQuotaRows(GhosttySnapshotQuotaCheckpoint checkpoint)
+    private int RemoveSnapshotQuotaRows(GhosttySnapshotQuotaCheckpoint checkpoint, GhosttySnapshotScrollbackQuota? growthQuota = null)
     {
-        if (!HasFiniteSnapshotQuota || !HasNativeSnapshotGeometry || _rows.Count <= ViewportRows) return 0;
-        GhosttySnapshotScrollbackQuota quota = _snapshotScrollbackQuota!;
+        GhosttySnapshotScrollbackQuota? quota = growthQuota ?? _snapshotScrollbackQuota;
+        if (quota is not ({ MaximumBytes: not null } or { MaximumRows: not null }) ||
+            !HasNativeSnapshotGeometry || _rows.Count <= ViewportRows) return 0;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         bool bytes = quota.MaximumBytes.HasValue && checkpoint is GhosttySnapshotQuotaCheckpoint.LimitChange or GhosttySnapshotQuotaCheckpoint.PageGrowth;
         if (!bytes && (ulong)(_rows.Count - ViewportRows) <= Math.Max(quota.MaximumRows ?? ulong.MaxValue, (ulong)layout.InitialRows(Columns))) return 0;

@@ -14,8 +14,10 @@ public sealed record ManagedTerminalSnapshotOptions
 
     /// <summary>
     /// Maximum primary history rows accepted from incremental pages. Resident READY overlap is
-    /// preserved. Alternate history is not retained. Unlike native page-byte quotas this is the
-    /// managed host's row contract; a page that does not fit is dropped whole, with all older pages.
+    /// preserved. Alternate incidental history is bounded by its native zero-byte/row limits'
+    /// effective page floors and is not exposed as user scrollback. Unlike native page-byte
+    /// quotas this is the managed host's row contract; a page that does not fit is dropped
+    /// whole, with all older pages.
     /// Live changes to the screen's scrollback limit affect subsequent pages.
     /// </summary>
     public int ScrollbackLimit { get; init; } = 10_000;

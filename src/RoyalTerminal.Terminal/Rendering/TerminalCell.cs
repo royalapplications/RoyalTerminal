@@ -831,8 +831,9 @@ public sealed partial class TerminalScreen
         set => _viewportTop = Math.Clamp(value, 0, MaxScrollOffset);
     }
 
-    /// <summary>Maximum scroll offset.</summary>
-    public int MaxScrollOffset => _snapshotScrollbackQuota?.MaximumBytes == 0 ? 0 : Math.Max(0, TotalRows - ViewportRows);
+    /// <summary>Maximum scroll offset; alternate page-local history is not user scrollback.</summary>
+    public int MaxScrollOffset => _alternateBufferActive || _snapshotScrollbackQuota?.MaximumBytes == 0
+        ? 0 : Math.Max(0, TotalRows - ViewportRows);
 
     /// <summary>Whether the screen is currently rendering the alternate buffer.</summary>
     public bool AlternateBufferActive => _alternateBufferActive;
@@ -1327,9 +1328,10 @@ public sealed partial class TerminalScreen
     /// <summary>
     /// Adds a new row to the bottom, potentially scrolling up.
     /// </summary>
-    public TerminalRow AddRow()
+    public TerminalRow AddRow() => AddRowCore(ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit));
+
+    private TerminalRow AddRowCore(int maxRows, GhosttySnapshotScrollbackQuota? growthQuota = null)
     {
-        int maxRows = ViewportRows + (_alternateBufferActive ? 0 : _scrollbackLimit);
         int removedRows = Math.Max(0, _rows.Count + 1 - maxRows);
         TerminalRow row;
         if (removedRows > 0 && _rows.Count > 0)
@@ -1356,7 +1358,7 @@ public sealed partial class TerminalScreen
             RemoveRows(0, _rows.Count);
         }
 
-        removedRows += RemoveSnapshotQuotaRowsAfterGrowth();
+        removedRows += RemoveSnapshotQuotaRowsAfterGrowth(growthQuota);
 
         if (removedRows > 0)
         {
@@ -1449,6 +1451,7 @@ public sealed partial class TerminalScreen
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _snapshotPageTracker?.DiscardCursor(1);
         _alternateRows = null;
+        _snapshotAlternateLineLimit = false;
         _alternateRasterImagesById = null;
         _alternateRasterPlacements = null;
         PruneAnchorsFromRow(0, alternate: true);
@@ -1564,6 +1567,7 @@ public sealed partial class TerminalScreen
         _primaryRows = null;
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
         _alternateRows = null;
+        _snapshotAlternateLineLimit = false;
         _primaryRasterImagesById = null;
         _primaryRasterPlacements = null;
         _alternateRasterImagesById = null;
@@ -1589,6 +1593,7 @@ public sealed partial class TerminalScreen
     {
         if (_alternateBufferActive)
         {
+            if (!clearActiveRows) return ScrollAlternateViewportToHistory();
             EnsureAlternateRows();
             ClearActiveRows();
             ClearRasterGraphics();

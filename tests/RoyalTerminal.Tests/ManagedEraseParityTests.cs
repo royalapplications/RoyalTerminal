@@ -16,7 +16,7 @@ namespace RoyalTerminal.Tests;
 // likewise fills split halves with erase attributes; WT EraseInDisplay/Line
 // uses erase-attribute rectangles (including image content), but orders ED1's
 // rows differently and has no Ghostty PAGE allocator. Keep Ghostty's ordering.
-public sealed class ManagedEraseParityTests
+public sealed partial class ManagedEraseParityTests
 {
     private const string Close = "\u001b]8;;\u001b\\";
     private const string Wide = "\u001b[1;41m\u001b]8;id=edge;https://edge\u001b\\中\u0301" + Close;
@@ -237,16 +237,18 @@ public sealed class ManagedEraseParityTests
 
     private static void AssertNative(GhosttyTerminal native, ManagedTerminalSnapshot managed, string context)
     {
+        int key = managed.Screen.AlternateBufferActive ? 1 : 0;
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
-        GhosttySnapshotScreen expected = reader.ReadReady().Screens[0];
+        GhosttySnapshotScreen expected = reader.ReadReady().Screens[key];
         using GhosttySnapshotStateReader actualReader = new(managed.Processor.GetBinarySnapshot(), new());
-        GhosttySnapshotScreen actual = actualReader.ReadReady().Screens[0];
+        GhosttySnapshotScreen actual = actualReader.ReadReady().Screens[key];
         Assert.True(expected.State.HistoryRows == actual.State.HistoryRows,
             $"{context}: expected history {expected.State.HistoryRows}, actual {actual.State.HistoryRows}");
         Assert.Equal((expected.State.CursorX, expected.State.CursorY, expected.State.PendingWrap),
             (actual.State.CursorX, actual.State.CursorY, actual.State.PendingWrap));
         Assert.Equal(expected.State.Pen, actual.State.Pen);
-        Assert.Equal(expected.State.HyperlinkImplicitCounter, actual.State.HyperlinkImplicitCounter);
+        Assert.True(expected.State.HyperlinkImplicitCounter == actual.State.HyperlinkImplicitCounter,
+            $"{context}: expected hyperlink counter {expected.State.HyperlinkImplicitCounter}, actual {actual.State.HyperlinkImplicitCounter}");
         Assert.Equal(expected.State.TryGetHyperlink(out GhosttySnapshotHyperlink expectedCursorLink),
             actual.State.TryGetHyperlink(out GhosttySnapshotHyperlink actualCursorLink));
         if (expected.State.TryGetHyperlink(out _))
@@ -257,7 +259,7 @@ public sealed class ManagedEraseParityTests
         }
         List<GhosttySnapshotPage> pages = [.. expected.Pages];
         while (reader.ReadNextHistoryPage() is { } history)
-            if (history.Key == 0) pages.Insert(0, history.Page);
+            if (history.Key == key) pages.Insert(0, history.Page);
         TerminalScreen owner = new(8, 3);
         int index = 0;
         foreach (GhosttySnapshotPage page in pages)

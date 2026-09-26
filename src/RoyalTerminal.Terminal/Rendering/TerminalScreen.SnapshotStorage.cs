@@ -26,7 +26,10 @@ public sealed partial class TerminalScreen
 
     internal bool FitsSnapshotHistoryQuota(int key, GhosttySnapshotPage page)
     {
-        if (_snapshotScrollbackQuota is not { } quota) return true;
+        GhosttySnapshotScrollbackQuota? quota = key == 1
+            ? AlternateSnapshotHistoryQuota()
+            : _snapshotScrollbackQuota;
+        if (quota is null) return true;
         TerminalRowBuffer? rows = GetSnapshotRows(key);
         if (rows is null || Columns is < 1 or > ushort.MaxValue || ViewportRows is < 1 or > ushort.MaxValue) return false;
         GhosttySnapshotAllocation allocation = new(quota.PageAlignment);
@@ -117,6 +120,7 @@ public sealed partial class TerminalScreen
         _alternateRows = alternateBuffer;
         _rows = _alternateBufferActive ? alternateBuffer! : primaryBuffer;
         _snapshotRowGeometry = true;
+        _snapshotAlternateLineLimit = alternate is not null;
 
         void ValidateRows(TerminalRow[] rows)
         {

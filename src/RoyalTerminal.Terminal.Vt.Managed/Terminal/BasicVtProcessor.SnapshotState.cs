@@ -33,7 +33,9 @@ public sealed partial class BasicVtProcessor
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         TerminalRowBuffer? rows = _screen.GetSnapshotRows(history.Key);
         long historyRows = rows is null ? long.MaxValue : (long)rows.Count - _screen.ViewportRows;
-        int limit = history.Key == 0 ? _publishedScreen.ScrollbackLimit : 0;
+        // Alternate ED22 can create complete historical pages. Admit them by
+        // the alternate native byte floor, without enabling user scrollback.
+        int limit = history.Key == 0 ? _publishedScreen.ScrollbackLimit : int.MaxValue;
         bool fits = historyRows <= (long)limit - history.Page.Grid.Rows &&
             _screen.FitsSnapshotHistoryQuota(history.Key, history.Page);
         GhosttySnapshotHistoryProgress progress = application.Apply(_screen, history, fits);
