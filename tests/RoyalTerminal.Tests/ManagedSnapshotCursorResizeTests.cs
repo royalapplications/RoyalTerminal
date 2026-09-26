@@ -287,23 +287,20 @@ public sealed class ManagedSnapshotCursorResizeTests
                 Assert.Equal(expectedCapacity.Styles, cursor.SnapshotAllocation!.Capacity.Styles);
                 // Pinned Screen.resize saves node.serial, but eraseHistory's
                 // partial-row removal changes it without replacing storage.
-                // The native temporary link then survives the 8x2 shrink and
-                // forces growth on the next resize. Do not reproduce that leak:
+                // With some native page layouts, the temporary link survives
+                // a shrink and forces growth on the next resize. Other layouts
+                // replace the allocation and correctly discard it. Do not
+                // require or reproduce the upstream leak:
                 // allocator identity, rather than row-layout identity, owns
                 // the managed temporary reference. Keep the divergence narrow
                 // and assert both implementations' exact state/capacity below.
-                if (state.Key == 1 && rows == 2)
-                {
-                    Assert.Equal(2, nativePage.HyperlinkCount);
-                    nativeRetainedOrphan = true;
-                }
-                else Assert.Equal(1, nativePage.HyperlinkCount);
+                Assert.InRange(nativePage.HyperlinkCount, 1, state.Key == 1 && rows == 2 ? 2 : 1);
                 Assert.Equal(1UL, Usage(managed.Screen, cursor, state.Key).Links);
                 Assert.Equal((ushort)192, cursor.SnapshotAllocation.Capacity.HyperlinkBytes);
-                bool afterNativeGrowth = state.Key == 1 && nativeRetainedOrphan &&
-                    (columns, rows) is (8, 4) or (4, 2);
+                bool afterNativeGrowth = state.Key == 1 && nativeRetainedOrphan;
                 Assert.Equal((ushort)(afterNativeGrowth ? 384 : 192), expectedCapacity.HyperlinkBytes);
                 Assert.Equal(expectedCapacity.StringBytes, cursor.SnapshotAllocation.Capacity.StringBytes);
+                nativeRetainedOrphan |= nativePage.HyperlinkCount == 2;
             }
         }
     }

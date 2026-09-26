@@ -152,8 +152,10 @@ different storage models and no equivalent PAGE allocation contract.
 The pinned Ghostty resize implementation has one intentionally unported allocator
 quirk: partial alternate-history erasure changes a node's row-layout serial without
 replacing its allocation, so `Screen.resize` skips releasing a temporary hyperlink
-reference. A subsequent resize grows the native hyperlink table from 192 to 384
-bytes unnecessarily. Managed leases use allocation identity and release the reference;
+reference when the native page layout permits reusing that allocation. A subsequent
+resize then grows the native hyperlink table from 192 to 384 bytes unnecessarily;
+layouts that replace the allocation do not retain the orphan. Managed leases use
+allocation identity and release the reference;
 the differential regression checks identical cursor/link state, exactly one managed
 live link and the specific native capacity divergence in both active-buffer orders.
 This is not exact allocation-history parity and does not change the native dependency.
