@@ -29,8 +29,8 @@ internal sealed partial class ManagedKittyGraphicsStore
             int finalRow = row;
             if (delta != 0 && _images.TryGetValue(key.ImageId, out Image? image))
             {
-                uint width = (uint)image.Animation.CurrentImage.Width;
-                uint height = (uint)image.Animation.CurrentImage.Height;
+                uint width = (uint)image.Animation.Width;
+                uint height = (uint)image.Animation.Height;
                 ManagedKittyPlacementGeometry grid = placement.Options.Calculate(width, height, cellWidth, cellHeight);
                 if (grid.Rows > 0 && grid.Columns > 0 && row >= top && (long)row + grid.Rows - 1 <= bottom &&
                     origin.Column >= left && Math.Min((long)origin.Column + grid.Columns - 1, screen.Columns - 1) <= right)

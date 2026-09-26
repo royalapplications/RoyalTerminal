@@ -19,7 +19,7 @@ public sealed class ManagedKittyImageLoaderTests
     {
         ManagedKittyImageLoader loader = Load($"f={format},s=1,v=1;{input}");
         Assert.True(loader.TryComplete(out var image, out string error), error);
-        Assert.Equal(Convert.FromBase64String(expected), image.Rgba);
+        Assert.Equal(Convert.FromBase64String(expected), image.GetRgbaImage().Rgba);
         Assert.Equal(1, image.Width);
         Assert.Equal(1, image.Height);
     }
@@ -30,7 +30,7 @@ public sealed class ManagedKittyImageLoaderTests
         ManagedKittyImageLoader loader = Load("i=9,f=32,s=1,v=1,m=1,q=1;AQI=");
         Assert.True(loader.TryAppend(Command("f=24,s=99,v=99,q=2;AwQ="), out _));
         Assert.True(loader.TryComplete(out var image, out _));
-        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.Rgba);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.GetRgbaImage().Rgba);
         Assert.Equal(9u, loader.InitialCommand.ImageId);
         Assert.Equal(2, loader.Quiet);
     }
@@ -52,7 +52,7 @@ public sealed class ManagedKittyImageLoaderTests
     public void AnimationFramesTruncateSurplusPixelData()
     {
         Assert.True(Load("a=f,s=1,v=1;AQIDBAU=").TryComplete(out var image, out _));
-        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.Rgba);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.GetRgbaImage().Rgba);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class ManagedKittyImageLoaderTests
         using (ZLibStream encoder = new(compressed, CompressionLevel.Fastest, leaveOpen: true)) encoder.Write([1, 2, 3, 4]);
         string data = Convert.ToBase64String(compressed.ToArray());
         Assert.True(Load($"o=z,s=1,v=1;{data}").TryComplete(out var image, out _));
-        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.Rgba);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, image.GetRgbaImage().Rgba);
         Assert.False(Load("o=z,s=1,v=1;AQID").TryComplete(out _, out string error));
         Assert.Equal("EINVAL: decompression failed", error);
 
@@ -94,7 +94,29 @@ public sealed class ManagedKittyImageLoaderTests
         Assert.True(ManagedKittyImageLoader.TryCreate(command, null, 128, out var loader, out _, reader));
         Assert.Equal(new KittyGraphicsMediumRequest(KittyGraphicsMedium.SharedMemory, command.Data, 5, 3, 3), reader.Request);
         Assert.True(loader.TryComplete(out var image, out _));
-        Assert.Equal(new byte[] { 1, 2, 3, 255 }, image.Rgba);
+        Assert.Equal(new byte[] { 1, 2, 3, 255 }, image.GetRgbaImage().Rgba);
+    }
+
+    [Fact]
+    public void PngPixelsKeepTheirRgbaAccountingAndOwnedBuffer()
+    {
+        FakePng decoder = new();
+        Assert.True(ManagedKittyImageLoader.TryCreate(Command("f=100;AA=="), decoder, 4, out var loader, out _));
+        Assert.True(loader.TryComplete(out var image, out _));
+        Assert.True(image.IsRgba);
+        Assert.Equal(4, image.StorageBytes);
+        Assert.Same(decoder.Image, image.GetRgbaImage());
+    }
+
+    private sealed class FakePng : IKittyGraphicsPngDecoder
+    {
+        internal KittyGraphicsDecodedImage Image { get; } = new(1, 1, [1, 2, 3, 4]);
+        public bool TryDecode(ReadOnlySpan<byte> encoded, int maxDecodedBytes,
+            [NotNullWhen(true)] out KittyGraphicsDecodedImage? image)
+        {
+            image = Image;
+            return true;
+        }
     }
 
     private sealed class FakeMedium : IKittyGraphicsMediumReader

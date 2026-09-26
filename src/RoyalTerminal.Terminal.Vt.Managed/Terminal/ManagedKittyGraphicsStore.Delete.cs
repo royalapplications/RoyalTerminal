@@ -80,7 +80,7 @@ internal sealed partial class ManagedKittyGraphicsStore
             // A placement anchored in history can still reach into the active viewport.
             if (!_images.TryGetValue(key.ImageId, out Image? image)) return false;
             ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
-                (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
+                (uint)image.Animation.Width, (uint)image.Animation.Height,
                 cellWidth, cellHeight);
             return geometry.Columns > 0 && geometry.Rows > 0 && origin.Row + (long)geometry.Rows > activeTop;
         }, deleteUnused);
@@ -118,7 +118,7 @@ internal sealed partial class ManagedKittyGraphicsStore
             placement.Anchor is not TerminalScreenAnchor anchor ||
             !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin)) return false;
         ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
-            (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
+            (uint)image.Animation.Width, (uint)image.Animation.Height,
             cellWidth, cellHeight);
         if (geometry.Columns == 0 || geometry.Rows == 0) return false;
         left = origin.Column;

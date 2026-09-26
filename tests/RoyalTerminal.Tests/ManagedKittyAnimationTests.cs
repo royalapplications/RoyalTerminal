@@ -13,7 +13,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void AppendUsesBackgroundClipsAndReservesOneFullCanvas()
     {
-        ManagedKittyAnimation animation = new(new(2, 2, new byte[16]));
+        ManagedKittyAnimation animation = Create(new(2, 2, new byte[16]));
         ManagedKittyGraphicsCommand command = Command("a=f,x=1,y=1,Y=4278190335,X=1");
         Assert.Equal(16, animation.RequiredAdditionalBytes(command));
         Assert.True(animation.TryTransmitFrame(command, new(2, 1, [1, 2, 3, 4, 5, 6, 7, 8]), 32, out uint number, out string error));
@@ -29,7 +29,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void RejectedAppendIsAtomicAndFrameEditsDoNotRequireAdditionalQuota()
     {
-        ManagedKittyAnimation animation = new(Pixel(255, 0, 0));
+        ManagedKittyAnimation animation = Create(Pixel(255, 0, 0));
         Assert.False(animation.TryTransmitFrame(Command("a=f"), Pixel(0, 0, 255), 4, out _, out string error));
         Assert.Equal("ENOSPC: animation frame storage full", error);
         Assert.Equal(1, animation.FrameCount);
@@ -51,7 +51,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void ExistingFrameCanvasAndGapDefaultsFollowProtocol()
     {
-        ManagedKittyAnimation animation = new(new(2, 1, [255, 0, 0, 255, 0, 255, 0, 255]));
+        ManagedKittyAnimation animation = Create(new(2, 1, [255, 0, 0, 255, 0, 255, 0, 255]));
         Append(animation, "a=f,c=1,x=1,r=999", Pixel(0, 0, 255));
         animation.ApplyControl(Command("a=a,s=3"));
         Assert.True(animation.Tick(0, true, out long? delay));
@@ -71,7 +71,7 @@ public sealed class ManagedKittyAnimationTests
     [InlineData("a=c,r=1,c=1,w=1,h=1", "EINVAL: source and destination rectangles overlap")]
     public void CompositionRejectsInvalidRectanglesWithoutChangingPixels(string input, string expected)
     {
-        ManagedKittyAnimation animation = new(new(3, 1, new byte[12]));
+        ManagedKittyAnimation animation = Create(new(3, 1, new byte[12]));
         KittyGraphicsDecodedImage before = animation.CurrentImage;
         Assert.False(animation.TryCompose(Command(input), out string error));
         Assert.Equal(expected, error);
@@ -81,7 +81,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void CompositionAllowsDisjointSelfRectanglesAndPreservesPublishedPixels()
     {
-        ManagedKittyAnimation animation = new(new(3, 1, [1, 2, 3, 4, 0, 0, 0, 0, 9, 9, 9, 9]));
+        ManagedKittyAnimation animation = Create(new(3, 1, [1, 2, 3, 4, 0, 0, 0, 0, 9, 9, 9, 9]));
         KittyGraphicsDecodedImage before = animation.CurrentImage;
         Assert.True(animation.TryCompose(Command("a=c,r=1,c=1,w=1,h=1,x=2,C=2"), out string error));
         Assert.Equal("OK", error);
@@ -97,7 +97,7 @@ public sealed class ManagedKittyAnimationTests
     [InlineData(new byte[] { 255, 0, 0, 0 }, new byte[] { 0, 0, 255, 0 }, new byte[] { 0, 0, 255, 0 })]
     public void AlphaCompositionMatchesUpstreamWuffsEdgeCases(byte[] destination, byte[] source, byte[] expected)
     {
-        ManagedKittyAnimation animation = new(new(1, 1, destination));
+        ManagedKittyAnimation animation = Create(new(1, 1, destination));
         Append(animation, "a=f,r=1", new(1, 1, source));
         Assert.Equal(expected, animation.CurrentImage.Rgba);
     }
@@ -111,7 +111,7 @@ public sealed class ManagedKittyAnimationTests
         Random random = new(17);
         random.NextBytes(source);
         random.NextBytes(destination);
-        ManagedKittyAnimation animation = new(new(256, 1, destination));
+        ManagedKittyAnimation animation = Create(new(256, 1, destination));
         Append(animation, "a=f,r=1", new(256, 1, source));
         using GhosttyTerminal native = new(10, 3);
         native.SetKittyImageStorageLimit(4096);
@@ -125,7 +125,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void GaplessFramesAreSkippedAndOnlyOneDisplayedFrameAdvancesPerTick()
     {
-        ManagedKittyAnimation animation = new(Pixel(255, 0, 0));
+        ManagedKittyAnimation animation = Create(Pixel(255, 0, 0));
         Append(animation, "a=f,z=-1", Pixel(1, 1, 1));
         Append(animation, "a=f,z=25", Pixel(0, 0, 255));
         Append(animation, "a=f,z=30", Pixel(0, 255, 0));
@@ -191,7 +191,7 @@ public sealed class ManagedKittyAnimationTests
     [Fact]
     public void StoppedUnplacedSingleFrameAndAllGaplessDoNotSchedule()
     {
-        ManagedKittyAnimation animation = new(Pixel(255, 0, 0));
+        ManagedKittyAnimation animation = Create(Pixel(255, 0, 0));
         animation.ApplyControl(Command("a=a,s=3,r=1,z=10"));
         Assert.False(animation.Tick(0, true, out long? delay));
         Assert.Null(delay);
@@ -270,10 +270,12 @@ public sealed class ManagedKittyAnimationTests
 
     private static ManagedKittyAnimation TwoFrames()
     {
-        ManagedKittyAnimation animation = new(Pixel(255, 0, 0));
+        ManagedKittyAnimation animation = Create(Pixel(255, 0, 0));
         Append(animation, "a=f", Pixel(0, 0, 255));
         return animation;
     }
+
+    private static ManagedKittyAnimation Create(KittyGraphicsDecodedImage root) => new(new ManagedKittyImagePixels(root));
 
     private static KittyGraphicsDecodedImage Pixel(byte red, byte green, byte blue) => new(1, 1, [red, green, blue, 255]);
 

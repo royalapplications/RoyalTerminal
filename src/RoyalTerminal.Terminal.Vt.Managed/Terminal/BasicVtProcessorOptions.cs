@@ -54,10 +54,20 @@ public sealed record BasicVtProcessorOptions
     /// <summary>Maximum encoded Kitty graphics bytes in one APC command.</summary>
     public int KittyGraphicsMaxApcBytes { get; init; } = 64 * 1024 * 1024;
 
-    /// <summary>Maximum bytes in one loaded or decompressed Kitty image.</summary>
+    /// <summary>
+    /// Maximum bytes in one loaded/decompressed Kitty image, also bounding its
+    /// largest RGBA view before allocation. This per-image safety bound is
+    /// independent of the retained image/frame admission budget.
+    /// </summary>
     public int KittyGraphicsMaxImageBytes { get; init; } = 400 * 1024 * 1024;
 
-    /// <summary>Maximum retained Kitty image and animation storage per screen.</summary>
+    /// <summary>
+    /// Kitty image/frame admission budget per screen. RGB is charged at three
+    /// bytes per pixel until animation composition promotes it to RGBA. Like
+    /// Ghostty, promotion and existing-frame edits do not evict or reject an
+    /// existing image; a later new-image/frame admission enforces the budget.
+    /// Renderer caches and caller-retained immutable publications are separate.
+    /// </summary>
     public int KittyGraphicsStorageLimitBytes { get; init; } = 32 * 1024 * 1024;
 
     /// <summary>

@@ -9,7 +9,7 @@ Both shared and static libraries include them.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies six corrections to pinned upstream
+The generated source copy also applies seven corrections to pinned upstream
 `622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -31,6 +31,13 @@ fails the build until reviewed. The submodule checkout is never changed.
   frame 2 from red/blue/white/green frames. Correct behavior selects the white
   successor and stamps changed content. Deleting another frame preserves the
   displayed frame's identity.
+- `kitty/graphics_storage.zig`: bound eviction requests by actual retained bytes,
+  not the admission limit. RGB-to-RGBA animation promotion is quota-exempt, so a
+  three-byte RGB image admitted at a three-byte limit can become four bytes.
+  Admitting another three-byte image then legitimately reclaims four bytes;
+  the old assertion incorrectly made that path unreachable. The existing eviction
+  loop handles it without algorithm changes. Native and cross-engine regressions
+  are added; this seventh correction is source-reviewed, not yet executed.
 - `stream_continuation.zig`: canonicalize export after an APC-to-C1 DCS/CSI/OSC
   transition commits the preceding APC. Unpatched export retained the entire
   Kitty query, causing snapshot validation to reject the exported continuation
@@ -54,8 +61,9 @@ fails the build until reviewed. The submodule checkout is never changed.
   bypassed dirty publication. A focused clean-frame EL regression is written;
   validation of this sixth overlay is deferred until after the requested push.
 
-The first five were reproduced through the native C API before correction and
-have focused tests. No public upstream issue is claimed. Reassess and
+Five earlier corrections were reproduced through the native C API before
+correction and have focused tests. The dirty-wrap and eviction-quota corrections
+above still await execution. No public upstream issue is claimed. Reassess and
 remove an overlay when its upstream fix is incorporated.
 
 ## OSC 99 host bridge
@@ -64,7 +72,7 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the six correctness fixes.
+These are host integration additions, separate from the seven correctness fixes.
 Native rebuild and callback/lifetime tests are pending implementation-phase validation.
 
 The sixteen additional C exports are declared in

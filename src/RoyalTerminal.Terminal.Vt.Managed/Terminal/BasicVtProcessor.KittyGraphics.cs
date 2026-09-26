@@ -71,9 +71,10 @@ public sealed partial class BasicVtProcessor
                     else
                     {
                         responseId = composed.Id;
-                        KittyGraphicsDecodedImage previous = composed.Animation.CurrentImage;
+                        ManagedKittyImagePixels previous = composed.Animation.CurrentPixels;
                         changed = composed.Animation.TryCompose(command, out error);
-                        if (!ReferenceEquals(previous, composed.Animation.CurrentImage))
+                        if (changed) _kittyStore.CommitAnimationBytes(composed);
+                        if (!ReferenceEquals(previous, composed.Animation.CurrentPixels))
                             _kittyStore.MarkContentChanged(composed);
                     }
                     break;
@@ -163,11 +164,18 @@ public sealed partial class BasicVtProcessor
             if (animationImage is null || animationImage.Generation != _kittyStore.LoadingTargetGeneration)
                 return false;
         }
-        if (!loader.TryComplete(out KittyGraphicsDecodedImage? decoded, out error)) return false;
+        if (!loader.TryComplete(out ManagedKittyImagePixels? decoded, out error)) return false;
         if (animationImage is not null)
         {
             responseId = animationImage.Id;
-            if (!animationImage.Animation.TryValidateFrame(responseCommand, decoded, out responseFrame, out error))
+            error = "EINVAL: frame dimensions exceed image";
+            if (decoded.Width > animationImage.Animation.Width || decoded.Height > animationImage.Animation.Height)
+                return false;
+            KittyGraphicsDecodedImage frame = decoded.GetRgbaImage();
+            // Upstream promotes the base before resolving frame/base numbers or
+            // reserving append space, even if either later check rejects it.
+            _kittyStore.ConvertImageToRgba(animationImage);
+            if (!animationImage.Animation.TryValidateFrame(responseCommand, frame, out responseFrame, out error))
                 return false;
             if (!_kittyStore.TryReserveAnimation(_screen, animationImage,
                     animationImage.Animation.RequiredAdditionalBytes(responseCommand)))
@@ -175,11 +183,11 @@ public sealed partial class BasicVtProcessor
                 error = "ENOSPC: animation frame storage full";
                 return false;
             }
-            KittyGraphicsDecodedImage previous = animationImage.Animation.CurrentImage;
-            if (!animationImage.Animation.TryTransmitFrame(responseCommand, decoded,
+            ManagedKittyImagePixels previous = animationImage.Animation.CurrentPixels;
+            if (!animationImage.Animation.TryTransmitFrame(responseCommand, frame,
                     _options.KittyGraphicsStorageLimitBytes, out responseFrame, out error)) return false;
             _kittyStore.CommitAnimationBytes(animationImage);
-            if (!ReferenceEquals(previous, animationImage.Animation.CurrentImage))
+            if (!ReferenceEquals(previous, animationImage.Animation.CurrentPixels))
                 _kittyStore.MarkContentChanged(animationImage);
             return true;
         }
@@ -187,7 +195,7 @@ public sealed partial class BasicVtProcessor
         uint imageId = _kittyStore.LoadingImageId;
         if (responseCommand.ImageId == 0 && responseCommand.ImageNumber == 0) respond = false;
         if (!_kittyStore.TryAddImage(_screen, imageId, responseCommand.ImageNumber,
-                decoded, decoded.Rgba.Length, transient: (responseCommand.Get('N') & 1) != 0, out error)) return false;
+                decoded, transient: (responseCommand.Get('N') & 1) != 0, out error)) return false;
         responseId = imageId;
         if (responseCommand.Action == 'T')
             return TryDisplayKittyImage(responseCommand, out responseId, out error, imageId);
@@ -214,7 +222,7 @@ public sealed partial class BasicVtProcessor
         if (placement?.Anchor is not null && command.Get('C') != 1)
         {
             ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
-                (uint)image.Animation.CurrentImage.Width, (uint)image.Animation.CurrentImage.Height,
+                (uint)image.Animation.Width, (uint)image.Animation.Height,
                 (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
             long target = (long)_cursorCol + geometry.Columns;
             long requestedRows = Math.Max(0L, (long)geometry.Rows - 1) + (target >= _screen.Columns ? 1 : 0);

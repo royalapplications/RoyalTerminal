@@ -49,10 +49,11 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         return id;
     }
 
-    internal bool TryAddImage(TerminalScreen screen, uint id, uint number, KittyGraphicsDecodedImage decoded,
-        int storageBytes, bool transient, out string error)
+    internal bool TryAddImage(TerminalScreen screen, uint id, uint number, ManagedKittyImagePixels decoded,
+        bool transient, out string error)
     {
         error = "ENOMEM: out of memory";
+        int storageBytes = decoded.StorageBytes;
         Image? existing = Find(id);
         long oldBytes = existing?.QuotaBytes ?? 0;
         if (storageBytes > byteLimit || storageBytes < 0) return false;
@@ -67,9 +68,20 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
 
     internal bool TryReserveAnimation(TerminalScreen screen, Image image, long additionalBytes)
     {
-        long newBytes = image.Animation.StoredBytes + additionalBytes;
-        if (newBytes > byteLimit) return false;
-        return TryReserve(screen, newBytes - image.QuotaBytes, image.Id);
+        // Edits are exempt from admission, even after RGB promotion takes the
+        // existing image over quota. Appends follow reserveAnimationBytes:
+        // other images can be evicted even when this reservation later fails.
+        if (additionalBytes == 0) return true;
+        if (additionalBytes < 0 || additionalBytes > byteLimit ||
+            _storedBytes + additionalBytes - byteLimit > byteLimit) return false;
+        return TryReserve(screen, additionalBytes, image.Id);
+    }
+
+    internal void ConvertImageToRgba(Image image)
+    {
+        if (!image.Animation.PromoteRootToRgba()) return;
+        CommitAnimationBytes(image);
+        MarkContentChanged(image);
     }
 
     internal void CommitAnimationBytes(Image image)
@@ -244,7 +256,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         return true;
     }
 
-    internal sealed class Image(uint id, uint number, KittyGraphicsDecodedImage decoded, long quotaBytes, bool transient, ulong generation)
+    internal sealed class Image(uint id, uint number, ManagedKittyImagePixels decoded, long quotaBytes, bool transient, ulong generation)
     {
         private KittyGraphicsDecodedImage? _published;
         private TerminalKittyImageSource? _source;

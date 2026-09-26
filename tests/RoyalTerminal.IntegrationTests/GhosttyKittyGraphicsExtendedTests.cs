@@ -12,6 +12,30 @@ namespace RoyalTerminal.IntegrationTests;
 public class GhosttyKittyGraphicsExtendedTests
 {
     [GhosttyNativeFact]
+    public void ImageAdmissionAfterQuotaExemptRgbPromotionReclaimsActualBytes()
+    {
+        if (!GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;
+        using GhosttyTerminal terminal = new(10, 3);
+        terminal.SetKittyImageStorageLimit(3);
+        terminal.Write("\x1b_Ga=t,i=1,f=24,s=1,v=1;/wAA\x1b\\"u8);
+        terminal.Write("\x1b_Ga=f,i=1,r=1,f=24,s=1,v=1;AAD/\x1b\\"u8);
+        Assert.True(terminal.TryGetKittyGraphics(out GhosttyKittyGraphics? graphics));
+        Assert.True(graphics!.TryGetImage(1, out GhosttyKittyGraphicsImage promoted));
+        Assert.Equal(GhosttyVtNative.GhosttyKittyImageFormat.Rgba, promoted.GetFormat());
+        byte[] retained = promoted.CopyData();
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, retained);
+
+        // Four bytes must be reclaimed even though the admission limit is three.
+        // The upstream assertion incorrectly required the deficit <= the limit.
+        terminal.Write("\x1b_Ga=t,i=2,f=24,s=1,v=1;AP8A\x1b\\"u8);
+        Assert.False(graphics.TryGetImage(1, out _));
+        Assert.True(graphics.TryGetImage(2, out GhosttyKittyGraphicsImage added));
+        Assert.Equal(GhosttyVtNative.GhosttyKittyImageFormat.Rgb, added.GetFormat());
+        Assert.Equal(new byte[] { 0, 255, 0 }, added.CopyData());
+        Assert.Equal(new byte[] { 0, 0, 255, 255 }, retained);
+    }
+
+    [GhosttyNativeFact]
     public void DeletingDisplayedAnimationFrameSelectsItsSuccessorAndChangesGeneration()
     {
         if (!GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;

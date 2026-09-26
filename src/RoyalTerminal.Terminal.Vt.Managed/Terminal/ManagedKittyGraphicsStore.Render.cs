@@ -39,8 +39,8 @@ internal sealed partial class ManagedKittyGraphicsStore
             }
 
             ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
-                (uint)image.Animation.CurrentImage.Width,
-                (uint)image.Animation.CurrentImage.Height, cellWidth, cellHeight);
+                (uint)image.Animation.Width,
+                (uint)image.Animation.Height, cellWidth, cellHeight);
             if (geometry.SourceWidth == 0 || geometry.SourceHeight == 0 ||
                 geometry.Width == 0 || geometry.Height == 0) continue;
 

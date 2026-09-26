@@ -59,10 +59,16 @@ pub fn build(b: *std.Build) !void {
         .before = "        next_row.rowAndCell().row.wrap_continuation = false;",
         .after = "        next_row.rowAndCell().row.wrap_continuation = false;\n        next_row.markDirty();",
     }});
-    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{.{
+    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{ .{
         .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
         .after = "        const removed_idx: u32 = number - 1;",
-    }});
+    }, .{
+        // RGB-to-RGBA promotion is quota-exempt. A subsequent image admission
+        // can require reclaiming more than the limit, but never more than the
+        // actual retained bytes. The eviction loop already handles that case.
+        .before = "        assert(req <= self.total_limit);",
+        .after = "        assert(req <= self.total_bytes);",
+    } });
     try addOverlay(b, sources, ghostty, "terminal/stream_continuation.zig", "a86feef9e53dc62349e64ddb6d25f1d6d971b9813578a24e915e39daeb39a9a2", &.{.{
         .before = "        var scanner: BoundaryScanner = .init();\n        for (self.bytes.items) |c| {\n            if (scanner.next(c) == .omittable) continue;\n            try writer.writeByte(c);\n        }\n",
         .after = @embedFile("src/continuation_write.zig.inc"),

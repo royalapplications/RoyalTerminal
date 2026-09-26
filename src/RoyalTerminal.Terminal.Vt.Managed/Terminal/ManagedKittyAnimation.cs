@@ -18,22 +18,33 @@ internal sealed class ManagedKittyAnimation
     private long? _frameShownAtMilliseconds;
     private long _durationMilliseconds;
 
-    internal ManagedKittyAnimation(KittyGraphicsDecodedImage root)
+    internal ManagedKittyAnimation(ManagedKittyImagePixels root)
     {
         ArgumentNullException.ThrowIfNull(root);
         _frames = [new(root, 0)];
     }
 
-    internal KittyGraphicsDecodedImage RootImage => _frames[0].Image;
-    internal KittyGraphicsDecodedImage CurrentImage => _frames[_currentIndex].Image;
+    internal KittyGraphicsDecodedImage RootImage => _frames[0].Image.GetRgbaImage();
+    internal KittyGraphicsDecodedImage CurrentImage => CurrentPixels.GetRgbaImage();
+    internal ManagedKittyImagePixels CurrentPixels => _frames[_currentIndex].Image;
+    internal int Width => _frames[0].Image.Width;
+    internal int Height => _frames[0].Image.Height;
     internal int FrameCount => _frames.Count;
     internal uint CurrentFrameNumber => (uint)_currentIndex + 1;
-    internal long StoredBytes => (long)RootImage.Rgba.Length * _frames.Count;
+    internal long StoredBytes => _frames[0].Image.StorageBytes + (long)_frames[0].Image.RgbaByteLength * (_frames.Count - 1);
+
+    internal bool PromoteRootToRgba()
+    {
+        Frame root = _frames[0];
+        if (root.Image.IsRgba) return false;
+        _frames[0] = new(root.Image.AsRgba(), root.GapMilliseconds);
+        return true;
+    }
 
     internal int RequiredAdditionalBytes(ManagedKittyGraphicsCommand command)
     {
         uint editFrame = command.Get('r');
-        return editFrame == 0 || editFrame > (uint)_frames.Count ? RootImage.Rgba.Length : 0;
+        return editFrame == 0 || editFrame > (uint)_frames.Count ? _frames[0].Image.RgbaByteLength : 0;
     }
 
     internal bool TryValidateFrame(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
@@ -42,8 +53,7 @@ internal sealed class ManagedKittyAnimation
         uint requested = command.Get('r');
         frameNumber = 0;
         error = "OK";
-        KittyGraphicsDecodedImage root = RootImage;
-        if (source.Width > root.Width || source.Height > root.Height)
+        if (source.Width > Width || source.Height > Height)
         {
             error = "EINVAL: frame dimensions exceed image";
             return false;
@@ -64,6 +74,7 @@ internal sealed class ManagedKittyAnimation
         long maxStoredBytes, out uint frameNumber, out string error)
     {
         if (!TryValidateFrame(command, source, out frameNumber, out error)) return false;
+        PromoteRootToRgba();
         KittyGraphicsDecodedImage root = RootImage;
         bool append = frameNumber == (uint)_frames.Count + 1;
         uint baseFrame = command.Get('c');
@@ -74,8 +85,8 @@ internal sealed class ManagedKittyAnimation
         }
 
         byte[] pixels;
-        if (!append) pixels = (byte[])_frames[(int)frameNumber - 1].Image.Rgba.Clone();
-        else if (baseFrame > 0) pixels = (byte[])_frames[(int)baseFrame - 1].Image.Rgba.Clone();
+        if (!append) pixels = (byte[])_frames[(int)frameNumber - 1].Image.GetRgbaImage().Rgba.Clone();
+        else if (baseFrame > 0) pixels = (byte[])_frames[(int)baseFrame - 1].Image.GetRgbaImage().Rgba.Clone();
         else
         {
             pixels = GC.AllocateUninitializedArray<byte>(root.Rgba.Length);
@@ -92,7 +103,7 @@ internal sealed class ManagedKittyAnimation
         }
 
         int gap = command.GetSigned('z');
-        KittyGraphicsDecodedImage image = new(root.Width, root.Height, pixels);
+        ManagedKittyImagePixels image = new(new KittyGraphicsDecodedImage(root.Width, root.Height, pixels));
         if (append)
         {
             uint frameGap = gap > 0 ? (uint)gap : gap < 0 ? 0u : 40u;
@@ -155,21 +166,20 @@ internal sealed class ManagedKittyAnimation
             return false;
         }
 
-        KittyGraphicsDecodedImage root = RootImage;
         uint width = command.Get('w');
         uint height = command.Get('h');
-        if (width == 0) width = (uint)root.Width;
-        if (height == 0) height = (uint)root.Height;
+        if (width == 0) width = (uint)Width;
+        if (height == 0) height = (uint)Height;
         uint destinationX = command.Get('x');
         uint destinationY = command.Get('y');
         uint sourceX = command.Get('X');
         uint sourceY = command.Get('Y');
-        if ((ulong)destinationX + width > (uint)root.Width || (ulong)destinationY + height > (uint)root.Height)
+        if ((ulong)destinationX + width > (uint)Width || (ulong)destinationY + height > (uint)Height)
         {
             error = "EINVAL: destination rectangle out of bounds";
             return false;
         }
-        if ((ulong)sourceX + width > (uint)root.Width || (ulong)sourceY + height > (uint)root.Height)
+        if ((ulong)sourceX + width > (uint)Width || (ulong)sourceY + height > (uint)Height)
         {
             error = "EINVAL: source rectangle out of bounds";
             return false;
@@ -182,12 +192,14 @@ internal sealed class ManagedKittyAnimation
             return false;
         }
 
+        PromoteRootToRgba();
         Frame destination = _frames[(int)destinationFrame - 1];
-        byte[] pixels = (byte[])destination.Image.Rgba.Clone();
-        ManagedKittyAnimationPixels.Compose(pixels, root.Width, _frames[(int)sourceFrame - 1].Image.Rgba,
-            root.Width, (int)width, (int)height, (int)sourceX, (int)sourceY, (int)destinationX, (int)destinationY,
+        byte[] pixels = (byte[])destination.Image.GetRgbaImage().Rgba.Clone();
+        ManagedKittyAnimationPixels.Compose(pixels, Width, _frames[(int)sourceFrame - 1].Image.GetRgbaImage().Rgba,
+            Width, (int)width, (int)height, (int)sourceX, (int)sourceY, (int)destinationX, (int)destinationY,
             command.Get('C') != 0);
-        _frames[(int)destinationFrame - 1] = new(new(root.Width, root.Height, pixels), destination.GapMilliseconds);
+        ManagedKittyImagePixels image = new(new KittyGraphicsDecodedImage(Width, Height, pixels));
+        _frames[(int)destinationFrame - 1] = new(image, destination.GapMilliseconds);
         return true;
     }
 
@@ -197,12 +209,12 @@ internal sealed class ManagedKittyAnimation
         visibleChanged = false;
         if (_frames.Count == 1) return false;
         int removedIndex = (int)(Math.Clamp(frameNumber, 1, (uint)_frames.Count) - 1);
-        KittyGraphicsDecodedImage previous = CurrentImage;
+        ManagedKittyImagePixels previous = CurrentPixels;
         _durationMilliseconds -= _frames[removedIndex].GapMilliseconds;
         _frames.RemoveAt(removedIndex);
         if (removedIndex < _currentIndex) _currentIndex--;
         else if (_currentIndex >= _frames.Count) _currentIndex = _frames.Count - 1;
-        visibleChanged = !ReferenceEquals(previous, CurrentImage);
+        visibleChanged = !ReferenceEquals(previous, CurrentPixels);
         if (visibleChanged) _frameShownAtMilliseconds = null;
         return true;
     }
@@ -253,5 +265,5 @@ internal sealed class ManagedKittyAnimation
     private static long SaturatingAdd(long timestamp, uint milliseconds) =>
         timestamp > long.MaxValue - milliseconds ? long.MaxValue : timestamp + milliseconds;
 
-    private readonly record struct Frame(KittyGraphicsDecodedImage Image, uint GapMilliseconds);
+    private readonly record struct Frame(ManagedKittyImagePixels Image, uint GapMilliseconds);
 }

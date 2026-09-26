@@ -29,6 +29,33 @@ retain the Skia renderer, and other operating systems retain normal rendering,
 matching Ghostty's platform support for this setting. Glyph and font caches are
 bounded, invalidated when font settings change, and disposed with the renderer.
 
+## Kitty image storage
+
+The managed engine retains raw RGB images at three bytes per pixel, matching
+Ghostty's protocol storage. RGBA and decoded PNG use four. Rendering creates one
+cached, owned RGBA view without changing the image's storage charge or eviction
+generation; geometry-only reads do not expand pixels. Frame edits and composition
+use copy-on-write, so an earlier render publication keeps its original pixels.
+
+`BasicVtProcessorOptions.KittyGraphicsStorageLimitBytes` is an admission budget,
+not a bound on all process memory. Like Ghostty, animation composition promotes
+the root to RGBA before resolving a new frame's base or reserving its full canvas.
+Promotion and existing-frame edits are quota-exempt, so retained bytes can exceed
+the admission limit. Subsequent image/frame admission reclaims actual bytes using
+transient/placement priority and generation order, excluding the animation target.
+An append may fail after evicting other images; a deficit larger than the limit is
+rejected before eviction. Frame deletion and retransmission release their stored
+bytes. The native build includes a hash-checked correction to an eviction assertion
+that previously excluded valid over-budget RGB promotion.
+
+The separate `KittyGraphicsMaxImageBytes` safety setting bounds loaded/decompressed
+data and the largest RGBA view before allocation. Renderer caches, temporary load
+buffers and caller-retained publications are not charged to protocol storage.
+Unrendered RGB payloads retain three rather than four bytes per pixel; rendered
+RGB images can hold both source and cached view. No whole-application memory or
+speed improvement is claimed. Allocation, ownership, quota and cross-engine tests
+are included; execution and profiling are pending implementation-phase validation.
+
 ## Kitty drag and drop
 
 Both VT adapters implement `ITerminalDragDropTarget`. A registered OSC 72 client

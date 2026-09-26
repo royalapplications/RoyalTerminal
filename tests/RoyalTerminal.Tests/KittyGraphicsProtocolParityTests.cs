@@ -75,6 +75,18 @@ public sealed class KittyGraphicsProtocolParityTests
             "a=t,s=1,v=1,m=1;/wAA", "a=d,d=a", "a=T,s=1,v=1,C=1;AAD//w==",
             "a=p,i=2147483647,C=1", "a=p,i=2147483648,C=1"
         }];
+        yield return ["rgb-promotion-refreshes-number-lookup-generation", new[]
+        {
+            "a=t,I=77,f=24,s=1,v=1;/wAA", "a=t,I=77,f=24,s=1,v=1;AAD/",
+            "a=p,i=1,C=1", "a=p,I=77,C=1", "a=f,i=1,c=99,f=24,s=1,v=1;AP8A",
+            "a=p,I=77,C=1"
+        }];
+        yield return ["rgb-promotion-cannot-retarget-numbered-chunked-frame", new[]
+        {
+            "a=t,I=77,f=24,s=2,v=1;/wAAAP8A", "a=t,I=77,f=24,s=1,v=1;AAD/",
+            "a=f,I=77,f=24,s=1,v=1,m=1;AA==", "a=c,i=1,r=1,c=1,x=1,w=1,h=1",
+            "m=0;AP8=", "a=p,I=77,C=1"
+        }];
     }
 
     [Theory]

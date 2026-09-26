@@ -81,7 +81,7 @@ internal sealed class ManagedKittyImageLoader
         return success;
     }
 
-    internal bool TryComplete([NotNullWhen(true)] out KittyGraphicsDecodedImage? image, out string error)
+    internal bool TryComplete([NotNullWhen(true)] out ManagedKittyImagePixels? image, out string error)
     {
         image = null;
         if (InitialCommand.Get('o') == 'z' && !TryInflate())
@@ -96,13 +96,11 @@ internal sealed class ManagedKittyImageLoader
             error = "EINVAL: unsupported format";
             if (_pngDecoder is null) return false;
             error = "EINVAL: invalid data";
-            if (!_pngDecoder.TryDecode(_buffer.Data.Span, _limit, out image)) return false;
+            if (!_pngDecoder.TryDecode(_buffer.Data.Span, _limit, out KittyGraphicsDecodedImage? decoded)) return false;
             // Enforce bounds even for an injected decoder with weaker limits.
-            if (image is null || image.Width > 10000 || image.Height > 10000 || image.Rgba.Length > _limit)
-            {
-                image = null;
+            if (decoded is null || decoded.Width > 10000 || decoded.Height > 10000 || decoded.Rgba.Length > _limit)
                 return false;
-            }
+            image = new(decoded);
             error = "OK";
             return true;
         }
@@ -122,21 +120,12 @@ internal sealed class ManagedKittyImageLoader
         int rgbaLength = checked((int)(width * height * 4));
         if (rgbaLength > _limit) return false;
 
-        byte[] rgba;
-        if (channels == 4) rgba = _buffer.Take(expected);
-        else
-        {
-            rgba = GC.AllocateUninitializedArray<byte>(rgbaLength);
-            ReadOnlySpan<byte> rgb = _buffer.Data.Span;
-            for (int source = 0, destination = 0; source < expected; source += 3, destination += 4)
-            {
-                rgba[destination] = rgb[source];
-                rgba[destination + 1] = rgb[source + 1];
-                rgba[destination + 2] = rgb[source + 2];
-                rgba[destination + 3] = 255;
-            }
-        }
-        image = new KittyGraphicsDecodedImage((int)width, (int)height, rgba);
+        // Keep native RGB storage until publication/composition needs RGBA.
+        // The per-image safety limit above still bounds the largest view.
+        byte[] pixels = _buffer.Take(expected);
+        image = channels == 3
+            ? ManagedKittyImagePixels.FromRgb((int)width, (int)height, pixels)
+            : new(new KittyGraphicsDecodedImage((int)width, (int)height, pixels));
         error = "OK";
         return true;
     }
