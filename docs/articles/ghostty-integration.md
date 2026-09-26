@@ -76,6 +76,17 @@ scalar fallback has inconsistent whitespace/invalid-padding behavior; the manage
 engine deliberately follows the default decoder on every platform. Differential
 tests cover shared valid inputs on all native builds and whitespace on SIMD builds.
 
+Animation ticks follow the native host's write-then-render order. Stop, gap edits,
+frame uploads and screen switches within one input write execute before its next
+tick; parser command boundaries do not independently advance playback or invalidate
+an upload's saved image generation. DECSET 2026 is an explicit exception: it ticks
+and publishes the completed prefix before freezing presentation. Releasing the hold
+lets the remainder of that write run before the next tick. Idle deadlines and
+external resize still refresh animations. Deleting an earlier frame preserves the
+displayed frame's identity and elapsed gap, including when it was the last frame;
+the reviewed native frame-deletion overlay now covers that case as well. Fake-clock
+cross-engine tests and a raw-native generation regression are added but unrun.
+
 ## Kitty drag and drop
 
 Both VT adapters implement `ITerminalDragDropTarget`. A registered OSC 72 client

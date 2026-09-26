@@ -30,7 +30,11 @@ fails the build until reviewed. The submodule checkout is never changed.
   selected the red root and kept its generation after deleting displayed blue
   frame 2 from red/blue/white/green frames. Correct behavior selects the white
   successor and stamps changed content. Deleting another frame preserves the
-  displayed frame's identity.
+  displayed frame's identity. The overlay now also handles earlier-frame deletion
+  before clamping the old last index: deleting an earlier frame while displaying
+  the last one must preserve both its content generation and elapsed gap. The
+  original displayed-frame correction was reproduced; this timer/generation
+  refinement and its new native regression remain unexecuted.
 - `kitty/graphics_storage.zig`: bound eviction requests by actual retained bytes,
   not the admission limit. RGB-to-RGBA animation promotion is quota-exempt, so a
   three-byte RGB image admitted at a three-byte limit can become four bytes.

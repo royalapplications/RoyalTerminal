@@ -296,9 +296,10 @@ public sealed partial class BasicVtProcessor
         => _kittyStore.Publish(_screen,
             (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
 
-    private bool AdvanceKittyAnimations()
+    private bool AdvanceKittyAnimations(bool commitInputPrefix = false)
     {
-        if (_renderHold is not null) return false;
+        if (_renderHold is not null || _inputBatchDepth > 0 && !commitInputPrefix) return false;
+        ulong initialRevision = _kittyStore.Revision;
         _kittyStore.ReapPrunedPlacements(_screen);
         long now = _options.TimeProvider.GetTimestamp();
         long milliseconds = Math.Max(0, (long)_options.TimeProvider.GetElapsedTime(0, now).TotalMilliseconds);
@@ -314,6 +315,6 @@ public sealed partial class BasicVtProcessor
         }
         _animationTickTimestamp = now;
         _animationNextTickDelay = nextDelay is long next ? TimeSpan.FromMilliseconds(next) : null;
-        return changed;
+        return changed || _kittyStore.Revision != initialRevision;
     }
 }

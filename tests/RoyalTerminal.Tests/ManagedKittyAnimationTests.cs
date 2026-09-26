@@ -268,6 +268,26 @@ public sealed class ManagedKittyAnimationTests
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    [Theory]
+    [InlineData(1u)]
+    [InlineData(2u)]
+    public void DeletingEarlierFramePreservesLastFrameIdentityAndElapsedGap(uint removed)
+    {
+        ManagedKittyAnimation animation = TwoFrames();
+        Append(animation, "a=f,z=60", Pixel(0, 255, 0));
+        animation.ApplyControl(Command("a=a,c=3,s=3"));
+        Assert.False(animation.Tick(100, true, out long? delay));
+        Assert.Equal(60, delay);
+        ManagedKittyImagePixels displayed = animation.CurrentPixels;
+        Assert.True(animation.DeleteFrame(removed, out bool changed));
+        Assert.False(changed);
+        Assert.Same(displayed, animation.CurrentPixels);
+        Assert.False(animation.Tick(120, true, out delay));
+        Assert.Equal(40, delay);
+        Assert.True(animation.Tick(160, true, out delay));
+        Assert.Equal(removed == 1 ? 40 : 60, delay);
+    }
+
     private static ManagedKittyAnimation TwoFrames()
     {
         ManagedKittyAnimation animation = Create(Pixel(255, 0, 0));

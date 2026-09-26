@@ -133,6 +133,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     // Parser state machine
     private ParserState _state = ParserState.Ground;
+    private int _inputBatchDepth;
     private readonly List<int> _params = new(24);
     private uint _csiColonSeparators;
     private int _intermediateCount;
@@ -454,14 +455,33 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ProcessCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed)
     {
+        TerminalModeState before;
+        _inputBatchDepth++;
+        try
+        {
+            ProcessInputCore(data, stopAtGround, out consumed, out before);
+        }
+        finally
+        {
+            _inputBatchDepth--;
+            // Match the native adapter's write-then-render order. Protocol
+            // commands in one input batch must see a stable animation clock;
+            // an intervening render tick can otherwise invalidate frame loads.
+            if (_inputBatchDepth == 0 && AdvanceKittyAnimations()) PublishKittyGraphics();
+        }
+        RaiseModeChangedIfNeeded(before);
+    }
+
+    private void ProcessInputCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed, out TerminalModeState before)
+    {
         consumed = 0;
         RefreshTimedState();
+        before = ModeState;
         if (data.IsEmpty || (stopAtGround && IsParserGround))
         {
             return;
         }
 
-        TerminalModeState before = ModeState;
         int continuationStart = -1;
         int continuationSegmentStart = 0;
 
@@ -645,7 +665,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (consumed == 0) consumed = data.Length;
         _continuation.Track(data[continuationSegmentStart..consumed],
             continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart, IsParserGround);
-        RaiseModeChangedIfNeeded(before);
     }
 
     private void ProcessPrintableAscii(ReadOnlySpan<byte> data)
@@ -4731,7 +4750,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.Resize(columns, rows, reflowOnResize: !_inAltScreen);
         }
         ApplyResizeState(columns, rows);
-        if (_kittyStore.PlacementCount > 0) PublishKittyGraphics();
+        if (AdvanceKittyAnimations() || _kittyStore.PlacementCount > 0) PublishKittyGraphics();
     }
 
     /// <summary>
@@ -4807,6 +4826,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
             ApplyResizeState(columns, rows);
         }
+        AdvanceKittyAnimations();
         PublishKittyGraphics();
         if (reportSize) EmitInBandSizeReport();
     }
@@ -5027,6 +5047,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void BeginRenderHold()
     {
         if (_renderHold is not null) return;
+        // DECSET 2026 publishes the completed input prefix, including its
+        // animation tick, before isolating the rest of this same write.
+        if (AdvanceKittyAnimations(commitInputPrefix: true)) PublishKittyGraphics();
         // Publish the completed prefix of the current input chunk immediately,
         // then continue parsing into an isolated state. Queries and host effects
         // remain responsive while readers/renderers retain the completed frame.

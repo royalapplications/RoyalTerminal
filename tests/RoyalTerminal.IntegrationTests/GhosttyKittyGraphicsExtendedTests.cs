@@ -59,6 +59,39 @@ public class GhosttyKittyGraphicsExtendedTests
         Assert.True(after.GetGeneration() > generation);
     }
 
+    [GhosttyNativeFact]
+    public void DeletingEarlierFramePreservesLastFrameGenerationAndElapsedGap()
+    {
+        if (!GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;
+        foreach (int removed in new[] { 1, 2 })
+        {
+            using GhosttyTerminal terminal = new(10, 3);
+            terminal.SetKittyImageStorageLimit(1024);
+            terminal.Write("\u001b_Ga=T,i=1,p=1,s=1,v=1,C=1;/wAA/w==\u001b\\"u8);
+            terminal.Write("\u001b_Ga=f,i=1,s=1,v=1,z=40;AAD//w==\u001b\\"u8);
+            terminal.Write("\u001b_Ga=f,i=1,s=1,v=1,z=60;AP8A/w==\u001b\\"u8);
+            terminal.Write("\u001b_Ga=a,i=1,c=3,s=3\u001b\\"u8);
+            Assert.True(terminal.TryGetKittyGraphics(out var graphics));
+            Assert.NotNull(graphics);
+            Assert.Equal(60ul, graphics.AdvanceAnimations(100));
+            Assert.True(graphics.TryGetImage(1, out var before));
+            ulong generation = before.GetGeneration();
+            byte[] pixels = before.CopyRgbaData();
+
+            terminal.Write(Encoding.ASCII.GetBytes($"\u001b_Ga=d,d=f,i=1,r={removed}\u001b\\"));
+
+            Assert.True(graphics.TryGetImage(1, out var after));
+            Assert.Equal(generation, after.GetGeneration());
+            Assert.Equal(pixels, after.CopyRgbaData());
+            Assert.Equal(40ul, graphics.AdvanceAnimations(120));
+            Assert.Equal(1ul, graphics.AdvanceAnimations(159));
+            Assert.Equal(removed == 1 ? 40ul : 60ul, graphics.AdvanceAnimations(160));
+            Assert.True(graphics.TryGetImage(1, out var advanced));
+            Assert.True(advanced.GetGeneration() > generation);
+            Assert.Equal(removed == 1 ? new byte[] { 0, 0, 255, 255 } : pixels, advanced.CopyRgbaData());
+        }
+    }
+
     [Theory]
     [InlineData(GhosttyVtNative.GhosttyKittyImageFormat.Rgba, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 })]
     [InlineData(GhosttyVtNative.GhosttyKittyImageFormat.Rgb, new byte[] { 1, 2, 3, 5, 6, 7 }, new byte[] { 1, 2, 3, 255, 5, 6, 7, 255 })]

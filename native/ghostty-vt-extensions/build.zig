@@ -63,6 +63,12 @@ pub fn build(b: *std.Build) !void {
         .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
         .after = "        const removed_idx: u32 = number - 1;",
     }, .{
+        // Deleting an earlier frame renumbers the displayed frame but does
+        // not replace its pixels. Do this before clamping the old last index;
+        // otherwise the same frame spuriously changes generation/restarts its gap.
+        .before = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (anim.current_index > remaining) {",
+        .after = "        const remaining: u32 = @intCast(anim.frames.items.len);\n        if (removed_idx < anim.current_index) {\n            anim.current_index -= 1;\n            self.markMutated(io);\n            return;\n        }\n        if (anim.current_index > remaining) {",
+    }, .{
         // RGB-to-RGBA promotion is quota-exempt. A subsequent image admission
         // can require reclaiming more than the limit, but never more than the
         // actual retained bytes. The eviction loop already handles that case.
