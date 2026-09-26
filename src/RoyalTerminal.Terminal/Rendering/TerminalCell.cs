@@ -832,7 +832,7 @@ public sealed partial class TerminalScreen
     }
 
     /// <summary>Maximum scroll offset.</summary>
-    public int MaxScrollOffset => Math.Max(0, TotalRows - ViewportRows);
+    public int MaxScrollOffset => _snapshotScrollbackQuota?.MaximumBytes == 0 ? 0 : Math.Max(0, TotalRows - ViewportRows);
 
     /// <summary>Whether the screen is currently rendering the alternate buffer.</summary>
     public bool AlternateBufferActive => _alternateBufferActive;
@@ -1356,9 +1356,12 @@ public sealed partial class TerminalScreen
             RemoveRows(0, _rows.Count);
         }
 
+        removedRows += RemoveSnapshotQuotaRowsAfterGrowth();
+
         if (removedRows > 0)
         {
             ShiftRasterGraphicsAfterTopRowsRemoved(removedRows);
+            ScrollOffset = _viewportTop;
         }
 
         return row;
@@ -1758,6 +1761,13 @@ public sealed partial class TerminalScreen
     {
         if (rowCount <= 0)
         {
+            return;
+        }
+
+        if (HasFiniteSnapshotQuota)
+        {
+            // Each newly exposed tail page has its own byte-recycling event.
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) AddRow();
             return;
         }
 
@@ -2228,6 +2238,8 @@ public sealed partial class TerminalScreen
                 removedRows = overflowRows;
             }
         }
+
+        removedRows += RemoveSnapshotQuotaRows(GhosttySnapshotQuotaCheckpoint.Resize);
 
         if (mappedAbsoluteRow >= 0)
         {

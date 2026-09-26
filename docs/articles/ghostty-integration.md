@@ -37,6 +37,25 @@ replacement ownership; Windows Terminal and xterm.js use row-oriented storage an
 do not define this snapshot budget. The managed hard scrollback row cap remains
 independent of the logical native-page budget.
 
+Changing `TerminalScreen.SnapshotScrollbackQuota` immediately evicts eligible whole
+historical allocations in both buffers, using native byte/line minimums. A page
+overlapping the active area is never split just to meet a quota. Row growth enforces
+the line limit; a new tail allocation can recycle one old page for byte pressure,
+but reuse of a free tail row does not re-enforce bytes. Resize enforces lines after
+layout, before combined anchor remapping. Zero bytes also disables scrolling into
+retained boundary history. These are `PageList` limits: unlike Ghostty's
+terminal-level zero-byte setter, the snapshot policy intentionally preserves
+resident READY overlap instead of erasing partial primary history. Removed anchors
+are invalidated; surviving anchors and
+raster placements shift once, and COW readers retain their original rows.
+Host policy changes reach held live input and publication without reapplying an
+unchanged byte setter on every batch. Host row rotation can interleave allocation
+identities: their connected prefix remains indivisible, and a byte-growth recycle
+cannot remove multiple allocations solely to work around that host representation.
+These conservative cases can remain over quota. Runtime-limit, streaming, resize,
+ownership and native continuation regression cases are authored; execution and
+profiling remain deferred.
+
 Column reflow now carries source-page allocation provenance through logical lines,
 including lines that cross PAGE boundaries. The first destination inherits the
 first source's adjusted capacity; later destinations inherit the page currently
@@ -47,10 +66,13 @@ reflow retains the first page, and viewport padding reuses its remaining slots.
 Accounting is isolated from text, style and tracked-anchor movement; ordinary
 untracked screens do not create snapshot allocation metadata during reflow.
 
-This is not yet exact mutable allocator parity: exact occupancy at each failed
-allocation, transient mutation ordering, fragmentation and pressure-driven page
-splitting still need event-level accounting. Checkpoint projection cannot reconstruct
-that history from final cells. Boundary, COW, recycling, source-provenance,
+This is not yet exact mutable allocator parity: the full failure/degradation and
+mutation-order audit remains unfinished. Cursor-style pressure splitting uses
+exact live row-layout selection, keeps the upper allocator and clones the suffix
+before publication. Migrating links precede the style retry; failed SGR retries its
+previous pen while cursor restoration/movement falls back to default. Other
+unconnected paths cannot reconstruct allocator history from final cells.
+Boundary, COW, recycling, source-provenance,
 blank/wrapped reflow, growth-ceiling and native admission comparison tests are added;
 execution and profiling are pending the full validation phase.
 
@@ -154,13 +176,13 @@ tests cover identical-background erasure, protected holes, transient copy growth
 preferred IDs, same-page moves, COW storage, chunk reuse and native capacities;
 execution and performance measurement remain pending.
 
-This is not yet complete mutation-time parity: snapshot-aware reflow, host-level
-row recycling/eviction and all other metadata allocators still need event
-integration and a complete mutation-path audit. Pressure-driven page splitting is also
-unfinished; an unrepresentable tracked style state rejects additional history
-rather than wrapping a capacity or undercharging it. A subsequent representable
+Snapshot-aware reflow, row retirement and style/grapheme/hyperlink mutation hooks
+are connected, but complete mutation-time parity still requires the remaining
+failure/degradation audit. Unrepresentable allocation state rejects additional
+history rather than wrapping a capacity or undercharging it; quota eviction can
+remove such a page only once it is wholly historical. A subsequent representable
 content checkpoint can recover admission. Builds, native comparisons and allocation/
-throughput profiling of this path remain pending.
+throughput profiling of these paths remain pending.
 
 Managed bitmap searches safely reject an oversized span at the last word rather
 than reading past the bitmap. A hash-checked native correctness overlay now applies

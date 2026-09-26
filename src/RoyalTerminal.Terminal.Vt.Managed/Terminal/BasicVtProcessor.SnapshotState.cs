@@ -29,7 +29,7 @@ public sealed partial class BasicVtProcessor
     {
         // Use the live COW screen during output holds, not the frozen published view.
         // Admission policy belongs to the host, not the frozen terminal frame.
-        _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
+        _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         TerminalRowBuffer? rows = _screen.GetSnapshotRows(history.Key);
         long historyRows = rows is null ? long.MaxValue : (long)rows.Count - _screen.ViewportRows;
         int limit = history.Key == 0 ? _publishedScreen.ScrollbackLimit : 0;

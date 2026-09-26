@@ -475,6 +475,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ProcessInputCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed, out TerminalModeState before)
     {
         consumed = 0;
+        _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         RefreshTimedState();
         before = ModeState;
         if (data.IsEmpty || (stopAtGround && IsParserGround))
@@ -4864,7 +4865,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         try
         {
             _screen = _screen.CreateStateCopy();
-            _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
+            _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
             _kittyStore = _kittyStore.CreateStateCopy();
             // Width changes reset tab stops. Reserve the replacement once;
             // keep custom stops and their existing set on height-only resizes.
@@ -5179,7 +5180,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         if (_renderHold is null) return false;
         // Host admission policy can change while the terminal frame is frozen.
-        _screen.SnapshotScrollbackQuota = _publishedScreen.SnapshotScrollbackQuota;
+        _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
         _renderHold = null;

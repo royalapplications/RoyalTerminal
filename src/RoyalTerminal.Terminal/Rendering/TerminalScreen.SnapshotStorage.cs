@@ -11,14 +11,16 @@ public sealed partial class TerminalScreen
     private GhosttySnapshotScrollbackQuota? _snapshotScrollbackQuota;
 
     /// <summary>
-    /// Live incremental-history admission policy. Null disables logical page quotas.
-    /// Changing this does not evict resident rows or reopen a previously dropped history gap.
+    /// Logical page quota for live scrollback and incremental-history admission.
+    /// Changing this immediately evicts eligible whole historical pages in both
+    /// buffers, never an active-boundary page. Null disables logical quotas.
+    /// Raising a limit does not reopen a previously dropped history gap.
     /// Serialize changes with screen/processor access, as for ScrollbackLimit.
     /// </summary>
     public GhosttySnapshotScrollbackQuota? SnapshotScrollbackQuota
     {
         get => _snapshotScrollbackQuota;
-        set { value?.Validate(); _snapshotScrollbackQuota = value; }
+        set { value?.Validate(); _snapshotScrollbackQuota = value; EnforceSnapshotQuotaChange(); }
     }
 
     internal bool FitsSnapshotHistoryQuota(int key, GhosttySnapshotPage page)

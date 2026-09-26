@@ -27,7 +27,12 @@ internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity 
 internal static class GhosttySnapshotLiveAllocation
 {
     internal static ulong Measure(TerminalScreen screen, TerminalRowBuffer rows, GhosttySnapshotAllocation allocation)
+        => Measure(screen, rows, allocation, out _);
+
+    internal static ulong Measure(TerminalScreen screen, TerminalRowBuffer rows, GhosttySnapshotAllocation allocation,
+        out HashSet<GhosttySnapshotPageAllocation>? unrepresentable)
     {
+        unrepresentable = null;
         Dictionary<GhosttySnapshotPageAllocation, List<TerminalRow>> pages = [];
         Dictionary<GhosttySnapshotPageAllocation, int> occupied = [];
         // Row rotations (for example a top-origin scrolling region) preserve
@@ -75,11 +80,21 @@ internal static class GhosttySnapshotLiveAllocation
             foreach (TerminalRow row in group) unchanged &= row.SnapshotAllocationUnmodified;
             if (unchanged)
             {
-                if (page.MetadataOverflow) return ulong.MaxValue;
+                if (page.MetadataOverflow)
+                {
+                    (unrepresentable ??= []).Add(page);
+                    bytes = ulong.MaxValue;
+                    continue;
+                }
                 bytes = Add(bytes, allocation.AllocatedBytes(page.Capacity));
                 continue;
             }
-            if (!TryMeasureCapacity(screen, group, allocation, page.Capacity, out GhosttySnapshotPageCapacity capacity)) return ulong.MaxValue;
+            if (!TryMeasureCapacity(screen, group, allocation, page.Capacity, out GhosttySnapshotPageCapacity capacity))
+            {
+                (unrepresentable ??= []).Add(page);
+                bytes = ulong.MaxValue;
+                continue;
+            }
             GhosttySnapshotPageAllocation updated = capacity == page.Capacity && !page.MetadataOverflow ? page : new(capacity);
             if (!ReferenceEquals(page, updated)) updated = screen.SnapshotAllocationReplaced(page, updated);
             foreach (TerminalRow row in group)
@@ -89,14 +104,19 @@ internal static class GhosttySnapshotLiveAllocation
                 row.SnapshotAllocation = updated;
                 row.SnapshotAllocationUnmodified = true;
             }
-            if (updated.MetadataOverflow) return ulong.MaxValue;
+            if (updated.MetadataOverflow)
+            {
+                (unrepresentable ??= []).Add(updated);
+                bytes = ulong.MaxValue;
+                continue;
+            }
             bytes = Add(bytes, allocation.AllocatedBytes(capacity));
         }
         return bytes;
     }
 
     // Changes to styles, graphemes and OSC8 strings must count, not just rows.
-    // This path is used only during incremental restore, never the IO hot path.
+    // Used at admission/resize and quota-enforcement checkpoints, not per cell.
     // Native growth buckets are evaluated against observed content, including
     // a replacement grapheme slice. The resulting high-water charge is retained
     // at subsequent admission checkpoints, even after an erase. Mutation-time
@@ -118,6 +138,9 @@ internal static class GhosttySnapshotLiveAllocation
         foreach (TerminalRow row in rows)
         {
             columns = Math.Max(columns, row.PreservedColumns);
+            // At quota checkpoints the mutation tracker already owns exact
+            // counts. Do not scan every cell of fully accounted live history.
+            if (trackedStyles && trackedGraphemes && trackedLinks) continue;
             foreach (ref readonly TerminalCell cell in row.ReadOnlyPreservedCells)
             {
                 if (styles is not null)
