@@ -16,6 +16,7 @@ internal sealed class GhosttySnapshotPage
     private readonly Dictionary<ushort, byte[]> _hyperlinks;
     private readonly IReadOnlyDictionary<int, uint[]>? _liveGraphemes;
     private readonly IReadOnlySet<ushort>? _liveStyles, _liveLinks;
+    private readonly GhosttySnapshotStyleStorage? _styleStorage;
 
     private GhosttySnapshotPage(byte[] header, GhosttySnapshotGrid grid,
         Dictionary<ushort, GhosttySnapshotStyle> styles, Dictionary<ushort, byte[]> hyperlinks,
@@ -23,12 +24,17 @@ internal sealed class GhosttySnapshotPage
     {
         _header = header; Grid = grid; _styles = styles; _hyperlinks = hyperlinks; _liveGraphemes = liveGraphemes;
         _liveStyles = metadata?.Styles; _liveLinks = metadata?.Links;
+        _styleStorage = metadata?.FinishStyles(grid);
     }
 
     internal GhosttySnapshotGrid Grid { get; }
     internal int StyleCount => _styles.Count;
     internal int HyperlinkCount => _hyperlinks.Count;
     internal GhosttySnapshotPageCapacity Capacity => GhosttySnapshotPageCapacity.Read(_header);
+
+    // The identity owns a read-only restore seed. Each live owner obtains an
+    // isolated mutable copy, while raw PAGE data and held COW frames stay stable.
+    internal GhosttySnapshotPageAllocation CreateAllocationIdentity() => new(Capacity, _styleStorage);
 
     // Raw codec output stays lossless; live cells follow native allocation
     // failure and suffix-bound semantics computed in original wire order.

@@ -8,9 +8,11 @@ namespace RoyalTerminal.Terminal.Snapshots;
 
 // Immutable allocation identity survives row moves, partial pruning and COW.
 // No live screen/row references are retained by the identity itself.
-internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity capacity)
+internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity capacity, GhosttySnapshotStyleStorage? restoredStyles = null)
 {
     internal GhosttySnapshotPageCapacity Capacity { get; } = capacity;
+    // This is the decode-time seed, not a measurement of mutable live rows.
+    internal GhosttySnapshotStyleStorage CopyRestoredStyles() => restoredStyles?.Copy() ?? new(capacity.Styles);
 }
 
 /// <summary>Measures only currently retained storage, including the unpublished COW screen.</summary>

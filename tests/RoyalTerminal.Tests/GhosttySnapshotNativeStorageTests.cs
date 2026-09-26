@@ -171,6 +171,97 @@ public sealed class GhosttySnapshotNativeStorageTests
     }
 
     [Fact]
+    public void LiveReferencesDistinguishRehashFromCapacityExhaustion()
+    {
+        GhosttySnapshotRefCountedSet<Value> set = new(4, new Context());
+        int first = set.Add(new(1, 0)), last = set.Add(new(2, 1));
+        Assert.Equal(2, set.Count);
+        set.Use(first);
+        Assert.Equal(2, set.ReferenceCount(first));
+        set.Release(first);
+        Assert.Equal(2, set.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, set.TryAdd(new(3, 2), out int id));
+        Assert.Equal(0, id);
+        set.Release(first);
+        Assert.Equal(1, set.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, set.TryAdd(new(3, 2), out id));
+        Assert.Equal(0, id);
+        // Lookup still precedes pressure checks, and a released tail is trimmed.
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(2, 1), out id));
+        Assert.Equal(last, id);
+        set.Release(last); set.Release(last);
+        Assert.Equal(0, set.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(3, 2), out id));
+        Assert.Equal(1, id);
+    }
+
+    [Fact]
+    public void RehashThresholdUsesNativeTruncationAndProbeFailureTakesPrecedence()
+    {
+        GhosttySnapshotRefCountedSet<Value> set = new(8, new Context()); // cap=6, threshold=5
+        for (int i = 1; i <= 5; i++) Assert.Equal(i, set.Add(new(i, (ulong)i)));
+        Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, set.TryAdd(new(6, 7), out _));
+        set.Release(1);
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, set.TryAdd(new(6, 7), out _));
+
+        GhosttySnapshotRefCountedSet<Value> probes = new(128, new Context());
+        for (int i = 1; i <= 32; i++) probes.Add(new(i, 0));
+        probes.Release(1);
+        Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, probes.TryAdd(new(33, 63), out _));
+    }
+
+    [Fact]
+    public void CopiesPreserveDeadSlotsButDoNotShareReferenceOrDeletionState()
+    {
+        Context sourceContext = new(), copyContext = new();
+        GhosttySnapshotRefCountedSet<Value> source = new(4, sourceContext);
+        int first = source.Add(new(1, 0)), last = source.Add(new(2, 1));
+        source.Release(first);
+        GhosttySnapshotRefCountedSet<Value> copy = source.Copy(copyContext);
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, copy.TryAdd(new(3, 2), out _));
+        copy.Release(last);
+        Assert.Equal(1, copy.Add(new(3, 2)));
+        Assert.Equal(new[] { 2, 1 }, copyContext.DeletedValues);
+        Assert.Empty(sourceContext.DeletedValues);
+        Assert.Equal(1, source.Count);
+        Assert.Equal(new Value(2, 1), source.Get(last));
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, source.TryAdd(new(3, 2), out _));
+    }
+
+    [Fact]
+    public void PreferredIdsCanReviveAnInteriorHoleEvenWhenTheNextIdIsExhausted()
+    {
+        Context context = new();
+        GhosttySnapshotRefCountedSet<Value> set = new(4, context);
+        int first = set.Add(new(1, 0)), last = set.Add(new(2, 1));
+        set.Release(first);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAddWithId(new(3, 2), first, out int id));
+        Assert.Equal(first, id);
+        Assert.Equal(2, set.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAddWithId(new(3, 2), last, out id));
+        Assert.Equal(first, id); // The preferred ID is occupied by another value.
+        Assert.Equal(2, set.ReferenceCount(first));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAddWithId(new(2, 1), last, out id));
+        Assert.Equal(last, id);
+        Assert.Equal(2, set.ReferenceCount(last));
+        Assert.Equal(new[] { 1, 3, 2 }, context.DeletedValues);
+    }
+
+    [Fact]
+    public void PreferredDeadIdDoesNotDisplaceAnAlreadyLivingEqualValue()
+    {
+        GhosttySnapshotRefCountedSet<Value> set = new(8, new Context());
+        int first = set.Add(new(1, 0)), second = set.Add(new(2, 1));
+        set.Release(first);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAddWithId(new(2, 1), first, out int id));
+        Assert.Equal(second, id);
+        Assert.Equal(1, set.Count);
+        Assert.Equal(2, set.ReferenceCount(second));
+        Assert.Throws<InvalidOperationException>(() => set.Use(first));
+        Assert.Throws<InvalidOperationException>(() => set.Release(first));
+    }
+
+    [Fact]
     public void LargeCapacityHintsDoNotAllocateDenseStorage()
     {
         Context context = new();

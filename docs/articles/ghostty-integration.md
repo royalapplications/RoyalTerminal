@@ -87,7 +87,24 @@ Ignored zero/duplicate wire IDs still perform native insertion/release, so their
 dead entries may hold strings until a later insertion reclaims them. Failed URI
 allocation frees its explicit ID, and the fixed hyperlink-cell map admits cells in
 row order. Raw accepted tables remain independent of the live result. Temporary
-sets/bitmaps are discarded after parsing; only accepted IDs and suffixes remain.
+hyperlink sets/bitmaps are discarded after parsing; accepted IDs and suffixes
+remain. Style storage now additionally retains a decode-time allocator seed:
+each accepted wire entry surrenders its temporary reference after cells take
+their own, including equal values under different wire IDs. Dead slots and probe
+placement survive until reuse or rehash. Allocation identities expose isolated
+copies of that seed so mutable bookkeeping cannot change raw pages or held COW
+frames. Sparse 256-cell chunks use 16-bit IDs, avoiding per-cell dictionary
+entries and allocation proportional to absent prefixes or capacity hints.
+
+The style-storage lifecycle model includes cursor-only release/add, cell
+write/erase, native rehash-versus-growth failure reasons, preferred-ID insertion
+and row-major rebuilds. A rebuild drops dead entries and leaves cursor restoration
+to its owner. Unit and native cursor/write/erase comparisons are added but unrun.
+This seed/model is a prerequisite for, not completion of, production mutation
+tracking: the processor's SGR/print/erase/move hooks and page growth/split ownership
+still need integration. The seed remains explicitly decode-time state; it must
+not be mistaken for the current contents of mutable rows.
+
 Managed bitmap searches safely reject an oversized span at the last word rather
 than reading past the bitmap. A hash-checked native correctness overlay now applies
 the same end check to the pinned allocator, without changing its allocation order

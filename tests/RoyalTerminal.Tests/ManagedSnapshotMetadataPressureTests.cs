@@ -53,6 +53,122 @@ public sealed class ManagedSnapshotMetadataPressureTests
         Assert.True(page.TryGetStyle(3, out _));
     }
 
+    [Fact]
+    public void RestoredAllocationRetainsDeadStyleSlotsAfterTableReferencesAreReleased()
+    {
+        GhosttySnapshotPage page = Read(Payload(styleCapacity: 4,
+            styles: [(1, Bold), (2, Italic)], styleIds: [2, 0, 0, 0]));
+        TerminalRow row = Live(page);
+        GhosttySnapshotStyleStorage storage = row.SnapshotAllocation!.CopyRestoredStyles();
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(Italic, storage.CellStyle(0));
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, storage.ChangeCursor(Faint));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.Rebuild(page.Capacity.Styles, out GhosttySnapshotStyleStorage? rehashed));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, rehashed!.ChangeCursor(Faint));
+        // A second fork must see the original dead slot, not the first fork's rehash.
+        GhosttySnapshotStyleStorage untouched = row.SnapshotAllocation.CopyRestoredStyles();
+        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, untouched.ChangeCursor(Faint));
+        Assert.Equal(2, page.StyleCount);
+        Assert.True(page.TryGetStyle(1, out GhosttySnapshotStyle raw));
+        Assert.Equal(Bold, raw);
+    }
+
+    [Fact]
+    public void EqualWireStylesReleaseSeparateTableReferencesButPreserveBothCells()
+    {
+        GhosttySnapshotPage page = Read(Payload(styleCapacity: 4,
+            styles: [(1, Bold), (2, Bold), (3, Italic)], styleIds: [1, 2, 0, 0]));
+        TerminalRow row = Live(page);
+        GhosttySnapshotStyleStorage storage = row.SnapshotAllocation!.CopyRestoredStyles();
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(2, storage.CellCount);
+        storage.ClearCell(0);
+        Assert.Equal(Bold, storage.CellStyle(1));
+        storage.ClearCell(1);
+        Assert.Equal(0, storage.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ChangeCursor(Faint));
+        Assert.Equal(1, storage.Count);
+        Assert.Equal(1, row.SnapshotAllocation.CopyRestoredStyles().Count);
+    }
+
+    [Fact]
+    public void RestoredStyleReferenceModelMatchesNativeCursorWritesRehashAndErase()
+    {
+        RequireNative();
+        byte[][] inputs =
+        [
+            Payload(styleCapacity: 0),
+            Payload(styleCapacity: 4, styles: [(1, Bold), (2, Italic)], styleIds: [2, 0, 0, 0]),
+            Payload(styleCapacity: 4, styles: [(1, Bold), (2, Italic)], styleIds: [1, 0, 0, 0]),
+            Payload(styleCapacity: 4, styles: [(1, Bold), (2, Italic)], styleIds: [1, 2, 1, 2]),
+            Payload(styleCapacity: 4, styles: [(1, Bold), (2, Bold), (3, Italic)], styleIds: [1, 2, 0, 0]),
+        ];
+        foreach (byte[] input in inputs)
+        {
+            GhosttySnapshotPage page = Read(input);
+            GhosttySnapshotStyleStorage storage = page.CreateAllocationIdentity().CopyRestoredStyles();
+            GhosttySnapshotPageCapacity capacity = page.Capacity;
+            // Style growth arithmetic is independent of page alignment here;
+            // the test compares the capacity hint, not pooled byte charges.
+            GhosttySnapshotAllocation layout = new(4096);
+            using GhosttyTerminal native = GhosttySnapshot.Decode(Snapshot(input, 4));
+            SetPen(Faint, "\u001b[0;2m");
+            Write(2);
+            SetPen(default, "\u001b[0m");
+            SetPen(Bold, "\u001b[1m");
+            Write(3);
+            SetPen(Italic, "\u001b[0;3m");
+            Write(0);
+            SetPen(default, "\u001b[0m");
+            native.Write("\u001b[2K"u8);
+            for (int i = 0; i < 4; i++) storage.ClearCell(i);
+            Compare();
+            SetPen(Bold, "\u001b[1m");
+            SetPen(Faint, "\u001b[0;2m");
+            SetPen(default, "\u001b[0m");
+
+            void SetPen(GhosttySnapshotStyle pen, string sgr)
+            {
+                // For these composed reset+set controls the intermediate default
+                // only releases the previous cursor, exactly as ChangeCursor does.
+                GhosttySnapshotSetAddResult result = storage.ChangeCursor(pen);
+                if (result != GhosttySnapshotSetAddResult.Success)
+                {
+                    if (result == GhosttySnapshotSetAddResult.OutOfMemory)
+                        Assert.True(layout.TryIncreaseCapacity(capacity, GhosttySnapshotCapacityDimension.Styles,
+                            (ulong)storage.Count, 1, out capacity));
+                    Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? rebuilt));
+                    storage = rebuilt!;
+                    Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ChangeCursor(pen));
+                }
+                native.Write(Encoding.UTF8.GetBytes(sgr));
+                Compare();
+            }
+
+            void Write(int column)
+            {
+                native.Write(Encoding.UTF8.GetBytes($"\u001b[1;{column + 1}HX"));
+                storage.WriteCursorToCell(column);
+                Compare();
+            }
+
+            void Compare()
+            {
+                using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
+                GhosttySnapshotScreen screen = reader.ReadReady().Screens[0];
+                GhosttySnapshotPage actual = Assert.Single(screen.Pages);
+                Assert.Equal(capacity.Styles, actual.Capacity.Styles);
+                Assert.Equal(storage.Cursor, screen.State.Pen);
+                Assert.Equal(storage.Count, actual.StyleCount);
+                for (int i = 0; i < 4; i++)
+                {
+                    actual.TryGetStyle((ushort)(actual.Grid.Cells[i] >> 26), out GhosttySnapshotStyle expected);
+                    Assert.Equal(expected, storage.CellStyle(i));
+                }
+            }
+        }
+    }
+
     [Theory]
     [InlineData(2048U, false)]
     [InlineData(4096U, true)]

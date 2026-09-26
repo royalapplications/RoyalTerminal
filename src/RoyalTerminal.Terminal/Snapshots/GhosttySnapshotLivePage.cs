@@ -21,7 +21,7 @@ internal static class GhosttySnapshotLivePage
         GhosttySnapshotGrid grid = page.Grid;
         TerminalTheme theme = hyperlinkOwner.Theme;
         TerminalRow[] rows = new TerminalRow[grid.Rows];
-        GhosttySnapshotPageAllocation allocation = new(page.Capacity);
+        GhosttySnapshotPageAllocation allocation = page.CreateAllocationIdentity();
         Dictionary<ushort, TerminalCell> styles = new(page.StyleCount);
         Dictionary<ushort, int> links = new(page.HyperlinkCount);
         ulong remainingLinks = GhosttySnapshotAllocation.MapItemCapacity(page.Capacity.HyperlinkBytes / 48UL * 16, 80);
