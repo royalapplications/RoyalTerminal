@@ -3,6 +3,7 @@
 
 using System.Text;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -131,33 +132,40 @@ public sealed class TerminalDropBehaviorTests
     }
 
     [AvaloniaFact]
-    public void FileDropsExposeEscapedUrisWithoutOpeningMovingOrDisposingFiles()
+    public async Task FileDropsExposeEscapedUrisWithoutOpeningOrMovingFiles()
     {
-        FileReference first = new(new Uri("file:///tmp/a%20b.txt"));
-        FileReference second = new(new Uri("file:///tmp/line%0Abreak.txt"));
-        DataTransfer data = new();
-        DataTransferItem a = new(); a.Set(DataFormat.File, first); data.Add(a);
-        DataTransferItem b = new(); b.Set(DataFormat.File, second); data.Add(b);
-        var formats = TerminalDropDataReader.GetFormats(data);
-        Assert.Equal("text/uri-list", Assert.Single(formats).Mime);
-        TerminalDropItem item = Assert.Single(TerminalDropDataReader.Read(data, formats));
-        Assert.Equal("file:///tmp/a%20b.txt\r\nfile:///tmp/line%0Abreak.txt\r\n", Encoding.UTF8.GetString(item.Data.Span));
-        Assert.False(first.Disposed);
-        Assert.False(second.Disposed);
-    }
-
-    private sealed class FileReference(Uri path) : IStorageItem
-    {
-        public string Name => "reference";
-        public Uri Path => path;
-        public bool CanBookmark => false;
-        internal bool Disposed { get; private set; }
-        public Task<StorageItemProperties> GetBasicPropertiesAsync() => throw new InvalidOperationException("No file access expected.");
-        public Task<string?> SaveBookmarkAsync() => throw new InvalidOperationException("No file access expected.");
-        public Task<IStorageFolder?> GetParentAsync() => throw new InvalidOperationException("No file access expected.");
-        public Task DeleteAsync() => throw new InvalidOperationException("Never delete a dropped file.");
-        public Task<IStorageItem?> MoveAsync(IStorageFolder destination) => throw new InvalidOperationException("Never move a dropped file.");
-        public void Dispose() => Disposed = true;
+        // Avalonia 12 forbids client implementations of IStorageItem. Use its
+        // headless BCL provider and real, exclusively held files instead.
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("royalterminal-drop-");
+        Window window = new();
+        try
+        {
+            string firstPath = Path.Combine(directory.FullName, "a b.txt");
+            string secondPath = Path.Combine(directory.FullName, OperatingSystem.IsWindows() ? "line%0Abreak.txt" : "line\nbreak.txt");
+            await File.WriteAllTextAsync(firstPath, "first");
+            await File.WriteAllTextAsync(secondPath, "second");
+            using IStorageFile first = (await window.StorageProvider.TryGetFileFromPathAsync(firstPath))!;
+            using IStorageFile second = (await window.StorageProvider.TryGetFileFromPathAsync(secondPath))!;
+            Assert.NotNull(first); Assert.NotNull(second);
+            DataTransfer data = new();
+            DataTransferItem a = new(); a.Set(DataFormat.File, first); data.Add(a);
+            DataTransferItem b = new(); b.Set(DataFormat.File, second); data.Add(b);
+            using (FileStream firstLock = File.Open(firstPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            using (FileStream secondLock = File.Open(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var formats = TerminalDropDataReader.GetFormats(data);
+                Assert.Equal("text/uri-list", Assert.Single(formats).Mime);
+                TerminalDropItem item = Assert.Single(TerminalDropDataReader.Read(data, formats));
+                string uris = Encoding.UTF8.GetString(item.Data.Span);
+                Assert.Equal(first.Path.AbsoluteUri + "\r\n" + second.Path.AbsoluteUri + "\r\n", uris);
+                Assert.Contains("a%20b.txt", uris);
+                Assert.Contains(OperatingSystem.IsWindows() ? "line%250Abreak.txt" : "line%0Abreak.txt", uris);
+                Assert.Equal(2, uris.Count(c => c == '\n'));
+            }
+            Assert.Equal("first", await File.ReadAllTextAsync(firstPath));
+            Assert.Equal("second", await File.ReadAllTextAsync(secondPath));
+        }
+        finally { window.Close(); directory.Delete(recursive: true); }
     }
 
     private static IDataTransfer TextTransfer(string text)

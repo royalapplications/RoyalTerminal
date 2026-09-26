@@ -212,7 +212,7 @@ public sealed class ManagedSnapshotGraphemePressureTests
     private static void CompareCells(GhosttyTerminal native, ManagedTerminalSnapshot managed)
     {
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
-        GhosttySnapshotGrid grid = Assert.Single(reader.ReadReady().Screens[0].Pages).Grid;
+        GhosttySnapshotGrid grid = Assert.Single(reader.ReadReady().Screens[0].Pages.ToArray()).Grid;
         TerminalRow row = managed.Screen.GetViewportRow(0);
         for (int column = 0; column < Columns; column++)
         {

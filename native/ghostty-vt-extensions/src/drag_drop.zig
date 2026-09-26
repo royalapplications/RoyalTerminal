@@ -45,7 +45,7 @@ export fn ghostty_royal_dnd_event(
     pixel_x: i32,
     pixel_y: i32,
     operations: u32,
-    input: ?[*]const RoyalDndItem,
+    offered_items: ?[*]const RoyalDndItem,
     count: usize,
     destination: @import("terminal/c/io.zig").Writer,
 ) callconv(.c) c_int {
@@ -53,12 +53,12 @@ export fn ghostty_royal_dnd_event(
     const dnd = @import("terminal/kitty/dnd.zig");
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
     if (kind < 1 or kind > 5 or operations > 3 or count > 16 or !destination.valid()) return -2;
-    if (count > 0 and input == null) return -2;
+    if (count > 0 and offered_items == null) return -2;
     var items: [16]dnd.Item = undefined;
     var mimes: [16][]const u8 = undefined;
     var bytes: usize = 0;
     for (0..count) |index| {
-        const item = input.?[index];
+        const item = offered_items.?[index];
         if (item.mime_len == 0 or item.mime_len > 1024 or item.mime == null) return -2;
         const mime = item.mime.?[0..item.mime_len];
         for (mime) |c| if (c < 33 or c > 126) return -2;

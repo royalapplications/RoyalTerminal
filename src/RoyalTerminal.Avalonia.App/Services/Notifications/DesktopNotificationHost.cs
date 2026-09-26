@@ -72,12 +72,12 @@ internal sealed class DesktopNotificationHost : ITerminalNotificationHost, ITerm
         int generation = Volatile.Read(ref _focusGeneration);
         Dispatcher.UIThread.Post(() =>
         {
-            if (Volatile.Read(ref _disposed) != 0 || generation != Volatile.Read(ref _focusGeneration) || _control.GetVisualRoot() != _window) return;
+            if (Volatile.Read(ref _disposed) != 0 || generation != Volatile.Read(ref _focusGeneration) || TopLevel.GetTopLevel(_control) != _window) return;
             _focus();
         }, DispatcherPriority.Input);
     }
 
-    private void GotFocus(object? sender, GotFocusEventArgs args) => UpdateState();
+    private void GotFocus(object? sender, FocusChangedEventArgs args) => UpdateState();
     private void LostFocus(object? sender, RoutedEventArgs args) => UpdateState();
     private void Attached(object? sender, VisualTreeAttachmentEventArgs args) => ObserveAncestors();
     private void Detached(object? sender, VisualTreeAttachmentEventArgs args) { CancelPendingFocus(); UnobserveAncestors(); UpdateState(); }
@@ -104,7 +104,7 @@ internal sealed class DesktopNotificationHost : ITerminalNotificationHost, ITerm
     private void UpdateState()
     {
         Volatile.Write(ref _canFocus, SupportsWindowFocus(OperatingSystem.IsLinux(), _window.TryGetPlatformHandle()?.HandleDescriptor) ? 1 : 0);
-        bool visible = Volatile.Read(ref _disposed) == 0 && _control.GetVisualRoot() == _window && _window.IsActive && _window.IsVisible && _window.WindowState != WindowState.Minimized;
+        bool visible = Volatile.Read(ref _disposed) == 0 && TopLevel.GetTopLevel(_control) == _window && _window.IsActive && _window.IsVisible && _window.WindowState != WindowState.Minimized;
         foreach (Visual visual in _visuals) visible &= visual.IsVisible;
         Volatile.Write(ref _visible, visible ? 1 : 0);
         Volatile.Write(ref _focused, visible && _control.IsKeyboardFocusWithin ? 1 : 0);

@@ -156,7 +156,7 @@ public sealed class ManagedSnapshotMetadataPressureTests
             {
                 using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
                 GhosttySnapshotScreen screen = reader.ReadReady().Screens[0];
-                GhosttySnapshotPage actual = Assert.Single(screen.Pages);
+                GhosttySnapshotPage actual = Assert.Single(screen.Pages.ToArray());
                 Assert.Equal(capacity.Styles, actual.Capacity.Styles);
                 Assert.Equal(storage.Cursor, screen.State.Pen);
                 Assert.Equal(storage.Count, actual.StyleCount);
@@ -431,7 +431,7 @@ public sealed class ManagedSnapshotMetadataPressureTests
         void Compare()
         {
             using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
-            GhosttySnapshotPage page = Assert.Single(reader.ReadReady().Screens[0].Pages);
+            GhosttySnapshotPage page = Assert.Single(reader.ReadReady().Screens[0].Pages.ToArray());
             TerminalRow row = managed.Screen.GetViewportRow(0);
             for (int i = 0; i < columns; i++)
             {

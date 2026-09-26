@@ -254,7 +254,7 @@ public sealed class ManagedSnapshotCursorAllocationTests
                 native.Write(bytes); managed.Processor.Process(bytes);
                 using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
                 GhosttySnapshotScreen screen = reader.ReadReady().Screens[0];
-                Assert.Equal(2, screen.Pages.Count);
+                Assert.Equal(2, screen.Pages.Length);
                 Assert.Equal(screen.Pages[0].Capacity.Styles, Capacities(managed.Screen)[0]);
                 Assert.Equal(screen.Pages[1].Capacity.Styles, Capacities(managed.Screen)[1]);
                 Assert.Equal(screen.State.CursorY, managed.Processor.CursorRow);
@@ -288,7 +288,7 @@ public sealed class ManagedSnapshotCursorAllocationTests
             GhosttySnapshotReadyState ready = reader.ReadReady();
             foreach (GhosttySnapshotScreen screen in ready.Screens)
             {
-                Assert.Equal(2, screen.Pages.Count);
+                Assert.Equal(2, screen.Pages.Length);
                 Assert.Equal(new[] { screen.Pages[0].Capacity.Styles, screen.Pages[1].Capacity.Styles },
                     Capacities(managed.Screen, screen.State.Key));
             }

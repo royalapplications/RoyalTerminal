@@ -153,7 +153,7 @@ public sealed class ManagedSnapshotStyleMutationTests
                 byte[] input = Encoding.UTF8.GetBytes(write);
                 native.Write(input); managed.Processor.Process(input);
                 using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
-                GhosttySnapshotPage actual = Assert.Single(reader.ReadReady().Screens[0].Pages);
+                GhosttySnapshotPage actual = Assert.Single(reader.ReadReady().Screens[0].Pages.ToArray());
                 Assert.Equal(actual.Capacity.Styles, Capacity(managed.Screen).Styles);
                 for (int i = 0; i < 4; i++)
                 {

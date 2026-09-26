@@ -89,7 +89,7 @@ public sealed class FreedesktopNotificationWireTests
                 while (!_stop.IsCancellationRequested)
                 {
                     WireMessage message = await ReadMessageAsync(stream, _stop.Token);
-                    string member = message.Headers.GetValueOrDefault(3, "");
+                    string member = message.Headers.GetValueOrDefault((byte)3, "");
                     string signature = "";
                     byte[] body = [];
                     switch (member)

@@ -244,7 +244,7 @@ public sealed class ManagedSnapshotRowLifetimeTests
         native.Write(input); managed.Processor.Process(input);
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
         GhosttySnapshotScreen expected = reader.ReadReady().Screens[0];
-        Assert.Single(expected.Pages);
+        Assert.Equal(1, expected.Pages.Length);
         TerminalRow[] expectedRows = GhosttySnapshotLivePage.Decode(expected.Pages[0], new TerminalScreen(4, 2));
         TerminalRowBuffer observed = managed.Screen.GetSnapshotRows(0)!;
         Assert.Equal(expectedRows.Length, observed.Count);

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Terminal.Theming;
+using System.Runtime.InteropServices;
 using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Avalonia.Rendering;

@@ -16,11 +16,11 @@ internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity 
     internal bool MetadataOverflow { get; } = metadataOverflow;
     internal bool HasStyleSeed => restoredStyles is not null;
     // This is the decode-time seed, not a measurement of mutable live rows.
-    internal GhosttySnapshotStyleStorage CopyRestoredStyles() => restoredStyles?.Copy() ?? new(capacity.Styles);
+    internal GhosttySnapshotStyleStorage CopyRestoredStyles() => restoredStyles?.Copy() ?? new(Capacity.Styles);
     internal bool HasGraphemeSeed => restoredGraphemes is not null;
-    internal GhosttySnapshotGraphemeStorage CopyRestoredGraphemes() => restoredGraphemes?.Copy() ?? new(capacity.GraphemeBytes);
+    internal GhosttySnapshotGraphemeStorage CopyRestoredGraphemes() => restoredGraphemes?.Copy() ?? new(Capacity.GraphemeBytes);
     internal bool HasHyperlinkSeed => restoredHyperlinks is not null;
-    internal GhosttySnapshotHyperlinkStorage CopyRestoredHyperlinks() => restoredHyperlinks?.Copy() ?? new(capacity.HyperlinkBytes, capacity.StringBytes);
+    internal GhosttySnapshotHyperlinkStorage CopyRestoredHyperlinks() => restoredHyperlinks?.Copy() ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes);
 }
 
 /// <summary>Measures only currently retained storage, including the unpublished COW screen.</summary>

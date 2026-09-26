@@ -147,7 +147,7 @@ public sealed class GhosttySnapshotMetadataGrowthTests
             if (record.Tag == GhosttySnapshotRecordTag.Page)
                 BinaryPrimitives.WriteUInt32LittleEndian(record.Payload.AsSpan(variant == 2 ? 12 : 16), 1_000_000);
         using GhosttySnapshotStateReader probe = new(SnapshotTestRecords.Encode(records), new());
-        GhosttySnapshotPage resident = Assert.Single(probe.ReadReady().Screens[0].Pages);
+        GhosttySnapshotPage resident = Assert.Single(probe.ReadReady().Screens[0].Pages.ToArray());
         GhosttySnapshotPage history = probe.ReadNextHistoryPage()!.Value.Page;
         GhosttySnapshotPageCapacity expected = variant switch
         {
@@ -175,7 +175,7 @@ public sealed class GhosttySnapshotMetadataGrowthTests
             _ = GhosttySnapshotLiveAllocation.Measure(managed.Screen, managed.Screen.GetSnapshotRows(0)!, layout);
             Assert.Equal(expected, managed.Screen.GetSnapshotRows(0)![0].SnapshotAllocation!.Capacity);
             using GhosttySnapshotStateReader nativeReader = new(GhosttySnapshot.Encode(native), new());
-            Assert.Equal(expected, Assert.Single(nativeReader.ReadReady().Screens[0].Pages).Capacity);
+            Assert.Equal(expected, Assert.Single(nativeReader.ReadReady().Screens[0].Pages.ToArray()).Capacity);
             Assert.True(nativeDecoder.Next());
             ManagedTerminalSnapshotProgress progress = managedDecoder.Next()!.Value;
             Assert.Equal(nativeDecoder.GetProgressRows(), (nuint)progress.RowsApplied);

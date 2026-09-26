@@ -25,7 +25,7 @@ public sealed class ManagedSnapshotGraphemeLimitTests
         string suffix = supplementary ? "\U000E0100" : "\u0301";
         byte[] bytes = Snapshot(suffix, count);
         using GhosttySnapshotStateReader reader = new(bytes, new());
-        Assert.Equal(count, Assert.Single(reader.ReadReady().Screens[0].Pages).Grid.Suffix(0, 0).Length);
+        Assert.Equal(count, Assert.Single(reader.ReadReady().Screens[0].Pages.ToArray()).Grid.Suffix(0, 0).Length);
         using ManagedTerminalSnapshot restored = ManagedTerminalSnapshot.Restore(bytes);
         string expected = "A" + string.Concat(Enumerable.Repeat(suffix, Math.Min(count, 64)));
         Assert.Equal(expected, restored.Screen.GetViewportRow(0).ReadOnlyCells[0].Grapheme);
@@ -80,7 +80,7 @@ public sealed class ManagedSnapshotGraphemeLimitTests
     private static void AssertSameCells(GhosttyTerminal native, ManagedTerminalSnapshot managed)
     {
         using GhosttySnapshotStateReader reader = new(GhosttySnapshot.Encode(native), new());
-        GhosttySnapshotGrid grid = Assert.Single(reader.ReadReady().Screens[0].Pages).Grid;
+        GhosttySnapshotGrid grid = Assert.Single(reader.ReadReady().Screens[0].Pages.ToArray()).Grid;
         TerminalRow row = managed.Screen.GetViewportRow(0);
         Assert.Equal(64, grid.Suffix(0, 0).Length);
         StringBuilder text = new("A");
