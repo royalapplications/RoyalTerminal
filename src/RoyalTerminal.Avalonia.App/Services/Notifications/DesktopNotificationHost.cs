@@ -23,7 +23,7 @@ internal sealed class DesktopNotificationHost : ITerminalNotificationHost, ITerm
     private readonly Action _focus;
     private readonly List<Visual> _visuals = new();
     private readonly ConcurrentDictionary<Guid, byte> _owned = new();
-    private int _focused, _visible, _disposed, _focusGeneration;
+    private int _focused, _visible, _disposed, _focusGeneration, _canFocus;
 
     internal DesktopNotificationHost(DesktopNotificationService service, Window window, TerminalControl control, Action focus)
     {
@@ -42,8 +42,8 @@ internal sealed class DesktopNotificationHost : ITerminalNotificationHost, ITerm
         get
         {
             if (Volatile.Read(ref _disposed) != 0) return TerminalNotificationCapabilities.None;
-            TerminalNotificationCapabilities capabilities = _service.Capabilities;
-            return (capabilities & TerminalNotificationCapabilities.Activation) != 0
+            TerminalNotificationCapabilities capabilities = _service.Capabilities & ~TerminalNotificationCapabilities.Focus;
+            return Volatile.Read(ref _canFocus) != 0 && (capabilities & TerminalNotificationCapabilities.Activation) != 0
                 ? capabilities | TerminalNotificationCapabilities.Focus : capabilities;
         }
     }
@@ -103,11 +103,18 @@ internal sealed class DesktopNotificationHost : ITerminalNotificationHost, ITerm
 
     private void UpdateState()
     {
+        Volatile.Write(ref _canFocus, SupportsWindowFocus(OperatingSystem.IsLinux(), _window.TryGetPlatformHandle()?.HandleDescriptor) ? 1 : 0);
         bool visible = Volatile.Read(ref _disposed) == 0 && _control.GetVisualRoot() == _window && _window.IsActive && _window.IsVisible && _window.WindowState != WindowState.Minimized;
         foreach (Visual visual in _visuals) visible &= visual.IsVisible;
         Volatile.Write(ref _visible, visible ? 1 : 0);
         Volatile.Write(ref _focused, visible && _control.IsKeyboardFocusWithin ? 1 : 0);
     }
+
+    // Avalonia 12.1.1's native Wayland Activate() is a no-op and has no public
+    // token-aware alternative. XWayland uses the actual XID path, not the session
+    // environment variable. Do not advertise a focus action we cannot deliver.
+    internal static bool SupportsWindowFocus(bool linux, string? handleDescriptor)
+        => !linux || handleDescriptor == "XID";
 
     public void Dispose()
     {

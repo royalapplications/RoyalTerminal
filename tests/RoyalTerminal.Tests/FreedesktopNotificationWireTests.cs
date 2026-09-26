@@ -21,7 +21,7 @@ public sealed class FreedesktopNotificationWireTests
         Assert.Equal(new[] { "body", "actions", "sound" }, capabilities);
         uint id = await connection.NotifyAsync(new("RoyalTerminal", 0, "dialog-information", "literal <title>", "escaped &lt;body&gt;",
             ["default", "Open", "1", "Yes"], 2, 1234, "job", "dialog-warning", true,
-            new NotificationImage(1, 1, new byte[] { 10, 20, 30, 128 })), default).WaitAsync(TimeSpan.FromSeconds(5));
+            new NotificationImage(1, 1, new byte[] { 10, 20, 30, 128 }), "/usr/share/sounds/freedesktop/stereo/dialog-warning.oga"), default).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(42u, id);
         await connection.CloseAsync(id, default).WaitAsync(TimeSpan.FromSeconds(5));
         WireMessage notification = await peer.Notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -44,6 +44,7 @@ public sealed class FreedesktopNotificationWireTests
         body.Align(8); Assert.Equal("suppress-sound", body.String()); Assert.Equal("b", body.Signature()); Assert.Equal(1u, body.UInt());
         body.Align(8); Assert.Equal("category", body.String()); Assert.Equal("s", body.Signature()); Assert.Equal("job", body.String());
         body.Align(8); Assert.Equal("sound-name", body.String()); Assert.Equal("s", body.Signature()); Assert.Equal("dialog-warning", body.String());
+        body.Align(8); Assert.Equal("sound-file", body.String()); Assert.Equal("s", body.Signature()); Assert.Equal("/usr/share/sounds/freedesktop/stereo/dialog-warning.oga", body.String());
         body.Align(8); Assert.Equal("image-data", body.String()); Assert.Equal("(iiibiiay)", body.Signature()); body.Align(8);
         Assert.Equal(1u, body.UInt()); Assert.Equal(1u, body.UInt()); Assert.Equal(4u, body.UInt());
         Assert.Equal(1u, body.UInt()); Assert.Equal(8u, body.UInt()); Assert.Equal(4u, body.UInt());

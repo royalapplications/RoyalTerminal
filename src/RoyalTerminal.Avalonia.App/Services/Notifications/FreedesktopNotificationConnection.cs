@@ -106,6 +106,10 @@ internal sealed class FreedesktopNotificationConnection : IFreedesktopNotificati
         { writer.WriteDictionaryEntryStart(); writer.WriteString("category"); writer.WriteVariantString(notification.Category); }
         if (notification.Sound.Length > 0)
         { writer.WriteDictionaryEntryStart(); writer.WriteString("sound-name"); writer.WriteVariantString(notification.Sound); }
+        // The sound capability guarantees sound-file, not sound-name. Resolve a
+        // trusted local theme file as well so named sounds work on either server.
+        if (notification.SoundFile.Length > 0)
+        { writer.WriteDictionaryEntryStart(); writer.WriteString("sound-file"); writer.WriteVariantString(notification.SoundFile); }
         if (notification.Image is { } image)
         {
             writer.WriteDictionaryEntryStart(); writer.WriteString("image-data"); writer.WriteSignature("(iiibiiay)");

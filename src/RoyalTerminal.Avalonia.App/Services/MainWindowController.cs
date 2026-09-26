@@ -3141,7 +3141,13 @@ internal sealed class MainWindowController
             transportFactory);
         if (notificationsEnabled && OperatingSystem.IsLinux())
         {
-            _desktopNotifications ??= new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection()));
+            if (_desktopNotifications is null)
+            {
+                DesktopThemeFiles files = new();
+                LinuxDesktopThemeEnvironment themes = new(files, Environment.GetEnvironmentVariable, LinuxDesktopThemeSettings.Read);
+                FreedesktopNotificationResources resources = new(files, themes.Read, TimeProvider.System);
+                _desktopNotifications = new(new LinuxDesktopNotificationBackend(static () => new FreedesktopNotificationConnection(), resources));
+            }
             DesktopNotificationHost host = new(_desktopNotifications, _window, control, () =>
             {
                 if (FindTabForControl(control) is not { } tab) return;

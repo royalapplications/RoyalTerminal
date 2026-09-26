@@ -75,8 +75,10 @@ Limits are 64 unfinished and 64 active notifications, 4 MiB retained assembly
 and request payload budgets, 64 KiB per text field, 1 MiB per icon, 32 names/types
 or buttons, and a 128-entry/16 MiB session-local icon LRU. Individual OSC payloads
 follow Ghostty's 2048-byte plain / 4096-byte encoded limits; metadata is capped at
-8192 bytes and IDs at 256 ASCII identifier characters. Input never becomes a
-file path, shell command, or OS notification identity. Hosts must separately
+8192 bytes and IDs at 256 ASCII identifier characters. Input never becomes an
+arbitrary file path, shell command, or OS notification identity. Resource names
+are restricted to single identifiers resolved inside configured local XDG roots.
+Hosts must separately
 bound native image decoding and their own queues. RIS clears unfinished chunks;
 session changes, host replacement, detachment and disposal close owned revisions.
 
@@ -94,12 +96,37 @@ the originating tab/pane. Queued focus is invalidated on session/host teardown.
 Bodies are escaped only when the server supports markup; literal title text is
 preserved, and servers without body support receive the body in the summary.
 Images decode only their first PNG/JPEG/GIF frame, with 1 MiB encoded, 2048-pixel
-per-axis and 1-megapixel decoded limits. Standard icon names are mapped; complete
-ordered custom-theme lookup remains unfinished, so full icon support is not yet
-advertised. Named-sound and Wayland activation-token parity also remain unfinished.
+per-axis and 1-megapixel decoded limits. All standard icon aliases and ordered
+custom names use local XDG themes, inheritance, size/scale selection and unthemed
+fallbacks. Locally installed desktop entries supply application icons; their
+commands are never executed and caller-supplied paths/URLs are rejected. Explicit
+names precede transmitted images; the application name is an implicit icon only
+when neither names nor image data is supplied. Icons are advertised when the
+daemon reports static or animated icon support; only the first frame is sent.
+
+Theme roots follow XDG precedence, with GNOME GSettings, KDE and GTK configuration
+sources for theme selection and hicolor/freedesktop defaults. Optional GLib
+settings access uses explicit native imports, not GTK initialization or a shell.
+Theme documents, lookup work and caches are bounded; worker-side refresh observes
+file/theme changes on subsequent requests after five seconds. Standard and local
+sound names follow sound-theme inheritance, locale/profile and generic-name
+fallbacks, including user `.disabled` overrides. Both `sound-name` and resolved
+`sound-file` are supplied: the server's `sound` capability guarantees the latter,
+not the former. All standard sounds are advertised only when available locally
+(or explicitly disabled by the user); otherwise only system/silent are advertised.
+
+Wayland activation-token integration remains unfinished. Avalonia 12.1.1's
+[native Wayland activation is a no-op](https://github.com/AvaloniaUI/Avalonia/blob/12.1.1/src/Avalonia.Wayland/WindowImplBase.cs)
+and exposes no token-aware activation feature. Linux focus capability is therefore
+advertised only for an actual X11/XWayland window handle, not inferred from session
+environment variables. Native Wayland delivery/reporting remains usable without
+claiming that clicking a notification can focus the originating terminal.
 
 New tests cover backend negotiation, replacement, early/stale signals, queue
 saturation, in-flight close/shutdown, image limits and headless pane lifecycle.
+Additional tests cover XDG root/name/theme order, desktop-entry masking, all icon
+and sound aliases, locale and disabled sounds, cache invalidation, bounded lookup,
+path traversal rejection and backend-specific focus capability.
 An isolated loopback D-Bus peer exercises actual message serialization without
 contacting the user's desktop bus. These tests have not yet been executed.
 
@@ -110,6 +137,8 @@ RoyalTerminal follows the [Kitty desktop notification protocol](https://sw.kovid
 for the shared host lifecycle. Three reviewed native overlays expose the parsed
 command without adding an upstream action enum value. Callback, protocol and
 headless lifecycle tests have been added; execution awaits full validation.
+Linux resource resolution follows the [icon theme specification](https://specifications.freedesktop.org/icon-theme/latest/)
+and [sound theme specification](https://specifications.freedesktop.org/sound-theme/latest-single/).
 
 ## Ghostty-compatible shaders
 

@@ -6,7 +6,8 @@ using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Avalonia.App.Services.Notifications;
 
-internal sealed class LinuxDesktopNotificationBackend(Func<IFreedesktopNotificationConnection> createConnection) : IDesktopNotificationBackend
+internal sealed class LinuxDesktopNotificationBackend(Func<IFreedesktopNotificationConnection> createConnection,
+    ILinuxNotificationResources resources) : IDesktopNotificationBackend
 {
     private readonly object _sync = new();
     private readonly Dictionary<Guid, NativeEntry> _entries = new();
@@ -39,9 +40,14 @@ internal sealed class LinuxDesktopNotificationBackend(Func<IFreedesktopNotificat
             _markup = System.Array.IndexOf(names, "body-markup") >= 0;
             _body = System.Array.IndexOf(names, "body") >= 0;
             if (System.Array.IndexOf(names, "actions") >= 0) capabilities |= TerminalNotificationCapabilities.Activation | TerminalNotificationCapabilities.Buttons;
-            if (System.Array.IndexOf(names, "sound") >= 0) capabilities |= TerminalNotificationCapabilities.Sound;
-            // Image data works where advertised. Ordered custom theme-name lookup
-            // is not complete, so do not yet advertise full protocol Icons support.
+            resources.Refresh();
+            if (System.Array.IndexOf(names, "sound") >= 0)
+            {
+                capabilities |= TerminalNotificationCapabilities.Sound;
+                if (resources.SupportsNamedSounds) capabilities |= TerminalNotificationCapabilities.NamedSounds;
+            }
+            if (System.Array.IndexOf(names, "icon-static") >= 0 || System.Array.IndexOf(names, "icon-multi") >= 0)
+                capabilities |= TerminalNotificationCapabilities.Icons;
             lock (_sync) if (_generation == generation) Volatile.Write(ref _capabilities, (int)capabilities);
         }
         catch { Disconnected(generation); connection.Dispose(); throw; }
@@ -98,18 +104,24 @@ internal sealed class LinuxDesktopNotificationBackend(Func<IFreedesktopNotificat
         string[] pairs = actions ? new string[(buttonCount + 1) * 2] : [];
         if (actions) { pairs[0] = "default"; pairs[1] = "Open terminal"; }
         for (int i = 0; i < buttonCount; i++) { pairs[2 + i * 2] = (i + 1).ToString(CultureInfo.InvariantCulture); pairs[3 + i * 2] = request.Buttons[i]; }
-        string icon = string.Empty;
-        foreach (string name in request.IconNames)
-        {
-            icon = name switch { "error" => "dialog-error", "warn" or "warning" => "dialog-warning", "info" => "dialog-information", "question" => "dialog-question", "help" => "help-browser", _ => string.Empty };
-            if (icon.Length > 0) break;
-        }
-        // Client app/type names are metadata only, never desktop-entry IDs or paths.
+        resources.Refresh();
+        // File lookup and first-frame decoding run only on the notification
+        // worker. A supplied image precedes implicit application-icon inference.
+        string icon = resources.ResolveIcon(request.IconNames, request.IconData.IsEmpty ? request.ApplicationName : null);
+        // Client app/type names never become a desktop-entry hint or an OS ID.
         string category = request.Types.Count > 0 ? request.Types[0] : string.Empty;
-        string sound = request.Sound switch { "error" => "dialog-error", "warn" or "warning" => "dialog-warning", "info" => "dialog-information", "question" => "dialog-question", _ => string.Empty };
+        bool supportsSound = (Capabilities & TerminalNotificationCapabilities.Sound) != 0;
+        NotificationSound sound = supportsSound ? resources.ResolveSound(request.Sound) : new(string.Empty, string.Empty, request.Sound == "silent");
+        lock (_sync)
+        {
+            TerminalNotificationCapabilities capabilities = Capabilities & ~TerminalNotificationCapabilities.NamedSounds;
+            if (supportsSound && resources.SupportsNamedSounds) capabilities |= TerminalNotificationCapabilities.NamedSounds;
+            // Never restore capabilities after a concurrent daemon disconnect.
+            if ((Capabilities & TerminalNotificationCapabilities.Display) != 0) Volatile.Write(ref _capabilities, (int)capabilities);
+        }
         return new(request.ApplicationName ?? "RoyalTerminal", replaces, icon, title, body, pairs,
-            (byte)Math.Clamp(request.Urgency, 0, 2), request.ExpireMilliseconds, category, sound,
-            request.Sound == "silent", icon.Length == 0 ? NotificationImageDecoder.Decode(request.IconData) : null);
+            (byte)Math.Clamp(request.Urgency, 0, 2), request.ExpireMilliseconds, category, sound.Name,
+            sound.Silent, icon.Length == 0 ? NotificationImageDecoder.Decode(request.IconData) : null, sound.File);
     }
 
     internal static string EscapeMarkup(string text)

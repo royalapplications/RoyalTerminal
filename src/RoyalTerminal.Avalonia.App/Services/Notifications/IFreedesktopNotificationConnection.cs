@@ -5,7 +5,7 @@ namespace RoyalTerminal.Avalonia.App.Services.Notifications;
 
 internal sealed record FreedesktopNotification(string Application, uint ReplacesId, string Icon,
     string Title, string Body, string[] Actions, byte Urgency, int Expiry,
-    string Category, string Sound, bool Silent, NotificationImage? Image);
+    string Category, string Sound, bool Silent, NotificationImage? Image, string SoundFile = "");
 
 internal sealed record NotificationImage(int Width, int Height, byte[] Rgba);
 

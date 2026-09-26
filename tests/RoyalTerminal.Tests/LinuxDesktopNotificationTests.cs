@@ -25,13 +25,13 @@ public sealed class LinuxDesktopNotificationTests
     [Fact]
     public async Task NegotiationAndPayloadPreservePlainTextAndAdvertiseOnlySupportedFeatures()
     {
-        FakeConnection bus = new() { ServerCapabilities = ["body", "body-markup", "actions", "sound"] };
-        await using LinuxDesktopNotificationBackend backend = new(() => bus);
+        FakeConnection bus = new() { ServerCapabilities = ["body", "body-markup", "actions", "sound", "icon-static"] };
+        await using LinuxDesktopNotificationBackend backend = new(() => bus, new FakeResources());
         await backend.InitializeAsync(default);
         Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Activation));
         Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Sound));
-        Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Icons));
-        Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.NamedSounds));
+        Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Icons));
+        Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.NamedSounds));
         TerminalNotificationRequest request = Request() with
         { Title = "<plain>", Body = "<b>& a link</b>", Buttons = ["Yes", "No"], IconNames = ["/tmp/untrusted", "warn"], Sound = "silent", Urgency = 2, ExpireMilliseconds = 0 };
         List<TerminalNotificationFeedback> events = new();
@@ -58,7 +58,7 @@ public sealed class LinuxDesktopNotificationTests
     public async Task LimitedServerRetainsBodyInSummaryAndOmitsUnsupportedActions()
     {
         FakeConnection bus = new() { ServerCapabilities = [] };
-        await using LinuxDesktopNotificationBackend backend = new(() => bus);
+        await using LinuxDesktopNotificationBackend backend = new(() => bus, new FakeResources());
         await backend.InitializeAsync(default);
         await backend.ShowAsync(Request() with { Title = "title", Body = "body", Buttons = ["action"] }, _ => { }, default);
         FreedesktopNotification sent = Assert.Single(bus.Requests);
@@ -67,13 +67,53 @@ public sealed class LinuxDesktopNotificationTests
         Assert.Empty(sent.Actions);
         Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Activation));
         Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Sound));
+        Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.NamedSounds));
+        Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Icons));
+    }
+
+    [Fact]
+    public async Task LocalIconPrecedesImageAndNamedSoundsTrackThemeAvailability()
+    {
+        FakeConnection bus = new() { ServerCapabilities = ["body", "sound", "icon-multi"] };
+        FakeResources resources = new() { Icon = "/theme/editor.svg", Sound = new("dialog-error", "/theme/error.oga", false) };
+        await using LinuxDesktopNotificationBackend backend = new(() => bus, resources);
+        await backend.InitializeAsync(default);
+        Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Icons));
+        Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.NamedSounds));
+        TerminalNotificationRequest request = Request() with { ApplicationName = "editor", IconNames = ["editor"], IconData = new byte[] { 1, 2, 3 }, Sound = "error" };
+        await backend.ShowAsync(request, _ => { }, default);
+        Assert.Equal("/theme/editor.svg", bus.Requests[0].Icon);
+        Assert.Null(bus.Requests[0].Image);
+        Assert.Null(resources.Application); // Explicit data disables implicit app fallback.
+        Assert.Equal("/theme/error.oga", bus.Requests[0].SoundFile);
+        Assert.Equal("dialog-error", bus.Requests[0].Sound);
+        resources.NamedSounds = false;
+        await backend.ShowAsync(Request() with { ApplicationName = "editor" }, _ => { }, default);
+        Assert.Equal("editor", resources.Application);
+        Assert.False(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.NamedSounds));
+        Assert.True(backend.Capabilities.HasFlag(TerminalNotificationCapabilities.Sound));
+    }
+
+    [Fact]
+    public async Task MissingLocalIconUsesEncodedFirstFrame()
+    {
+        using SKBitmap bitmap = new(1, 1);
+        bitmap.Erase(SKColors.Red);
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData data = image.Encode(SKEncodedImageFormat.Png, 100);
+        FakeConnection bus = new();
+        await using LinuxDesktopNotificationBackend backend = new(() => bus, new FakeResources());
+        await backend.InitializeAsync(default);
+        await backend.ShowAsync(Request() with { IconNames = ["missing"], IconData = data.ToArray() }, _ => { }, default);
+        Assert.Empty(bus.Requests[0].Icon);
+        Assert.NotNull(bus.Requests[0].Image);
     }
 
     [Fact]
     public async Task ReplacementsUseServerIdAndDisposalClosesOnlyCurrentRevisions()
     {
         FakeConnection bus = new();
-        LinuxDesktopNotificationBackend backend = new(() => bus);
+        LinuxDesktopNotificationBackend backend = new(() => bus, new FakeResources());
         await backend.InitializeAsync(default);
         TerminalNotificationRequest first = Request(), second = Request() with { ReplacesToken = first.Token };
         List<TerminalNotificationFeedback> old = new(), current = new();
@@ -97,7 +137,7 @@ public sealed class LinuxDesktopNotificationTests
     {
         FakeConnection first = new() { BeforeReply = bus => bus.Dismiss(1) }, second = new();
         Queue<FakeConnection> connections = new([first, second]);
-        await using LinuxDesktopNotificationBackend backend = new(() => connections.Dequeue());
+        await using LinuxDesktopNotificationBackend backend = new(() => connections.Dequeue(), new FakeResources());
         await backend.InitializeAsync(default);
         List<TerminalNotificationFeedback> early = new();
         await backend.ShowAsync(Request(), early.Add, default);
@@ -262,6 +302,19 @@ public sealed class LinuxDesktopNotificationTests
 
     private static TerminalNotificationRequest Request() => new(Guid.NewGuid(), null,
         "title", "body", null, [], [], ReadOnlyMemory<byte>.Empty, [], "system", 1, -1);
+
+    private sealed class FakeResources : ILinuxNotificationResources
+    {
+        internal bool NamedSounds = true;
+        internal string Icon = string.Empty;
+        internal string? Application;
+        internal NotificationSound Sound = new(string.Empty, string.Empty, false);
+        public bool SupportsNamedSounds => NamedSounds;
+        public void Refresh() { }
+        public string ResolveIcon(IReadOnlyList<string> names, string? application)
+        { Application = application; return names.Contains("warn") ? "dialog-warning" : Icon; }
+        public NotificationSound ResolveSound(string name) => name == "silent" ? new(string.Empty, string.Empty, true) : Sound;
+    }
 
     private sealed class FakeConnection : IFreedesktopNotificationConnection
     {
