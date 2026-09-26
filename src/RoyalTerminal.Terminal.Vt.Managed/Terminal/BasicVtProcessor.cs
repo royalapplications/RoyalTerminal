@@ -2532,12 +2532,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (uri.IsEmpty)
         {
             // An ID on a close is invalid and must not close the active link.
-            if (id.IsEmpty) _currentHyperlinkId = 0;
+            if (id.IsEmpty)
+            {
+                _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
+                _currentHyperlinkId = 0;
+            }
             return;
         }
         ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
         _currentHyperlinkId = _screen.RegisterHyperlink(uri, id, counter);
-        if (id.IsEmpty) counter = unchecked(counter + 1);
+        _currentHyperlinkId = _screen.SnapshotHyperlinkChanged(_inAltScreen ? 1 : 0, _cursorRow,
+            CaptureSnapshotPen(), _currentHyperlinkId, ref counter, restart: true);
+        if (id.IsEmpty && _currentHyperlinkId != 0) counter = unchecked(counter + 1);
     }
 
     private void ProcessDcsString(byte b)
@@ -4535,6 +4541,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void SoftReset()
     {
         EndRenderHold();
+        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
         _cursorVisible = true;
         _originMode = false;
         _autoWrap = true;

@@ -21,9 +21,9 @@ internal static class GhosttySnapshotColumnResize
     }
 
     internal static void Resize(TerminalRowBuffer rows, int columns, uint foreground, uint background,
-        GhosttySnapshotAllocation layout, GhosttySnapshotPageTracker tracker)
+        GhosttySnapshotAllocation layout, GhosttySnapshotPageTracker tracker, TerminalScreen? screen = null)
     {
-        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> storage = tracker.ReflowSources(rows, layout);
+        Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> storage = tracker.ReflowSources(rows, layout, screen);
         Source[] sources = new Source[rows.Count];
         Dictionary<GhosttySnapshotPageAllocation, int> counts = [];
         for (int i = 0; i < rows.Count; i++)
@@ -132,8 +132,9 @@ internal static class GhosttySnapshotColumnResize
         int copied = 0;
         while (copied < count)
         {
-            int batch = storage.Graphemes.Count == 0 ? count - copied : 1;
+            int batch = storage.Graphemes.Count == 0 && storage.Hyperlinks.CellCount == 0 ? count - copied : 1;
             if (batch == 1 && destination.Storage.Graphemes.CopyCellFrom(target + copied, storage.Graphemes, offset + copied) != GhosttySnapshotGraphemeAddResult.Success) break;
+            if (batch == 1 && destination.Storage.Hyperlinks.CopyCellFrom(target + copied, storage.Hyperlinks, offset + copied) != GhosttySnapshotHyperlinkAddResult.Success) break;
             GhosttySnapshotSetAddResult result = destination.Storage.Styles.CopyCellsFrom(target + copied, storage.Styles,
                 offset + copied, batch, ref cache, out int added);
             copied += added;
@@ -143,8 +144,9 @@ internal static class GhosttySnapshotColumnResize
         // Page.cloneRowFrom may fail after copying a styled prefix. Roll back
         // that row's references, retaining dead IDs/probe history from the try.
         // No rehash or capacity growth is allowed on a preceding-page backfill.
-        destination.Storage.Styles.ClearCells(target, count);
         destination.Storage.Graphemes.ClearCells(target, count);
+        destination.Storage.Hyperlinks.ClearCells(target, count);
+        destination.Storage.Styles.ClearCells(target, count);
         return false;
     }
 

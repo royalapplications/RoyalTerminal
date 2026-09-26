@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Text;
+using System.Buffers.Binary;
 
 namespace RoyalTerminal.Avalonia.Rendering;
 
@@ -13,6 +14,7 @@ public sealed class TerminalHyperlink
 {
     private readonly byte[] _uri;
     private readonly byte[] _explicitId;
+    private byte[]? _snapshotEncoding;
 
     internal TerminalHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId)
     {
@@ -32,6 +34,24 @@ public sealed class TerminalHyperlink
     public uint ImplicitId { get; }
     /// <summary>Decoded URI for presentation and link activation.</summary>
     public string Uri { get; }
+
+    // Cached immutable protocol bytes may be shared by page/COW owners. This
+    // does not cache page allocation IDs or retain a screen/registry reference.
+    internal byte[] SnapshotEncoding
+    {
+        get
+        {
+            byte[]? existing = Volatile.Read(ref _snapshotEncoding);
+            if (existing is not null) return existing;
+            byte[] encoded = new byte[checked(9 + _explicitId.Length + _uri.Length)];
+            encoded[0] = IsExplicit ? (byte)2 : (byte)1;
+            BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(1), IsExplicit ? (uint)_explicitId.Length : ImplicitId);
+            _explicitId.CopyTo(encoded, 5);
+            BinaryPrimitives.WriteUInt32LittleEndian(encoded.AsSpan(5 + _explicitId.Length), (uint)_uri.Length);
+            _uri.CopyTo(encoded, 9 + _explicitId.Length);
+            return Interlocked.CompareExchange(ref _snapshotEncoding, encoded, null) ?? encoded;
+        }
+    }
 }
 
 // Immutable collision chains can be shared by synchronized-output snapshots.

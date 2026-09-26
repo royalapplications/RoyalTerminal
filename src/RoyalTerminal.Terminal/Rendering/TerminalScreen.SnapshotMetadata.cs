@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Runtime.InteropServices;
+using System.Text;
 using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -35,7 +36,7 @@ public sealed partial class TerminalScreen
         GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
         if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout))
             _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
-        if (!tracker.IsCurrent(key, row, current)) tracker.ChangeCursor(rows, key, row, previous, current, layout);
+        if (!tracker.IsCurrent(key, row, current)) tracker.ChangeCursor(rows, key, row, previous, current, layout, this);
     }
 
     internal GhosttySnapshotPageTracker.RowEdit EditSnapshotRowMetadata(TerminalRow row)
@@ -46,8 +47,34 @@ public sealed partial class TerminalScreen
         if (row.SnapshotAllocation is null &&
             !(_rows.Count > 0 && ReferenceEquals(_rows[_rows.Count - 1], row) && tracker.AssignTailRow(_rows, _rows.Count - 1, layout)))
             _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
-        return tracker.EditRow(_rows, row, layout);
+        return tracker.EditRow(_rows, row, layout, this);
     }
+
+    internal byte[]? SnapshotHyperlinkEncoding(int token)
+    {
+        if (token == 0) return null;
+        if (TryGetHyperlink(token, out TerminalHyperlink? link) && link is not null) return link.SnapshotEncoding;
+        // The legacy URL-only API has no OSC identity. Encode its stable host
+        // token as the same synthetic implicit ID used by snapshot export.
+        return TryGetHyperlinkUrl(token, out string? uri) && uri is not null
+            ? new TerminalHyperlink(Encoding.UTF8.GetBytes(uri), default, unchecked((uint)token)).SnapshotEncoding : null;
+    }
+
+    internal int SnapshotHyperlinkChanged(int key, int cursorRow, GhosttySnapshotStyle pen,
+        int token, ref uint counter, bool restart = false)
+    {
+        if (!TracksSnapshotMetadata) return token;
+        SnapshotStyleChanged(key, cursorRow, pen, pen);
+        TerminalRowBuffer? rows = GetSnapshotRows(key);
+        if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return token;
+        return _snapshotPageTracker!.ChangeHyperlink(this, rows, key, rows[rows.Count - ViewportRows + cursorRow],
+            token, ref counter, restart, SnapshotPageLayout());
+    }
+
+    internal void EndSnapshotCursorHyperlink(int key) => _snapshotPageTracker?.EndCursorHyperlink(key);
+
+    internal int SnapshotCursorHyperlinkToken(int key, int fallback)
+        => TracksSnapshotMetadata ? _snapshotPageTracker?.CursorHyperlinkToken(key, fallback) ?? fallback : fallback;
 
     private GhosttySnapshotAllocation SnapshotPageLayout()
     {
@@ -78,6 +105,13 @@ public sealed partial class TerminalScreen
     {
         cells = bytes = 0;
         return _snapshotPageTracker?.TryGetGraphemeUsage(page, rows, out cells, out bytes) == true;
+    }
+
+    internal bool TryGetSnapshotHyperlinkUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        out ulong links, out ulong cells, out ulong bytes)
+    {
+        links = cells = bytes = 0;
+        return _snapshotPageTracker?.TryGetHyperlinkUsage(page, rows, out links, out cells, out bytes) == true;
     }
 
     private void RetireSnapshotRows(int start, int count)

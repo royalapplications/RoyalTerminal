@@ -7,7 +7,7 @@ using RoyalTerminal.Avalonia.Rendering;
 namespace RoyalTerminal.Terminal.Snapshots;
 
 // Coordinates per-screen metadata ownership and page replacement. Individual
-// style/grapheme allocators own their algorithms. Non-cursor page keys are weak;
+// style/grapheme/hyperlink allocators own their algorithms. Non-cursor page keys are weak;
 // each buffer also owns its last observed cursor page until the next style event.
 // Copies share entries until a mutation forks them; capacity identities remain
 // immutable and replacement changes only the mutating screen's row set.
@@ -48,6 +48,8 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     internal void DiscardCursor(int key)
     {
+        EndCursorHyperlink(key);
+        if (key == 0) _primaryLinkPage = null; else _alternateLinkPage = null;
         GhosttySnapshotPageAllocation? page = key == 0 ? _primaryCursor : _alternateCursor;
         if (page is not null) _pages.Remove(page);
         if (key == 0) _primaryCursor = null; else _alternateCursor = null;
@@ -99,7 +101,12 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     internal GhosttySnapshotPageTracker Copy()
     {
-        GhosttySnapshotPageTracker copy = new() { _primaryCursor = _primaryCursor, _alternateCursor = _alternateCursor };
+        GhosttySnapshotPageTracker copy = new()
+        {
+            _primaryCursor = _primaryCursor, _alternateCursor = _alternateCursor,
+            _primaryLinkPage = _primaryLinkPage, _alternateLinkPage = _alternateLinkPage,
+            _primaryLinkToken = _primaryLinkToken, _alternateLinkToken = _alternateLinkToken,
+        };
         foreach (KeyValuePair<GhosttySnapshotPageAllocation, State> page in _pages)
         {
             page.Value.Shared = true;
@@ -116,7 +123,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             state.Storage = rebuilt!;
         else
             replacement = new(replacement.Capacity, state.Storage.Styles.Copy(), metadataOverflow: true,
-                restoredGraphemes: state.Storage.Graphemes.Copy());
+                restoredGraphemes: state.Storage.Graphemes.Copy(), restoredHyperlinks: state.Storage.Hyperlinks.Copy());
         // Reconcile mutated rows before the next pen update. A checkpoint can
         // replace capacity after a bulk edit that has not yet reached an SGR.
         foreach (int slot in state.Revisions.Keys) state.Revisions[slot] = null;
@@ -127,7 +134,7 @@ internal sealed partial class GhosttySnapshotPageTracker
     }
 
     internal void ChangeCursor(TerminalRowBuffer rows, int key, TerminalRow cursorRow,
-        GhosttySnapshotStyle previousPen, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout)
+        GhosttySnapshotStyle previousPen, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout, TerminalScreen? screen = null)
     {
         if (cursorRow.SnapshotAllocation is not { } page || page.MetadataOverflow) return;
         GhosttySnapshotPageAllocation? departing = key == 0 ? _primaryCursor : _alternateCursor;
@@ -136,14 +143,15 @@ internal sealed partial class GhosttySnapshotPageTracker
             List<TerminalRow> oldRows = Group(rows, departing);
             State old = Writable(departing, oldRows);
             GhosttySnapshotPageAllocation oldPage = departing;
-            if (oldRows.Count != 0) Synchronize(ref oldPage, old, oldRows, layout);
+            if (oldRows.Count != 0) Synchronize(ref oldPage, old, oldRows, layout, screen);
             old.Storage.Styles.ChangeCursor(default);
+            old.Storage.Hyperlinks.EndCursor();
             if (oldRows.Count == 0) _pages.Remove(departing);
         }
 
         List<TerminalRow> group = Group(rows, page);
         State state = Writable(page, group);
-        if (!Synchronize(ref page, state, group, layout)) return;
+        if (!Synchronize(ref page, state, group, layout, screen)) return;
         if (departing is null || !ReferenceEquals(departing, page))
             if (!SetPen(ref page, state, group, previousPen, layout)) return;
         _ = SetPen(ref page, state, group, pen, layout);
@@ -154,9 +162,9 @@ internal sealed partial class GhosttySnapshotPageTracker
     {
         if (!_pages.TryGetValue(page, out State? state))
         {
-            state = new(new(page.CopyRestoredStyles(), page.CopyRestoredGraphemes()));
+            state = new(new(page.CopyRestoredStyles(), page.CopyRestoredGraphemes(), page.CopyRestoredHyperlinks()));
             foreach (TerminalRow row in rows)
-                if (page.HasStyleSeed && page.HasGraphemeSeed && row.SnapshotAllocationUnmodified)
+                if (page.HasStyleSeed && page.HasGraphemeSeed && page.HasHyperlinkSeed && row.SnapshotAllocationUnmodified)
                     state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
             _pages.Add(page, state);
         }
@@ -178,12 +186,13 @@ internal sealed partial class GhosttySnapshotPageTracker
     }
 
     private bool Synchronize(ref GhosttySnapshotPageAllocation page, State state,
-        List<TerminalRow> group, GhosttySnapshotAllocation layout)
+        List<TerminalRow> group, GhosttySnapshotAllocation layout, TerminalScreen? screen)
     {
         HashSet<int> retained = [];
         foreach (TerminalRow row in group) retained.Add(row.SnapshotAllocationRow);
         state.Storage.Styles.RetainRows(retained, page.Capacity.Columns);
         state.Storage.Graphemes.RetainRows(retained, page.Capacity.Columns);
+        state.Storage.Hyperlinks.RetainRows(retained, page.Capacity.Columns);
         foreach (int slot in state.Revisions.Keys)
             if (!retained.Contains(slot)) state.RetireSlot(slot);
         foreach (TerminalRow row in group)
@@ -205,6 +214,9 @@ internal sealed partial class GhosttySnapshotPageTracker
                             return Overflow(ref page, state, group);
                     }
                 }
+                byte[]? encoded = screen?.SnapshotHyperlinkEncoding(cells[column].HyperlinkId);
+                if (cells[column].HyperlinkId != 0 && encoded is null) return Overflow(ref page, state, group);
+                if (!ObserveHyperlink(ref page, state, group, index, encoded, layout)) return false;
                 GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cells[column]);
                 bool empty = cells[column].Codepoint == 0 && cells[column].Grapheme is null;
                 GhosttySnapshotSetAddResult result = state.Storage.Styles.ObserveCell(index, style, empty);
@@ -236,18 +248,30 @@ internal sealed partial class GhosttySnapshotPageTracker
         GhosttySnapshotAllocation layout)
         => GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.GraphemeBytes, layout);
 
+    private bool ObserveHyperlink(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group,
+        int index, byte[]? encoded, GhosttySnapshotAllocation layout)
+    {
+        while (true)
+        {
+            GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.ObserveCell(index, encoded);
+            if (result == GhosttySnapshotHyperlinkAddResult.Success) return true;
+            if (result == GhosttySnapshotHyperlinkAddResult.InvalidEntry) return Overflow(ref page, state, group);
+            if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result), layout)) return false;
+        }
+    }
+
     private bool GrowMetadata(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group,
         GhosttySnapshotCapacityDimension? dimension, GhosttySnapshotAllocation layout)
     {
         GhosttySnapshotPageCapacity capacity = page.Capacity;
-        ulong used = dimension == GhosttySnapshotCapacityDimension.GraphemeBytes
-            ? state.Storage.Graphemes.AllocatedBytes : (ulong)state.Storage.Styles.Count;
+        ulong used = state.Storage.Usage(dimension);
         if (dimension is { } growth && !layout.TryIncreaseCapacity(capacity, growth, used, group.Count, out capacity))
             return Overflow(ref page, state, group);
         if (!state.Storage.Rebuild(capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
             return Overflow(ref page, state, group);
         state.Storage = rebuilt!;
-        Replace(ref page, new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy()), state, group);
+        Replace(ref page, new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy(),
+            restoredHyperlinks: rebuilt.Hyperlinks.Copy()), state, group);
         return true;
     }
 
@@ -256,7 +280,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         // Do not wrap a capacity or undercharge history while pressure-driven
         // page splitting is still unimplemented. Rendering remains independent.
         Replace(ref page, new(page.Capacity, state.Storage.Styles.Copy(), metadataOverflow: true,
-            restoredGraphemes: state.Storage.Graphemes.Copy()), state, group);
+            restoredGraphemes: state.Storage.Graphemes.Copy(), restoredHyperlinks: state.Storage.Hyperlinks.Copy()), state, group);
         return false;
     }
 
@@ -274,6 +298,17 @@ internal sealed partial class GhosttySnapshotPageTracker
     {
         if (ReferenceEquals(_primaryCursor, previous)) _primaryCursor = replacement;
         if (ReferenceEquals(_alternateCursor, previous)) _alternateCursor = replacement;
+        bool dropped = _pages.TryGetValue(replacement, out State? state) && state.Storage.Hyperlinks.CursorId == 0;
+        if (ReferenceEquals(_primaryLinkPage, previous))
+        {
+            _primaryLinkPage = replacement;
+            if (dropped) _primaryLinkToken = 0;
+        }
+        if (ReferenceEquals(_alternateLinkPage, previous))
+        {
+            _alternateLinkPage = replacement;
+            if (dropped) _alternateLinkToken = 0;
+        }
     }
 
     private static List<TerminalRow> Group(TerminalRowBuffer rows, GhosttySnapshotPageAllocation page)

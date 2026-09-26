@@ -11,7 +11,7 @@ internal enum GhosttySnapshotHyperlinkAddResult { Success, InvalidEntry, Strings
 // references are not. No CLR allocation is sized from native capacity hints.
 internal sealed class GhosttySnapshotHyperlinkStorage
 {
-    private sealed record Entry(byte[] Encoded, GhosttySnapshotBitmap.Slice Id, GhosttySnapshotBitmap.Slice Uri, ulong Hash);
+    private readonly record struct Entry(byte[] Encoded, GhosttySnapshotBitmap.Slice Id, GhosttySnapshotBitmap.Slice Uri, ulong Hash);
     private readonly GhosttySnapshotRefCountedSet<Entry> _links;
     private readonly StringContext _strings;
     private readonly Dictionary<int, int> _cells;
@@ -44,6 +44,37 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     internal int CellId(int index) => _cells.TryGetValue(index, out int id) ? id : 0;
     internal int ReferenceCount(int id) => _links.ReferenceCount(id);
 
+    // Reconcile a host-owned cell after a bulk edit. Unlike starting an OSC 8
+    // cursor, cloning first looks up the value and allocates only on a miss.
+    internal GhosttySnapshotHyperlinkAddResult ObserveCell(int index, byte[]? encoded)
+    {
+        if (encoded is null) { Clear(index); return GhosttySnapshotHyperlinkAddResult.Success; }
+        int previous = CellId(index);
+        if (previous != 0 && _links.Get(previous).Encoded.AsSpan().SequenceEqual(encoded))
+            return GhosttySnapshotHyperlinkAddResult.Success;
+        Clear(index);
+        if ((ulong)_cells.Count >= _mapCapacity) return GhosttySnapshotHyperlinkAddResult.MapFull;
+        GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(encoded, out _);
+        Entry key = new(encoded, default, default, GhosttySnapshotMetadataHash.Hyperlink(link));
+        int found = _links.Lookup(key);
+        if (found != 0) return AssignCell(index, found);
+        GhosttySnapshotHyperlinkAddResult allocation = Allocate(link, encoded, encoded, idFirst: false, out Entry entry);
+        if (allocation != GhosttySnapshotHyperlinkAddResult.Success) return allocation;
+        GhosttySnapshotSetAddResult result = _links.TryAdd(entry, out int id);
+        // As with cross-page cloning, set failure retains the copied strings.
+        if (result != GhosttySnapshotSetAddResult.Success) return Convert(result);
+        _cells.Add(index, id);
+        return GhosttySnapshotHyperlinkAddResult.Success;
+    }
+
+    internal static GhosttySnapshotCapacityDimension? GrowthDimension(GhosttySnapshotHyperlinkAddResult reason) => reason switch
+    {
+        GhosttySnapshotHyperlinkAddResult.StringsFull => GhosttySnapshotCapacityDimension.StringBytes,
+        GhosttySnapshotHyperlinkAddResult.SetFull or GhosttySnapshotHyperlinkAddResult.MapFull => GhosttySnapshotCapacityDimension.HyperlinkBytes,
+        GhosttySnapshotHyperlinkAddResult.SetNeedsRehash => null,
+        _ => throw new ArgumentOutOfRangeException(nameof(reason)),
+    };
+
     internal bool TryGetCell(int index, out GhosttySnapshotHyperlink link)
     {
         int id = CellId(index);
@@ -64,9 +95,9 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     // ultimately ignored zero/duplicate wire ID. Owned bytes must be immutable.
     internal int AddDecodedTableReference(GhosttySnapshotHyperlink link, ReadOnlySpan<byte> encoded, byte[]? owned = null)
     {
-        if (Allocate(link, encoded, owned, idFirst: true, out Entry? entry) != GhosttySnapshotHyperlinkAddResult.Success) return 0;
-        GhosttySnapshotSetAddResult result = _links.TryAdd(entry!, out int id);
-        if (result != GhosttySnapshotSetAddResult.Success) _strings.Deleted(entry!);
+        if (Allocate(link, encoded, owned, idFirst: true, out Entry entry) != GhosttySnapshotHyperlinkAddResult.Success) return 0;
+        GhosttySnapshotSetAddResult result = _links.TryAdd(entry, out int id);
+        if (result != GhosttySnapshotSetAddResult.Success) _strings.Deleted(entry);
         return id;
     }
 
@@ -84,10 +115,10 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     {
         GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(encoded, out _);
         EndCursor();
-        GhosttySnapshotHyperlinkAddResult allocation = Allocate(link, encoded, owned, idFirst: false, out Entry? entry);
+        GhosttySnapshotHyperlinkAddResult allocation = Allocate(link, encoded, owned, idFirst: false, out Entry entry);
         if (allocation != GhosttySnapshotHyperlinkAddResult.Success) return allocation;
-        GhosttySnapshotSetAddResult result = _links.TryAdd(entry!, out _cursorId);
-        if (result != GhosttySnapshotSetAddResult.Success) _strings.Deleted(entry!);
+        GhosttySnapshotSetAddResult result = _links.TryAdd(entry, out _cursorId);
+        if (result != GhosttySnapshotSetAddResult.Success) _strings.Deleted(entry);
         return Convert(result);
     }
 
@@ -95,6 +126,13 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     {
         _links.Release(_cursorId);
         _cursorId = 0;
+    }
+
+    internal GhosttySnapshotHyperlinkAddResult CopyCursorTo(GhosttySnapshotHyperlinkStorage destination)
+    {
+        if (_cursorId == 0) return GhosttySnapshotHyperlinkAddResult.Success;
+        byte[] encoded = _links.Get(_cursorId).Encoded;
+        return destination.StartCursor(encoded, encoded);
     }
 
     internal GhosttySnapshotHyperlinkAddResult WriteCursorToCell(int index)
@@ -167,9 +205,9 @@ internal sealed class GhosttySnapshotHyperlinkStorage
         if (found != 0) return AssignCell(destination, found);
 
         GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(value.Encoded, out _);
-        GhosttySnapshotHyperlinkAddResult allocation = Allocate(link, value.Encoded, value.Encoded, idFirst: false, out Entry? copied);
+        GhosttySnapshotHyperlinkAddResult allocation = Allocate(link, value.Encoded, value.Encoded, idFirst: false, out Entry copied);
         if (allocation != GhosttySnapshotHyperlinkAddResult.Success) return allocation;
-        GhosttySnapshotSetAddResult result = _links.TryAddWithId(copied!, sourceId, out int id);
+        GhosttySnapshotSetAddResult result = _links.TryAddWithId(copied, sourceId, out int id);
         // Pinned Page.clonePartialRowFrom does NOT free the copied strings on
         // set failure. Preserve that pressure until the owning page rebuilds;
         // normal insertion and decode, in contrast, explicitly roll them back.
@@ -202,9 +240,9 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     }
 
     private GhosttySnapshotHyperlinkAddResult Allocate(GhosttySnapshotHyperlink link, ReadOnlySpan<byte> encoded,
-        byte[]? owned, bool idFirst, out Entry? entry)
+        byte[]? owned, bool idFirst, out Entry entry)
     {
-        entry = null;
+        entry = default;
         if (link.HasExplicitId && link.ExplicitId.IsEmpty) return GhosttySnapshotHyperlinkAddResult.InvalidEntry;
         GhosttySnapshotBitmap.Slice id = default, uri = default;
         if (idFirst && link.HasExplicitId && !_strings.TryAllocate(link.ExplicitId.Length, out id))

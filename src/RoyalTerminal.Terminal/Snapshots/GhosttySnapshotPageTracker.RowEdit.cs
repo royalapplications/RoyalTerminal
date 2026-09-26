@@ -7,7 +7,7 @@ namespace RoyalTerminal.Terminal.Snapshots;
 
 internal sealed partial class GhosttySnapshotPageTracker
 {
-    internal RowEdit EditRow(TerminalRowBuffer rows, TerminalRow row, GhosttySnapshotAllocation layout)
+    internal RowEdit EditRow(TerminalRowBuffer rows, TerminalRow row, GhosttySnapshotAllocation layout, TerminalScreen? screen = null)
     {
         if (row.SnapshotAllocation is not { MetadataOverflow: false } page) return default;
         State state;
@@ -18,16 +18,16 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             List<TerminalRow> group = Group(rows, page);
             state = Writable(page, group);
-            if (!Synchronize(ref page, state, group, layout)) return default;
+            if (!Synchronize(ref page, state, group, layout, screen)) return default;
         }
-        return new(this, rows, row, state, layout);
+        return new(this, rows, row, state, layout, screen);
     }
 
     // Stack-only by usage: no per-edit closure, journal or dense cell snapshot.
     // Callers edit allocator references before the corresponding cells and must
     // cover every metadata-changing cell in the scope. Untracked screens use default.
     internal readonly struct RowEdit(GhosttySnapshotPageTracker? owner, TerminalRowBuffer rows,
-        TerminalRow row, State state, GhosttySnapshotAllocation layout) : IDisposable
+        TerminalRow row, State state, GhosttySnapshotAllocation layout, TerminalScreen? screen) : IDisposable
     {
         private GhosttySnapshotPageTracker? Owner => owner;
         private TerminalRow Row => row;
@@ -38,6 +38,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             if (owner is null || count <= 0) return;
             state.Storage.Graphemes.ClearCells(checked(Offset + start), count);
+            state.Storage.Hyperlinks.ClearCells(checked(Offset + start), count);
             state.Storage.Styles.ClearCells(checked(Offset + start), count);
         }
 
@@ -56,6 +57,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         internal void WriteCell(int column, in TerminalCell cell)
         {
             Write(column, GhosttySnapshotLivePage.EncodeStyle(in cell));
+            WriteHyperlink(column, cell.HyperlinkId);
             int suffix = TerminalGraphemeStorage.SuffixLength(in cell);
             if (suffix == 0 || owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;
             if (state.Storage.Graphemes.Set(checked(Offset + column), suffix) == GhosttySnapshotGraphemeAddResult.Success) return;
@@ -63,6 +65,36 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (owner.GrowGraphemes(ref page, state, group, layout) &&
                 state.Storage.Graphemes.Set(checked(Offset + column), suffix) != GhosttySnapshotGraphemeAddResult.Success)
                 owner.Overflow(ref page, state, group);
+        }
+
+        internal void WriteHyperlink(int column, int token)
+        {
+            if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;
+            byte[]? encoded = screen?.SnapshotHyperlinkEncoding(token);
+            int index = checked(Offset + column);
+            if (token != 0 && encoded is null) { owner.Overflow(ref page, state, Group(rows, page)); return; }
+            GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.ObserveCell(index, encoded);
+            if (result == GhosttySnapshotHyperlinkAddResult.Success) return;
+            List<TerminalRow> group = Group(rows, page);
+            if (result == GhosttySnapshotHyperlinkAddResult.InvalidEntry) { owner.Overflow(ref page, state, group); return; }
+            if (owner.GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result), layout))
+                owner.ObserveHyperlink(ref page, state, group, index, encoded, layout);
+        }
+
+        internal int WriteCursorHyperlink(int column, int token)
+        {
+            if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return token;
+            int index = checked(Offset + column);
+            while (state.Storage.Hyperlinks.WriteCursorToCell(index) == GhosttySnapshotHyperlinkAddResult.MapFull)
+            {
+                List<TerminalRow> group = Group(rows, page);
+                // Screen.cursorSetHyperlink reserves URI-only scratch before
+                // map growth. A successful reservation dies with the old page.
+                while (!state.Storage.Hyperlinks.TryReserveCursorUri())
+                    if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.StringBytes, layout)) return token;
+                if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.HyperlinkBytes, layout)) return token;
+            }
+            return state.Storage.Hyperlinks.CursorId == 0 ? 0 : token;
         }
 
         internal void AppendGrapheme(int column)
@@ -107,6 +139,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (owner is null) return;
             state.Storage.Styles.SwapCells(checked(Offset + left), checked(Offset + right));
             state.Storage.Graphemes.Swap(checked(Offset + left), checked(Offset + right));
+            state.Storage.Hyperlinks.Swap(checked(Offset + left), checked(Offset + right));
         }
 
         // True means an in-page ownership transfer. Full rows swap storage;
@@ -128,6 +161,7 @@ internal sealed partial class GhosttySnapshotPageTracker
                 {
                     state.Storage.Styles.SwapCells(checked(Offset + start + i), checked(source.Offset + start + i));
                     state.Storage.Graphemes.Swap(checked(Offset + start + i), checked(source.Offset + start + i));
+                    state.Storage.Hyperlinks.Swap(checked(Offset + start + i), checked(source.Offset + start + i));
                 }
                 return true;
             }
@@ -139,18 +173,25 @@ internal sealed partial class GhosttySnapshotPageTracker
                 Clear(start, count);
                 GhosttySnapshotSetAddResult result = GhosttySnapshotSetAddResult.Success;
                 GhosttySnapshotGraphemeAddResult grapheme = GhosttySnapshotGraphemeAddResult.Success;
+                GhosttySnapshotHyperlinkAddResult hyperlink = GhosttySnapshotHyperlinkAddResult.Success;
                 for (int i = 0; i < count; i++)
                 {
                     grapheme = state.Storage.Graphemes.CopyCellFrom(checked(Offset + start + i), source.AllocatorState.Storage.Graphemes,
                         checked(source.Offset + start + i));
                     if (grapheme != GhosttySnapshotGraphemeAddResult.Success) break;
+                    hyperlink = state.Storage.Hyperlinks.CopyCellFrom(checked(Offset + start + i), source.AllocatorState.Storage.Hyperlinks,
+                        checked(source.Offset + start + i));
+                    if (hyperlink != GhosttySnapshotHyperlinkAddResult.Success) break;
                     result = state.Storage.Styles.CopyCellFrom(checked(Offset + start + i), source.AllocatorState.Storage.Styles,
                         checked(source.Offset + start + i));
                     if (result != GhosttySnapshotSetAddResult.Success) break;
                 }
-                if (result == GhosttySnapshotSetAddResult.Success && grapheme == GhosttySnapshotGraphemeAddResult.Success) return false;
+                if (result == GhosttySnapshotSetAddResult.Success && grapheme == GhosttySnapshotGraphemeAddResult.Success &&
+                    hyperlink == GhosttySnapshotHyperlinkAddResult.Success) return false;
                 if (!(grapheme != GhosttySnapshotGraphemeAddResult.Success
                     ? owner.GrowGraphemes(ref page, state, Group(rows, page), layout)
+                    : hyperlink != GhosttySnapshotHyperlinkAddResult.Success
+                    ? owner.GrowMetadata(ref page, state, Group(rows, page), GhosttySnapshotHyperlinkStorage.GrowthDimension(hyperlink), layout)
                     : owner.Grow(ref page, state, Group(rows, page), result, layout))) return false;
             }
         }

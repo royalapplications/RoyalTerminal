@@ -17,6 +17,10 @@ public sealed partial class BasicVtProcessor
 
     private void CaptureDepartingSnapshotCursor()
     {
+        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
+        // Screen.cursorCopy also ends the entering cursor, including a cursor
+        // restored on a dormant buffer which has not yet been visited.
+        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 0 : 1);
         if (_inAltScreen)
         {
             _snapshotAlternatePen = CaptureSnapshotPen();
@@ -132,6 +136,7 @@ public sealed partial class BasicVtProcessor
             Span<byte> encoded = stackalloc byte[GhosttySnapshotSavedCursor.Length]; cursor.Write(encoded); output.Write(encoded);
         }
         int linkToken = active ? _currentHyperlinkId : alternate ? _snapshotAlternateHyperlink : _snapshotPrimaryHyperlink;
+        linkToken = _screen.SnapshotCursorHyperlinkToken(alternate ? 1 : 0, linkToken);
         if (linkToken != 0 && _screen.TryGetHyperlink(linkToken, out TerminalHyperlink? link))
         {
             if ((long)link!.UriBytes.Length + link.ExplicitId.Length > maximumStringBytes)

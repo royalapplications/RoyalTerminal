@@ -2407,7 +2407,7 @@ public sealed partial class TerminalScreen
         if (columns > Columns && PrepareSnapshotResize(columns) is { } tracker)
         {
             GhosttySnapshotColumnResize.Resize(_rows, columns, DefaultForeground, DefaultBackground,
-                SnapshotPageLayout(), tracker);
+                SnapshotPageLayout(), tracker, this);
             return;
         }
         for (int i = 0; i < _rows.Count; i++)

@@ -26,8 +26,9 @@ internal sealed partial class GhosttySnapshotPageTracker
             State state = _pages.TryGetValue(page, out State? known)
                 ? Exclusive(page, known) : Writable(page, Group(rows, page));
             int slot = row.SnapshotAllocationRow;
-            state.Storage.Styles.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
             state.Storage.Graphemes.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
+            state.Storage.Hyperlinks.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
+            state.Storage.Styles.ClearCells(checked(slot * page.Capacity.Columns), page.Capacity.Columns);
             state.RetireSlot(slot);
         }
     }

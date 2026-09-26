@@ -123,6 +123,8 @@ public sealed partial class BasicVtProcessor
         InstallSnapshotKittyKeyboard(state);
         int linkToken = state.TryGetHyperlink(out GhosttySnapshotHyperlink link)
             ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId) : 0;
+        ref uint counter = ref (state.Key == 0 ? ref _primaryHyperlinkImplicitCounter : ref _alternateHyperlinkImplicitCounter);
+        linkToken = _screen.SnapshotHyperlinkChanged(state.Key, row, state.Pen, linkToken, ref counter, restart: true);
         if (state.Key == 0)
         {
             _snapshotPrimaryPen = state.Pen; _snapshotPrimaryProtected = state.Protected; _snapshotPrimaryHyperlink = linkToken;

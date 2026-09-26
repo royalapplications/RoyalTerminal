@@ -32,8 +32,18 @@ public sealed partial class BasicVtProcessor
 
     private void WriteCellFromPen(TerminalRow row, int column, int codepoint, byte width)
     {
+        GhosttySnapshotStyle pen = default;
+        if (_screen.TracksSnapshotMetadata)
+        {
+            pen = CaptureSnapshotPen();
+            RecordSnapshotCursorStyle(pen);
+        }
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
-        if (_screen.TracksSnapshotMetadata) styles.Write(column, CaptureSnapshotPen());
+        if (_screen.TracksSnapshotMetadata)
+        {
+            styles.Write(column, pen);
+            _currentHyperlinkId = styles.WriteCursorHyperlink(column, _currentHyperlinkId);
+        }
         WriteCellFromPen(ref row[column], codepoint, width);
     }
 

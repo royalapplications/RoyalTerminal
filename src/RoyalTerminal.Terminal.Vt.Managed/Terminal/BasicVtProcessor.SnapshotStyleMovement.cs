@@ -15,10 +15,16 @@ public sealed partial class BasicVtProcessor
     private void RecordSnapshotCursorStyle()
     {
         if (!_screen.TracksSnapshotMetadata) return;
+        RecordSnapshotCursorStyle(CaptureSnapshotPen());
+    }
+
+    private void RecordSnapshotCursorStyle(GhosttySnapshotStyle pen)
+    {
         int key = _inAltScreen ? 1 : 0;
-        GhosttySnapshotStyle pen = CaptureSnapshotPen();
         if (!_screen.SnapshotCursorStyleIsCurrent(key, _cursorRow, pen))
             _screen.SnapshotStyleChanged(key, _cursorRow, pen, pen);
+        ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
+        _currentHyperlinkId = _screen.SnapshotHyperlinkChanged(key, _cursorRow, pen, _currentHyperlinkId, ref counter);
     }
 
     private readonly struct SnapshotCursorStyleScope(BasicVtProcessor? owner) : IDisposable

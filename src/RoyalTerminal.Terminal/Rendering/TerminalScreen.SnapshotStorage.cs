@@ -38,7 +38,7 @@ public sealed partial class TerminalScreen
     private GhosttySnapshotReflowAllocation? CreateSnapshotReflowAllocation(int columns)
     {
         GhosttySnapshotPageTracker? tracker = PrepareSnapshotResize(columns);
-        return tracker is null ? null : new(_rows, columns, SnapshotPageLayout(), tracker);
+        return tracker is null ? null : new(_rows, columns, SnapshotPageLayout(), tracker, this);
     }
 
     private GhosttySnapshotPageTracker? PrepareSnapshotResize(int columns)
@@ -54,7 +54,7 @@ public sealed partial class TerminalScreen
         // Existing PAGE seeds are more precise than visible styles (notably
         // inline background cells). Reconcile them before the generic metadata
         // checkpoint; otherwise that estimate can invent a style allocation.
-        if (allAccounted) _ = tracker.ReflowSources(_rows, layout);
+        if (allAccounted) _ = tracker.ReflowSources(_rows, layout, this);
         // Observe live content before reflow replaces its rows. A metadata
         // overflow may become representable after reflow splits the content;
         // retain its existing page identity instead of dropping all accounting.

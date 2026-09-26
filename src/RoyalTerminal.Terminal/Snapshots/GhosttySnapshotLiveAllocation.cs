@@ -107,11 +107,14 @@ internal static class GhosttySnapshotLiveAllocation
         int trackedStyleCount = 0;
         bool trackedStyles = rows[0].SnapshotAllocation is { } page && screen.TryGetSnapshotStyleUsage(page, rows, out trackedStyleCount);
         HashSet<GhosttySnapshotStyle>? styles = trackedStyles ? null : [];
-        HashSet<int> links = [];
         int columns = 1;
         ulong graphemes = 0, temporaryGrapheme = 0, graphemeCells = 0, strings = 0, linkedCells = 0;
         bool trackedGraphemes = rows[0].SnapshotAllocation is { } owner &&
             screen.TryGetSnapshotGraphemeUsage(owner, rows, out graphemeCells, out graphemes);
+        ulong trackedLinkCount = 0;
+        bool trackedLinks = rows[0].SnapshotAllocation is { } linkOwner &&
+            screen.TryGetSnapshotHyperlinkUsage(linkOwner, rows, out trackedLinkCount, out linkedCells, out strings);
+        HashSet<int>? links = trackedLinks ? null : [];
         foreach (TerminalRow row in rows)
         {
             columns = Math.Max(columns, row.PreservedColumns);
@@ -136,7 +139,7 @@ internal static class GhosttySnapshotLiveAllocation
                         temporaryGrapheme = Math.Max(temporaryGrapheme, bytes - 16);
                     }
                 }
-                if (cell.HyperlinkId == 0) continue;
+                if (links is null || cell.HyperlinkId == 0) continue;
                 linkedCells++;
                 if (!links.Add(cell.HyperlinkId)) continue;
                 if (screen.TryGetHyperlink(cell.HyperlinkId, out TerminalHyperlink? link) && link is not null)
@@ -154,7 +157,7 @@ internal static class GhosttySnapshotLiveAllocation
         // cells need no style entry, while an unprinted cursor can own one.
         int styleCount = trackedStyles ? trackedStyleCount : styles!.Count;
         GhosttySnapshotMetadataUsage usage = new((ulong)styleCount, graphemeCells, graphemes, temporaryGrapheme,
-            (ulong)links.Count, linkedCells, strings);
+            trackedLinks ? trackedLinkCount : (ulong)links!.Count, linkedCells, strings);
         return layout.TryFitMetadata(original with
         {
             Columns = (ushort)Math.Max(columns, original.Columns),

@@ -11,7 +11,7 @@ internal sealed partial class GhosttySnapshotPageTracker
     // metadata for this traversal, not retained publication state. Reconcile once
     // per page so restored IDs/dead slots and live mutations are both honored.
     internal Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotPageStorage> ReflowSources(
-        TerminalRowBuffer rows, GhosttySnapshotAllocation layout)
+        TerminalRowBuffer rows, GhosttySnapshotAllocation layout, TerminalScreen? screen = null)
     {
         Dictionary<GhosttySnapshotPageAllocation, List<TerminalRow>> groups = [];
         for (int i = 0; i < rows.Count; i++)
@@ -33,7 +33,7 @@ internal sealed partial class GhosttySnapshotPageTracker
                 continue;
             }
             State state = Writable(page, group);
-            if (!page.MetadataOverflow && Synchronize(ref page, state, group, layout)) sources.Add(page, state.Storage);
+            if (!page.MetadataOverflow && Synchronize(ref page, state, group, layout, screen)) sources.Add(page, state.Storage);
         }
         return sources;
     }
@@ -71,6 +71,17 @@ internal sealed partial class GhosttySnapshotPageTracker
         if (!TryGetStyleUsage(page, rows, out _) || !_pages.TryGetValue(page, out State? state)) return false;
         cells = (ulong)state.Storage.Graphemes.Count;
         bytes = state.Storage.Graphemes.AllocatedBytes;
+        return true;
+    }
+
+    internal bool TryGetHyperlinkUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        out ulong links, out ulong cells, out ulong bytes)
+    {
+        links = cells = bytes = 0;
+        if (!TryGetStyleUsage(page, rows, out _) || !_pages.TryGetValue(page, out State? state)) return false;
+        links = (ulong)state.Storage.Hyperlinks.Count;
+        cells = (ulong)state.Storage.Hyperlinks.CellCount;
+        bytes = state.Storage.Hyperlinks.StringBytes;
         return true;
     }
 }
