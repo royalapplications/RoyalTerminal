@@ -3547,7 +3547,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'G': // CHA
             case 'H': // CUP
             case 'f': // HVP
-            case 'P': // DCH
             case 'X': // ECH
             case '@': // ICH
             case 'Z': // CBT
@@ -4420,6 +4419,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
+        // Ghostty clears split pairs before swapping. Repairing afterward can
+        // join an old head to an unrelated tail and retain dead metadata.
+        if (_cursorCol > 0 && row.ReadOnlyCells[_cursorCol].Width == 0 &&
+            !row.ReadOnlyCells[_cursorCol].IsWideSpacerHead)
+            EraseCells(row, _cursorCol - 1, 2);
+        SplitCharacterEditBoundary(row, RightMargin + 1);
+        int shifted = RightMargin - _cursorCol + 1 - count;
+        if (shifted > 0 && row.ReadOnlyCells[_cursorCol + shifted - 1].Width == 2)
+            EraseCells(row, _cursorCol + shifted - 1, 2);
         using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
             for (var c = RightMargin; c >= _cursorCol + count; c--)
@@ -4447,12 +4455,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         count = Math.Min(count, RightMargin - _cursorCol + 1);
 
         var row = _screen.GetViewportRow(_cursorRow);
-        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
-        if (row.ReadOnlyCells[^1].IsWideSpacerHead)
-            EraseCells(row, row.Columns - 1, 1);
-        ResetRowSoftWrap(row);
-        ResetDelayedWrap();
+        SplitCharacterEditBoundary(row, _cursorCol);
+        SplitCharacterEditBoundary(row, _cursorCol + count);
+        SplitCharacterEditBoundary(row, RightMargin + 1);
         using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
             for (var c = _cursorCol; c + count <= RightMargin; c++)
@@ -4464,6 +4470,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             styles.Clear(start, RightMargin + 1 - start);
             row.Cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
         }
+        ResetProtectedRowWrap(row);
+        ResetDelayedWrap();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4484,13 +4492,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         var row = _screen.GetViewportRow(_cursorRow);
-        if (_cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2) ErasePreviousWideSpacerHead();
         ClearPreservedCellsForMutation(row);
-        if (row.ReadOnlyCells[^1].IsWideSpacerHead)
-            EraseCells(row, row.Columns - 1, 1);
-        ResetRowSoftWrap(row);
+        int end = Math.Min(row.Columns, _cursorCol + count);
+        if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
+        SplitCharacterEditBoundary(row, _cursorCol);
+        SplitCharacterEditBoundary(row, end);
+        ResetProtectedRowWrap(row);
         ResetDelayedWrap();
-        EraseCells(row, _cursorCol, Math.Min(count, _screen.Columns - _cursorCol));
+        EraseCells(row, _cursorCol, end - _cursorCol);
         NormalizeRowWideCells(row);
         row.IsDirty = true;
         _screen.ClearRasterGraphicsInViewportRectangle(

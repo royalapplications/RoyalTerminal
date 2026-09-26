@@ -68,10 +68,8 @@ public sealed partial class BasicVtProcessor
         if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
         // Match Ghostty eraseChars: split boundary pairs before considering ISO
         // protection. Upstream explicitly documents this protected-wide edge case.
-        if (_cursorRow > 0 && _cursorCol <= 1 && row.ReadOnlyCells[0].Width == 2)
-            ErasePreviousWideSpacerHead();
-        if (_cursorCol > 0 && row.ReadOnlyCells[_cursorCol - 1].Width == 2)
-            ClearCellAndWideArtifacts(row, _cursorCol);
+        SplitCharacterEditBoundary(row, _cursorCol);
+        SplitCharacterEditBoundary(row, end);
         ResetProtectedRowWrap(row);
         ClearUnprotectedCells(_cursorRow, _cursorCol, end);
         ResetDelayedWrap();
@@ -99,8 +97,9 @@ public sealed partial class BasicVtProcessor
 
     private void ErasePreviousWideSpacerHead()
     {
-        if (_cursorRow <= 0) return;
-        TerminalRow previous = _screen.GetViewportRow(_cursorRow - 1);
+        int absoluteRow = _screen.GetAbsoluteRowForViewportRow(_cursorRow);
+        if (absoluteRow <= 0) return;
+        TerminalRow previous = _screen.GetRow(absoluteRow - 1);
         if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
         EraseCells(previous, previous.Columns - 1, 1);
         previous.IsDirty = true;
