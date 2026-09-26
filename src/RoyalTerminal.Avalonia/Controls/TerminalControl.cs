@@ -657,6 +657,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     private int _searchTotal;
     private int _searchSelected = -1;
     private bool _searchSelectInitialMatchOnNextRefresh;
+    private bool _searchPending;
+    private bool _searchScrollOnAsyncResult;
+    private bool _searchPaused;
     private const int InitialRowTextScratchCapacity = 256;
     private readonly List<TerminalHighlightSpan> _highlightSpanScratch = [];
     private readonly List<TerminalSearchMatch> _searchMatchScratch = [];
@@ -2188,6 +2191,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _searchPaused = false;
         AttachSecureInputWindow();
         _terminalMouseCursorAttached = true;
 
@@ -2197,6 +2201,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         // TemplatedControl without a template never fires OnApplyTemplate.
         // Create the presenter here as a fallback so rendering always works.
         EnsurePresenter();
+        if (_searchNeedle is not null) UpdateRendererParityStateFromScreen();
         UpdateTimedRefreshTimer();
         UpdateTerminalMouseCursorOnUiThread();
         UpdatePasswordInputMonitoring();
@@ -2205,6 +2210,11 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _searchPaused = true;
+        if (_screen is not null && _vtProcessor is ITerminalAsyncSearchSource asyncSearch)
+        {
+            lock (_screen.SyncRoot) asyncSearch.CancelSearch();
+        }
         DetachSecureInputWindow();
         _passwordInputTimer?.Stop();
         ResetKeyboardInputState();
@@ -5274,13 +5284,20 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StartSearch(string? needle)
     {
-        _searchNeedle = string.IsNullOrWhiteSpace(needle) ? null : needle;
+        if (string.IsNullOrWhiteSpace(needle))
+        {
+            EndSearch();
+            return;
+        }
+        _searchNeedle = needle;
         _searchSelected = -1;
         _searchSelectInitialMatchOnNextRefresh = _searchNeedle is not null;
         _searchTotal = 0;
         UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
         _ = ScrollSelectedSearchMatchIntoView();
         UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
+        _searchScrollOnAsyncResult = _searchPending;
+        UpdateTimedRefreshTimer();
     }
 
     /// <summary>
@@ -5298,7 +5315,14 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _searchSelectInitialMatchOnNextRefresh = false;
         _searchTotal = 0;
         _searchMatchScratch.Clear();
+        _searchPending = false;
+        _searchScrollOnAsyncResult = false;
+        if (_screen is not null && _vtProcessor is ITerminalAsyncSearchSource asyncSearch)
+        {
+            lock (_screen.SyncRoot) asyncSearch.CancelSearch();
+        }
         UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
+        UpdateTimedRefreshTimer();
     }
 
     /// <summary>
@@ -7834,7 +7858,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void AppendSearchHighlightSpansLocked()
     {
-        if (_screen is null || string.IsNullOrEmpty(_searchNeedle))
+        if (_screen is null || _searchPaused || string.IsNullOrEmpty(_searchNeedle))
         {
             _searchTotal = 0;
             _searchSelected = -1;
@@ -7853,8 +7877,18 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        TerminalSearchMatch? selectedMatch = (uint)_searchSelected < (uint)_searchMatchScratch.Count
+            ? _searchMatchScratch[_searchSelected] : null;
         _searchMatchScratch.Clear();
-        if (_vtProcessor is ITerminalSearchSource terminalSearchSource)
+        _searchPending = false;
+        if (_vtProcessor is ITerminalAsyncSearchSource asyncSearch)
+        {
+            TerminalSearchStatus status = asyncSearch.PopulateSearchMatchesAsync(needle, _searchMatchScratch);
+            _searchPending = status == TerminalSearchStatus.Pending;
+            if (status == TerminalSearchStatus.Failed && _vtProcessor is ITerminalSearchSource fallback)
+                fallback.PopulateSearchMatches(needle, _searchMatchScratch);
+        }
+        else if (_vtProcessor is ITerminalSearchSource terminalSearchSource)
         {
             terminalSearchSource.PopulateSearchMatches(needle, _searchMatchScratch);
         }
@@ -7870,7 +7904,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        if (_searchSelectInitialMatchOnNextRefresh || _searchSelected < 0)
+        int retainedSelection = selectedMatch is TerminalSearchMatch selected ? _searchMatchScratch.IndexOf(selected) : -1;
+        if (!_searchSelectInitialMatchOnNextRefresh && retainedSelection >= 0)
+        {
+            _searchSelected = retainedSelection;
+        }
+        else if (_searchSelectInitialMatchOnNextRefresh || _searchSelected < 0)
         {
             _searchSelected = IsSearchStartAtTopLocked() ? 0 : _searchTotal - 1;
             _searchSelectInitialMatchOnNextRefresh = false;
@@ -9015,6 +9054,11 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (changed)
         {
+            if (_searchScrollOnAsyncResult && (_searchTotal > 0 || !_searchPending))
+            {
+                _searchScrollOnAsyncResult = false;
+                _ = ScrollSelectedSearchMatchIntoView();
+            }
             FinalizeOutputBatchOnUiThread();
         }
         else

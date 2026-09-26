@@ -5073,6 +5073,46 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
+    public void Control_AsyncSearchRetainsSelectedMatchWhenHistoryResultsArrive()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [new TerminalSearchMatch(18, 0, 5)]) { SearchStatus = TerminalSearchStatus.Pending };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new SingleProcessorFactory(processor), VtProcessorPreference.Native);
+        control.Columns = 8;
+        control.Rows = 4;
+        ArrangeControlToGrid(control, columns: 8, rows: 4);
+        control.StartSearch("needle");
+        Assert.Equal(1, control.SearchTotal);
+        Assert.Equal(0, control.SearchSelected);
+        processor.SetSearchResults([new(1, 0, 5), new(8, 0, 5), new(18, 0, 5)]);
+        processor.SearchStatus = TerminalSearchStatus.Complete;
+        control.WriteOutput("refresh"u8);
+        Assert.Equal(3, control.SearchTotal);
+        Assert.Equal(2, control.SearchSelected);
+        control.StartSearch(null);
+        Assert.Equal(1, processor.SearchCancellationCount);
+        Assert.Null(control.SearchNeedle);
+        Assert.Equal(0, control.SearchTotal);
+    }
+
+    [AvaloniaFact]
+    public void Control_AsyncSearchFailureUsesSynchronousCapability()
+    {
+        FakeSearchViewportVtProcessor processor = new(
+            new TerminalViewportScrollState(TotalRows: 20, OffsetRows: 0, VisibleRows: 4),
+            [new TerminalSearchMatch(18, 0, 5)]) { SearchStatus = TerminalSearchStatus.Failed };
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new SingleProcessorFactory(processor), VtProcessorPreference.Native);
+        control.StartSearch("needle");
+        Assert.Equal(1, control.SearchTotal);
+        Assert.True(processor.SynchronousSearchCount > 0);
+        control.EndSearch();
+        Assert.Equal(1, processor.SearchCancellationCount);
+    }
+
+    [AvaloniaFact]
     public void Control_SearchLifecycle_NativeViewportScrollsSelectedMatchIntoView()
     {
         if (!GhosttyVtProcessor.IsAvailable())
@@ -8006,10 +8046,30 @@ public class TerminalControlTests
         IVtProcessor,
         ITerminalViewportScrollSource,
         ITerminalSearchSource,
+        ITerminalAsyncSearchSource,
         ITerminalScreenSnapshotSource,
         ITerminalResizeReflowPolicySink
     {
         private readonly List<TerminalSearchMatch> _matches = [.. matches];
+        public TerminalSearchStatus SearchStatus { get; set; } = TerminalSearchStatus.Complete;
+        public int SearchCancellationCount { get; private set; }
+        public int SynchronousSearchCount { get; private set; }
+        public Exception? SearchError => SearchStatus == TerminalSearchStatus.Failed ? new InvalidOperationException("Search failed") : null;
+
+        public void SetSearchResults(IReadOnlyList<TerminalSearchMatch> results)
+        {
+            _matches.Clear();
+            _matches.AddRange(results);
+        }
+
+        public TerminalSearchStatus PopulateSearchMatchesAsync(string needle, List<TerminalSearchMatch> destination)
+        {
+            destination.Clear();
+            if (SearchStatus != TerminalSearchStatus.Failed) destination.AddRange(_matches);
+            return SearchStatus;
+        }
+
+        public void CancelSearch() => SearchCancellationCount++;
 
         public int CursorCol => 0;
         public int CursorRow => 0;
@@ -8161,6 +8221,7 @@ public class TerminalControlTests
 
         public void PopulateSearchMatches(string needle, List<TerminalSearchMatch> destination)
         {
+            SynchronousSearchCount++;
             _ = needle;
             destination.Clear();
             destination.AddRange(_matches);

@@ -25,7 +25,7 @@ public enum TerminalSnapshotExportFormat
 /// <param name="IncludeCursor">Include cursor position.</param>
 /// <param name="IncludeStyle">Include active SGR style.</param>
 /// <param name="IncludeHyperlinks">Include hyperlink state.</param>
-/// <param name="IncludeProtection">Include DECSCA protection state.</param>
+/// <param name="IncludeProtection">Include the active protection state. Managed VT exports also preserve per-cell protection.</param>
 /// <param name="IncludeKittyKeyboard">Include Kitty keyboard protocol state.</param>
 /// <param name="IncludeCharsets">Include character set state.</param>
 /// <param name="IncludePalette">Include palette definitions.</param>

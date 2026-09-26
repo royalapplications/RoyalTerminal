@@ -294,6 +294,14 @@ public sealed class TerminalRow
     // across this boundary. Subsequent mutations detach only the affected row.
     internal TerminalRow CreateStateCopy() => new(this);
 
+    // A search snapshot pins the backing cells with COW. Comparing storage plus
+    // row layout detects mutation independently of renderer dirty acknowledgments.
+    internal bool HasSameSearchContent(TerminalRow other) =>
+        ReferenceEquals(_cells, other._cells) && _columns == other._columns &&
+        WrapsToNext == other.WrapsToNext && IsWrapContinuation == other.IsWrapContinuation;
+
+    internal object SearchStorageIdentity => _cells;
+
     /// <summary>Access a cell by column index.</summary>
     public ref TerminalCell this[int column]
     {

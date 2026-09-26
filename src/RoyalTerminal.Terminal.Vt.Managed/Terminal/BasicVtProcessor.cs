@@ -7,7 +7,6 @@
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
 using System.Globalization;
-using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
@@ -37,6 +36,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalSessionHistoryController,
     ITerminalSelectionExportSource,
     ITerminalSearchSource,
+    ITerminalAsyncSearchSource,
     ITerminalGlyphCoverageSink,
     ITerminalPasteSequenceEncoderSource,
     ITerminalSnapshotExportSource,
@@ -99,6 +99,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private TerminalScreen _screen;
     private readonly ManagedTerminalSearch _search = new();
+    private ManagedBackgroundSearch? _backgroundSearch;
 
     /// <inheritdoc />
     public ITerminalGlyphCoverageSource? GlyphCoverageSource { get; set; }
@@ -663,6 +664,37 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         => _search.Populate(_publishedScreen, needle, destination);
 
     /// <inheritdoc />
+    public TerminalSearchStatus PopulateSearchMatchesAsync(string needle, List<TerminalSearchMatch> destination)
+    {
+        if (string.IsNullOrEmpty(needle))
+        {
+            CancelSearch();
+            destination.Clear();
+            return TerminalSearchStatus.Complete;
+        }
+        // Small screens finish inline without allocating a dedicated worker.
+        if (_publishedScreen.TotalRows <= 256)
+        {
+            _backgroundSearch?.Dispose();
+            _backgroundSearch = null;
+            _search.Populate(_publishedScreen, needle, destination);
+            return TerminalSearchStatus.Complete;
+        }
+        return (_backgroundSearch ??= new()).Populate(_publishedScreen, needle, destination);
+    }
+
+    /// <inheritdoc />
+    public Exception? SearchError => _backgroundSearch?.Error;
+
+    /// <inheritdoc />
+    public void CancelSearch()
+    {
+        _backgroundSearch?.Dispose();
+        _backgroundSearch = null;
+        _search.Reset();
+    }
+
+    /// <inheritdoc />
     public string? ReadSelection(in TerminalSelectionRange selection)
         => ManagedPlainTextFormatter.Format(_screen, new TerminalSnapshotExportOptions(Selection: selection));
 
@@ -730,357 +762,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private string ExportStyledVtSnapshot(in TerminalSnapshotExportOptions options)
     {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
         StringBuilder builder = new();
-        // Screen selection may restore a saved cursor or clear the alternate
-        // screen. Perform it before content and before restoring origin mode.
+        // Select the target screen before content and before restoring origin mode.
         if (options.Extras.IncludeModes) AppendMode(builder, ansi: false, 1049, _inAltScreen);
-        builder.Append("\x1b[0m");
-
-        SnapshotCellStyleKey? currentStyle = null;
-        int currentHyperlink = 0;
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            ManagedSnapshotSelection range = ManagedSnapshotSelection.Create(_screen, selection, options.Unwrap);
-            for (int absoluteRow = range.FirstRow; absoluteRow <= range.LastRow; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                if (!range.TryGetColumns(row, absoluteRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                AppendStyledSnapshotRow(
-                    builder,
-                    row,
-                    rowStart,
-                    rowEnd,
-                    options,
-                    ref currentStyle,
-                    ref currentHyperlink);
-
-                if (ShouldAppendSnapshotLineBreak(
-                    row,
-                    range.Unwrap,
-                    absoluteRow,
-                    range.LastRow))
-                {
-                    builder.Append("\r\n");
-                }
-            }
-        }
-        else
-        {
-            int lastRowIndex = options.TrimTrailingWhitespace
-                ? GetSnapshotLastRowIndex(visual: true)
-                : _screen.TotalRows - 1;
-            // No visible cells still permits requested cursor/pen/mode extras.
-
-            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendStyledSnapshotRow(
-                    builder,
-                    row,
-                    0,
-                    row.Columns - 1,
-                    options,
-                    ref currentStyle,
-                    ref currentHyperlink);
-
-                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-                {
-                    builder.Append("\r\n");
-                }
-            }
-        }
-
-        CloseStyledHyperlink(builder, ref currentHyperlink);
-        builder.Append("\x1b[0m");
+        ManagedRichTextFormatter.Append(_screen, builder, options, html: false);
         AppendStyledVtExtras(builder, options);
         return builder.ToString();
     }
 
     private string ExportHtmlSnapshot(in TerminalSnapshotExportOptions options)
     {
-        if (_screen.TotalRows <= 0 || _screen.Columns <= 0)
-        {
-            return string.Empty;
-        }
-
         StringBuilder builder = new();
-        builder.Append("<!DOCTYPE html><html><body style=\"margin:0;\">");
-        builder.Append("<pre class=\"terminal-snapshot\" style=\"margin:0;white-space:pre;\">");
-
-        if (options.Selection is TerminalSelectionRange selection)
-        {
-            ManagedSnapshotSelection range = ManagedSnapshotSelection.Create(_screen, selection, options.Unwrap);
-            for (int absoluteRow = range.FirstRow; absoluteRow <= range.LastRow; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                if (!range.TryGetColumns(row, absoluteRow, out int rowStart, out int rowEnd))
-                {
-                    continue;
-                }
-
-                AppendHtmlSnapshotRow(builder, row, rowStart, rowEnd, options);
-                if (ShouldAppendSnapshotLineBreak(row, range.Unwrap, absoluteRow, range.LastRow))
-                {
-                    builder.Append('\n');
-                }
-            }
-        }
-        else
-        {
-            int lastRowIndex = options.TrimTrailingWhitespace
-                ? GetSnapshotLastRowIndex(visual: true)
-                : _screen.TotalRows - 1;
-            if (lastRowIndex < 0)
-            {
-                return string.Empty;
-            }
-
-            for (int absoluteRow = 0; absoluteRow <= lastRowIndex; absoluteRow++)
-            {
-                TerminalRow row = _screen.GetRow(absoluteRow);
-                AppendHtmlSnapshotRow(builder, row, 0, row.Columns - 1, options);
-                if (ShouldAppendSnapshotLineBreak(row, options.Unwrap, absoluteRow, lastRowIndex))
-                {
-                    builder.Append('\n');
-                }
-            }
-        }
-
-        builder.Append("</pre></body></html>");
+        ManagedRichTextFormatter.Append(_screen, builder, options, html: true);
         return builder.ToString();
-    }
-
-
-    private static bool ShouldAppendSnapshotLineBreak(
-        TerminalRow row,
-        bool unwrap,
-        int rowIndex,
-        int lastRowIndex)
-    {
-        return rowIndex < lastRowIndex && (!unwrap || !row.WrapsToNext);
-    }
-
-    private void AppendStyledSnapshotRow(
-        StringBuilder builder,
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        in TerminalSnapshotExportOptions options,
-        ref SnapshotCellStyleKey? currentStyle,
-        ref int currentHyperlink)
-    {
-        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
-        if (exportEnd < startColumn)
-        {
-            return;
-        }
-
-        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
-        {
-            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
-            if (cell.Width == 0 || cell.IsWideSpacerHead)
-            {
-                continue;
-            }
-
-            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
-            if (text.Length == 0)
-            {
-                continue;
-            }
-
-            int desiredHyperlink = options.Extras.IncludeHyperlinks ? cell.HyperlinkId : 0;
-            if (currentHyperlink != desiredHyperlink)
-            {
-                CloseStyledHyperlink(builder, ref currentHyperlink);
-                if (desiredHyperlink != 0)
-                {
-                    AppendStyledHyperlink(builder, desiredHyperlink);
-                    currentHyperlink = desiredHyperlink;
-                }
-            }
-
-            SnapshotCellStyleKey style = CreateSnapshotStyleKey(cell);
-            if (currentStyle is null || currentStyle.Value != style)
-            {
-                ManagedSgrFormatter.Append(builder, cell);
-                currentStyle = style;
-            }
-
-            builder.Append(text);
-        }
-    }
-
-    private void AppendHtmlSnapshotRow(
-        StringBuilder builder,
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        in TerminalSnapshotExportOptions options)
-    {
-        int exportEnd = GetSnapshotRowEndColumn(row, startColumn, endColumn, options.TrimTrailingWhitespace, visual: true);
-        if (exportEnd < startColumn)
-        {
-            return;
-        }
-
-        for (int col = Math.Max(0, startColumn); col <= exportEnd; col++)
-        {
-            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
-            if (cell.Width == 0 || cell.IsWideSpacerHead)
-            {
-                continue;
-            }
-
-            string text = GetSnapshotCellText(cell, preserveEmptyCells: true);
-            if (text.Length == 0)
-            {
-                continue;
-            }
-
-            string encodedText = WebUtility.HtmlEncode(text);
-            string style = BuildHtmlCellStyle(cell);
-            string? hyperlink = ResolveSnapshotHyperlink(cell, options.Extras.IncludeHyperlinks);
-
-            if (!string.IsNullOrEmpty(hyperlink))
-            {
-                builder.Append("<a href=\"")
-                    .Append(WebUtility.HtmlEncode(hyperlink))
-                    .Append("\" style=\"color:inherit;text-decoration:inherit;\">");
-            }
-
-            if (style.Length > 0)
-            {
-                builder.Append("<span style=\"")
-                    .Append(style)
-                    .Append("\">");
-            }
-
-            builder.Append(encodedText);
-
-            if (style.Length > 0)
-            {
-                builder.Append("</span>");
-            }
-
-            if (!string.IsNullOrEmpty(hyperlink))
-            {
-                builder.Append("</a>");
-            }
-        }
-    }
-
-    private int GetSnapshotRowEndColumn(
-        TerminalRow row,
-        int startColumn,
-        int endColumn,
-        bool trimTrailingWhitespace,
-        bool visual)
-    {
-        int clampedStart = Math.Max(0, startColumn);
-        int clampedEnd = Math.Min(row.Columns - 1, endColumn);
-        if (clampedEnd < clampedStart || !trimTrailingWhitespace)
-        {
-            return clampedEnd;
-        }
-
-        for (int col = clampedEnd; col >= clampedStart; col--)
-        {
-            ref readonly TerminalCell cell = ref row.ReadOnlyCells[col];
-            if (cell.Width == 0 || cell.IsWideSpacerHead)
-            {
-                continue;
-            }
-
-            if (visual ? IsVisualSnapshotCell(cell) : IsPlainSnapshotCell(cell))
-            {
-                return col;
-            }
-        }
-
-        return clampedStart - 1;
-    }
-
-    private int GetSnapshotLastRowIndex(bool visual)
-    {
-        for (int rowIndex = _screen.TotalRows - 1; rowIndex >= 0; rowIndex--)
-        {
-            TerminalRow row = _screen.GetRow(rowIndex);
-            if (GetSnapshotRowEndColumn(row, 0, row.Columns - 1, trimTrailingWhitespace: true, visual) >= 0)
-            {
-                return rowIndex;
-            }
-        }
-
-        return -1;
-    }
-
-    private static bool IsPlainSnapshotCell(TerminalCell cell)
-    {
-        if (!cell.HasContent)
-        {
-            return false;
-        }
-
-        string text = GetSnapshotCellText(cell, preserveEmptyCells: false);
-        return !string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(text);
-    }
-
-    private bool IsVisualSnapshotCell(TerminalCell cell)
-    {
-        if (cell.HasContent || cell.HyperlinkId > 0)
-        {
-            return true;
-        }
-
-        if (cell.Attributes != CellAttributes.None ||
-            cell.UnderlineStyle != TerminalUnderlineStyle.None ||
-            cell.HasUnderlineColor ||
-            cell.Decorations != CellDecorations.None)
-        {
-            return true;
-        }
-
-        return cell.Foreground != _screen.DefaultForeground ||
-               cell.Background != _screen.DefaultBackground ||
-               !cell.HasBackground;
-    }
-
-    private static string GetSnapshotCellText(TerminalCell cell, bool preserveEmptyCells)
-    {
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            return cell.Grapheme;
-        }
-
-        if (cell.Codepoint != 0 && Rune.IsValid(cell.Codepoint))
-        {
-            return char.ConvertFromUtf32(cell.Codepoint);
-        }
-
-        return preserveEmptyCells ? " " : string.Empty;
-    }
-
-    private string? ResolveSnapshotHyperlink(TerminalCell cell, bool includeHyperlinks)
-    {
-        if (!includeHyperlinks || cell.HyperlinkId <= 0)
-        {
-            return null;
-        }
-
-        return _screen.TryGetHyperlinkUrl(cell.HyperlinkId, out string? url)
-            ? url
-            : null;
     }
 
 
@@ -1155,6 +849,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             AppendStyledHyperlink(builder, _currentHyperlinkId);
         }
+
+        if (options.Extras.IncludeProtection)
+        {
+            // Restore both the active pen and the last protection family: ISO
+            // protection affects ordinary erase even after EPA clears the pen.
+            builder.Append(ProtectionMode == CharacterProtectionMode.Iso ? "\x1bV" : "\x1b[1\"q");
+            if (!_currentProtected) builder.Append("\x1b[0\"q");
+        }
     }
 
     private void AppendCursorSnapshot(StringBuilder builder, in TerminalSnapshotExportOptions options)
@@ -1162,7 +864,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int cursorColumn = _cursorCol;
         TerminalRow row = _screen.GetRow(Math.Max(0, _screen.TotalRows - _screen.ViewportRows) + _cursorRow);
         bool restoreWrap = _delayedWrap && cursorColumn == CursorRightLimit;
-        if (restoreWrap && cursorColumn > 0 && row[cursorColumn].Width == 0 && row[cursorColumn - 1].Width == 2)
+        if (restoreWrap && cursorColumn > 0 && row.ReadOnlyCells[cursorColumn].Width == 0 && row.ReadOnlyCells[cursorColumn - 1].Width == 2)
         {
             cursorColumn--;
         }
@@ -1181,11 +883,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // CUP clears pending wrap; printing the complete edge cell restores it,
         // including wide characters and graphemes, using normal parser behavior.
         builder.Append("\x1b(B\x0F");
-        SnapshotCellStyleKey? style = null;
-        int hyperlink = 0;
-        AppendStyledSnapshotRow(builder, row, cursorColumn, CursorRightLimit,
-            options with { TrimTrailingWhitespace = false }, ref style, ref hyperlink);
-        CloseStyledHyperlink(builder, ref hyperlink);
+        ManagedRichTextFormatter.AppendVtCell(_screen, builder, row.ReadOnlyCells[cursorColumn], options.Extras);
     }
 
     private void AppendPaletteSnapshot(StringBuilder builder)
@@ -1284,118 +982,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         builder.Append("\x1b[H");
     }
 
-    private string BuildHtmlCellStyle(TerminalCell cell)
-    {
-        StringBuilder builder = new();
-
-        GetEffectiveHtmlColors(cell, out uint foreground, out uint background);
-        builder.Append("color:")
-            .Append(ToCssColor(foreground))
-            .Append(';');
-
-        if (cell.HasBackground || background != _screen.DefaultBackground || (cell.Attributes & CellAttributes.Inverse) != 0)
-        {
-            builder.Append("background-color:")
-                .Append(ToCssColor(background))
-                .Append(';');
-        }
-
-        if ((cell.Attributes & CellAttributes.Bold) != 0)
-        {
-            builder.Append("font-weight:bold;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Italic) != 0)
-        {
-            builder.Append("font-style:italic;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Dim) != 0)
-        {
-            builder.Append("opacity:0.7;");
-        }
-
-        if ((cell.Attributes & CellAttributes.Hidden) != 0)
-        {
-            builder.Append("visibility:hidden;");
-        }
-
-        AppendHtmlTextDecorations(builder, cell);
-        return builder.ToString();
-    }
-
-    private void AppendHtmlTextDecorations(StringBuilder builder, TerminalCell cell)
-    {
-        List<string> lines = [];
-        TerminalUnderlineStyle underlineStyle = GetEffectiveUnderlineStyle(cell);
-        if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            lines.Add("underline");
-        }
-
-        if ((cell.Attributes & CellAttributes.Strikethrough) != 0)
-        {
-            lines.Add("line-through");
-        }
-
-        if ((cell.Decorations & CellDecorations.Overline) != 0)
-        {
-            lines.Add("overline");
-        }
-
-        if (lines.Count == 0)
-        {
-            return;
-        }
-
-        builder.Append("text-decoration-line:")
-            .Append(string.Join(' ', lines))
-            .Append(';');
-
-        if (underlineStyle != TerminalUnderlineStyle.None)
-        {
-            builder.Append("text-decoration-style:")
-                .Append(underlineStyle switch
-                {
-                    TerminalUnderlineStyle.Double => "double",
-                    TerminalUnderlineStyle.Curly => "wavy",
-                    TerminalUnderlineStyle.Dotted => "dotted",
-                    TerminalUnderlineStyle.Dashed => "dashed",
-                    _ => "solid",
-                })
-                .Append(';');
-        }
-
-        if (cell.HasUnderlineColor)
-        {
-            builder.Append("text-decoration-color:")
-                .Append(ToCssColor(cell.UnderlineColor))
-                .Append(';');
-        }
-    }
-
-    private void GetEffectiveHtmlColors(TerminalCell cell, out uint foreground, out uint background)
-    {
-        foreground = cell.Foreground;
-        background = cell.HasBackground ? cell.Background : _screen.DefaultBackground;
-
-        if ((cell.Attributes & CellAttributes.Inverse) != 0)
-        {
-            (foreground, background) = (background, foreground);
-        }
-    }
-
-    private static TerminalUnderlineStyle GetEffectiveUnderlineStyle(TerminalCell cell)
-    {
-        if (cell.UnderlineStyle != TerminalUnderlineStyle.None)
-        {
-            return cell.UnderlineStyle;
-        }
-
-        return (cell.Attributes & CellAttributes.Underline) != 0
-            ? TerminalUnderlineStyle.Single
-            : TerminalUnderlineStyle.None;
-    }
 
     private void AppendStyledHyperlink(StringBuilder builder, int token)
     {
@@ -1407,34 +993,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         builder.Append("\x1b\\");
     }
 
-    private static void CloseStyledHyperlink(StringBuilder builder, ref int currentHyperlink)
-    {
-        if (currentHyperlink == 0)
-        {
-            return;
-        }
-
-        builder.Append("\x1b]8;;\x1b\\");
-        currentHyperlink = 0;
-    }
-
-
-    private static string ToCssColor(uint argb)
-    {
-        return string.Create(
-            7,
-            argb,
-            static (span, color) =>
-            {
-                span[0] = '#';
-                byte r = (byte)((color >> 16) & 0xFF);
-                byte g = (byte)((color >> 8) & 0xFF);
-                byte b = (byte)(color & 0xFF);
-                r.TryFormat(span[1..3], out _, "X2", CultureInfo.InvariantCulture);
-                g.TryFormat(span[3..5], out _, "X2", CultureInfo.InvariantCulture);
-                b.TryFormat(span[5..7], out _, "X2", CultureInfo.InvariantCulture);
-            });
-    }
 
     private static string ToOscRgb(uint argb)
     {
@@ -1458,34 +1016,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             });
     }
 
-    private readonly record struct SnapshotCellStyleKey(
-        TerminalColorIdentity ForegroundIdentity,
-        TerminalColorIdentity BackgroundIdentity,
-        TerminalColorIdentity UnderlineIdentity,
-        uint Foreground,
-        uint Background,
-        CellAttributes Attributes,
-        TerminalUnderlineStyle UnderlineStyle,
-        uint UnderlineColor,
-        bool HasUnderlineColor,
-        CellDecorations Decorations,
-        bool HasBackground);
-
-    private static SnapshotCellStyleKey CreateSnapshotStyleKey(TerminalCell cell)
-    {
-        return new SnapshotCellStyleKey(
-            cell.ForegroundIdentity,
-            cell.BackgroundIdentity,
-            cell.UnderlineIdentity,
-            cell.Foreground,
-            cell.Background,
-            cell.Attributes,
-            cell.UnderlineStyle,
-            cell.UnderlineColor,
-            cell.HasUnderlineColor,
-            cell.Decorations,
-            cell.HasBackground);
-    }
 
     private void EnterCsiState()
     {
@@ -5399,6 +4929,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
+        _backgroundSearch?.Dispose();
+        _search.Reset();
         EndRenderHold();
     }
 
@@ -5407,19 +4939,27 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         get
         {
-            if (_renderHold is { } hold)
-                return ClampRefreshDelay(TimeSpan.FromSeconds(1) -
-                    _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp));
-            return _animationNextTickDelay is TimeSpan next
-                ? ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp))
+            TimeSpan? delay = _renderHold is { } hold
+                ? ClampRefreshDelay(TimeSpan.FromSeconds(1) - _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
                 : null;
+            if (_animationNextTickDelay is TimeSpan next)
+            {
+                TimeSpan animation = ClampRefreshDelay(next - _options.TimeProvider.GetElapsedTime(_animationTickTimestamp));
+                if (delay is null || animation < delay) delay = animation;
+            }
+            if (_backgroundSearch is { NeedsRefresh: true })
+            {
+                TimeSpan search = TimeSpan.FromMilliseconds(24);
+                if (delay is null || search < delay) delay = search;
+            }
+            return delay;
         }
     }
 
     /// <inheritdoc />
     public bool RefreshTimedState()
     {
-        bool changed = false;
+        bool changed = _backgroundSearch?.TakeChanged() ?? false;
         if (_renderHold is { } hold &&
             _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))
         {
