@@ -4990,7 +4990,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     reflowOnResize && _autoWrap && !alternateScreen,
                     new TerminalGridPosition(resizeCursorCol, _cursorRow),
                     trackedAbsolutePositions,
-                    preserveViewportTopOnRowsIncrease && !alternateScreen);
+                    preserveViewportTopOnRowsIncrease && !alternateScreen,
+                    preserveVtCursorOnResize: _options.ResizePullScrollback &&
+                        !alternateScreen && !preserveViewportTopOnRowsIncrease);
 
                 if (discardHiddenCells) _screen.DiscardHiddenCells();
                 if (activeTopAnchor is not null && _screen.TryResolveAnchor(activeTopAnchor, out TerminalGridPosition activeTop))

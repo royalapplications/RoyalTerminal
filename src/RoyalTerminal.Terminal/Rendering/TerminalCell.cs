@@ -2074,6 +2074,17 @@ public sealed partial class TerminalScreen
         TerminalGridPosition? trackedViewportPosition,
         Span<TerminalGridPosition> trackedAbsolutePositions,
         bool preserveViewportTopOnRowsIncrease = false)
+        => Resize(columns, viewportRows, reflowOnResize, trackedViewportPosition,
+            trackedAbsolutePositions, preserveViewportTopOnRowsIncrease, preserveVtCursorOnResize: false);
+
+    internal TerminalGridPosition Resize(
+        int columns,
+        int viewportRows,
+        bool reflowOnResize,
+        TerminalGridPosition? trackedViewportPosition,
+        Span<TerminalGridPosition> trackedAbsolutePositions,
+        bool preserveViewportTopOnRowsIncrease,
+        bool preserveVtCursorOnResize)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
@@ -2163,6 +2174,10 @@ public sealed partial class TerminalScreen
             : 0;
         int mappedAbsoluteRow = trackedAbsoluteRow;
         int mappedColumn = Math.Clamp(trackedColumn, 0, columns);
+        // Ghostty grows below a non-bottom cursor rather than pulling history.
+        // Follow the same height-before-narrowing / height-after-widening order.
+        int vtRowsToAppend = preserveVtCursorOnResize && trackedViewportPosition is { } vtCursor &&
+            vtCursor.Row < oldViewportRows - 1 ? Math.Max(0, viewportRows - oldViewportRows) : 0;
 
         // PageList.resize shrinks height before narrower-column REFLOW. The
         // no-reflow path always changes columns first: truncation can make a
@@ -2172,11 +2187,16 @@ public sealed partial class TerminalScreen
         bool trimBeforeColumns = reflowOnResize && columns < oldColumns;
         if (trimBottom && trimBeforeColumns)
             TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, trackedAbsoluteRow);
+        if (trimBeforeColumns) AppendBlankResizeRows(vtRowsToAppend, oldColumns);
 
         if (columns != oldColumns)
         {
             if (reflowOnResize)
             {
+                int reflowViewportRows = columns < oldColumns ? viewportRows : oldViewportRows;
+                ReflowCursorPadding? cursorPadding = preserveVtCursorOnResize && trackedViewportPosition.HasValue
+                    ? CaptureReflowCursorPadding(trackedAbsoluteRow, trackedViewportPosition.Value.Row, reflowViewportRows)
+                    : null;
                 ReflowRows(
                     columns,
                     trackedAbsoluteRow,
@@ -2185,6 +2205,8 @@ public sealed partial class TerminalScreen
                     trimTrailingBlankRows: !preserveViewportTopOnRowsIncrease,
                     out mappedAbsoluteRow,
                     out mappedColumn);
+                if (cursorPadding is { } padding)
+                    RestoreReflowCursorPadding(padding, mappedAbsoluteRow, reflowViewportRows, columns);
             }
             else
             {
@@ -2192,6 +2214,7 @@ public sealed partial class TerminalScreen
             }
         }
 
+        if (!trimBeforeColumns) AppendBlankResizeRows(vtRowsToAppend, columns);
         if (trimBottom && !trimBeforeColumns)
             TrimUnpinnedBlankRowsForHeightShrink(oldViewportRows - viewportRows, mappedAbsoluteRow, reflowAnchors);
 

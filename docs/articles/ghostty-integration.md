@@ -160,6 +160,16 @@ the differential regression checks identical cursor/link state, exactly one mana
 live link and the specific native capacity divergence in both active-buffer orders.
 This is not exact allocation-history parity and does not change the native dependency.
 
+When scrollback pulling is enabled, managed VT reflow also preserves Ghostty's
+active-row space below the cursor, discounting new wrap continuations above it.
+Narrowing applies the new height before reflow; widening applies it afterward.
+Height growth pads below a non-bottom cursor instead of pulling history into view.
+This follows `PageList.resizeCols`'s `preserved_cursor` policy, not Windows
+Terminal's fixed-buffer cursor mapping or xterm.js's `ybase`/cursor-line policy.
+Generic screen-only resizing and explicit ConPTY viewport preservation are unchanged.
+Differential coverage exercises both pull-scrollback settings, live and restored
+screens, wrapped cursors, mixed width/height changes, writes and resize round trips.
+
 Screen-switch cursor copies now have their own failure boundary. If installing
 the entering style at the dormant destination fails, the destination keeps its
 position, pending wrap, pen, protection, cursor shape, semantic state and implicit

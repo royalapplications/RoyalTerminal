@@ -152,12 +152,18 @@ public sealed class ManagedSnapshotReflowStyleTests
         Assert.True(terminal.Screen.SnapshotCursorStyleIsCurrent(1, 0, new(default, default, default, 2)));
     }
 
-    [Fact]
-    public void ReflowGrowthAndContinuationMatchNativeAcrossRepeatedResizes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReflowGrowthAndContinuationMatchNativeAcrossRepeatedResizes(bool pullScrollback)
     {
         RequireNative();
         using GhosttyTerminal native = GhosttySnapshot.Decode(PressureSnapshot());
-        using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(PressureSnapshot());
+        native.SetResizePullScrollback(pullScrollback);
+        using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(PressureSnapshot(), new()
+        {
+            ProcessorOptions = new() { ResizePullScrollback = pullScrollback },
+        });
         int alignment = OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16384 : 4096;
         managed.Screen.SnapshotScrollbackQuota = new() { PageAlignment = alignment };
         foreach (ushort columns in new ushort[] { 8, 3, 9 })
@@ -174,7 +180,7 @@ public sealed class ManagedSnapshotReflowStyleTests
             int count = 0;
             foreach (GhosttySnapshotPage page in expected.Pages) count += page.Grid.Rows;
             int index = rows.Count - count;
-            Assert.True(index >= 0);
+            Assert.True(index >= 0, $"Resize to {columns}: managed rows {rows.Count}, native READY rows {count}; pull={pullScrollback}");
             foreach (GhosttySnapshotPage page in expected.Pages)
             foreach (TerminalRow referenceRow in GhosttySnapshotLivePage.Decode(page, new TerminalScreen(columns, 4)))
             {

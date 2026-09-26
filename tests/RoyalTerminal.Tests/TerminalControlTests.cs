@@ -2841,6 +2841,10 @@ public class TerminalControlTests
         control.AutoScroll = true;
         control.ReflowOnResize = true;
 
+        // Setup size changes can retain blank history. Establish the intended
+        // non-scrollable starting state explicitly; growing below a non-bottom
+        // cursor now follows Ghostty and does not pull that history into view.
+        control.WriteOutput("\u001b[3J"u8.ToArray());
         control.WriteOutput(Encoding.UTF8.GetBytes(
             "line-00\r\nline-01\r\nline-02\r\nline-03\r\nline-04\r\nline-05\r\nPROMPT"));
 
