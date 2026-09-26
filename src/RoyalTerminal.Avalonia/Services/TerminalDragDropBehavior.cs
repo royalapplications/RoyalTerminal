@@ -31,22 +31,28 @@ internal sealed class TerminalDragDropBehavior
     private void Move(object? sender, DragEventArgs e)
     {
         if (_control.Screen is not { } screen || _control.ActiveVtProcessor is not ITerminalDragDropTarget target) return;
+        long session = _control.DropSessionGeneration;
+        lock (screen.SyncRoot) { if (!target.IsDropRegistered) return; }
+        e.Handled = true;
+        DragDropEffects allowed = e.DragEffects;
+        e.DragEffects = DragDropEffects.None;
         byte[] response = [];
-        lock (screen.SyncRoot)
+        try
         {
-            if (!target.IsDropRegistered) return; // Unregistered drops remain available to the embedding app.
-            e.Handled = true;
-            DragDropEffects allowed = e.DragEffects;
-            e.DragEffects = DragDropEffects.None;
-            try
+            CacheFormats(e.DataTransfer);
+            lock (screen.SyncRoot)
             {
-                CacheFormats(e.DataTransfer);
+                if (!ReferenceEquals(_control.ActiveVtProcessor, target) || session != _control.DropSessionGeneration || !target.IsDropRegistered) return;
                 if (_formats.Length == 0 || (allowed & DragDropEffects.Copy) == 0) { target.CancelDrop(); return; }
                 response = target.DragMove(Position(e), _mimeTypes);
                 TerminalDropOperation? accepted = target.AcceptedDropOperation;
                 if (accepted is null or TerminalDropOperation.Copy) e.DragEffects = DragDropEffects.Copy;
             }
-            catch (Exception error) when (IsRecoverable(error)) { target.CancelDrop(); ClearCache(); }
+        }
+        catch (Exception error) when (IsRecoverable(error))
+        {
+            lock (screen.SyncRoot) if (ReferenceEquals(_control.ActiveVtProcessor, target) && session == _control.DropSessionGeneration) target.CancelDrop();
+            ClearCache();
         }
         if (response.Length > 0) _control.SendInput(response);
     }

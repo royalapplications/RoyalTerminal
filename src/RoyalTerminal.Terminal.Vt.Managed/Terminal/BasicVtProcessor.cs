@@ -2005,6 +2005,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (rawPayload.StartsWith("72;"u8))
         {
             (_dragDrop ??= new()).Handle(rawPayload[3..], bellTerminator, ResponseCallback);
+            if (!_dragDrop.IsDropRegistered) _dragDrop = null;
             _oscBuffer.Clear();
             return;
         }
