@@ -18,7 +18,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         internal GhosttySnapshotPageStorage Storage = storage;
         // Keys also own occupied row slots. Null means the cells still need
         // reconciliation, not that the slot is available for another row.
-        internal readonly Dictionary<int, ulong?> Revisions = [];
+        internal Dictionary<int, ulong?> Revisions = [];
         internal int NextRowSlot;
         internal bool Shared;
         internal State Copy()
@@ -133,10 +133,11 @@ internal sealed partial class GhosttySnapshotPageTracker
         return replacement;
     }
 
-    internal void ChangeCursor(TerminalRowBuffer rows, int key, TerminalRow cursorRow,
-        GhosttySnapshotStyle previousPen, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout, TerminalScreen? screen = null)
+    internal bool ChangeCursor(TerminalRowBuffer rows, int key, TerminalRow cursorRow,
+        GhosttySnapshotStyle previousPen, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout,
+        TerminalScreen screen, ref uint hyperlinkCounter)
     {
-        if (cursorRow.SnapshotAllocation is not { } page || page.MetadataOverflow) return;
+        if (cursorRow.SnapshotAllocation is not { } page || page.MetadataOverflow) return true;
         GhosttySnapshotPageAllocation? departing = key == 0 ? _primaryCursor : _alternateCursor;
         if (departing is not null && !ReferenceEquals(departing, page) && _pages.TryGetValue(departing, out _))
         {
@@ -151,11 +152,13 @@ internal sealed partial class GhosttySnapshotPageTracker
 
         List<TerminalRow> group = Group(rows, page);
         State state = Writable(page, group);
-        if (!Synchronize(ref page, state, group, layout, screen)) return;
+        if (!Synchronize(ref page, state, group, layout, screen)) return false;
+        bool success = true;
         if (departing is null || !ReferenceEquals(departing, page))
-            if (!SetPen(ref page, state, group, previousPen, layout)) return;
-        _ = SetPen(ref page, state, group, pen, layout);
+            success = SetPen(ref page, ref state, ref group, previousPen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
+        if (success) success = SetPen(ref page, ref state, ref group, pen, layout, rows, cursorRow, key, screen, ref hyperlinkCounter);
         if (key == 0) _primaryCursor = page; else _alternateCursor = page;
+        return success;
     }
 
     private State Writable(GhosttySnapshotPageAllocation page, List<TerminalRow> rows)
@@ -230,13 +233,37 @@ internal sealed partial class GhosttySnapshotPageTracker
         return true;
     }
 
-    private bool SetPen(ref GhosttySnapshotPageAllocation page, State state,
-        List<TerminalRow> group, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout)
+    private bool SetPen(ref GhosttySnapshotPageAllocation page, ref State state,
+        ref List<TerminalRow> group, GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout,
+        TerminalRowBuffer rows, TerminalRow cursorRow, int key, TerminalScreen screen, ref uint hyperlinkCounter)
     {
         GhosttySnapshotSetAddResult result = state.Storage.Styles.ChangeCursor(pen);
         if (result == GhosttySnapshotSetAddResult.Success) return true;
-        if (!Grow(ref page, state, group, result, layout)) return false;
-        return state.Storage.Styles.ChangeCursor(pen) == GhosttySnapshotSetAddResult.Success || Overflow(ref page, state, group);
+        if (result == GhosttySnapshotSetAddResult.OutOfMemory &&
+            !layout.TryIncreaseCapacity(page.Capacity, GhosttySnapshotCapacityDimension.Styles,
+                (ulong)state.Storage.Styles.Count, group.Count, out _))
+        {
+            // Only cursor-style OutOfSpace invokes Screen.splitForCapacity.
+            // Grapheme/string allocation errors are not arbitrary split points.
+            if (!SplitForCapacity(ref page, ref state, ref group, cursorRow, layout))
+                return false;
+            if (key == 0) _primaryCursor = page; else _alternateCursor = page;
+            // cursorChangePin migrates a surviving link BEFORE retrying the
+            // failed style (its old cursor style reference is already zero).
+            _ = ChangeHyperlink(screen, rows, key, cursorRow, CursorHyperlinkToken(key, 0),
+                ref hyperlinkCounter, restart: false, layout);
+            page = cursorRow.SnapshotAllocation!;
+            group = Group(rows, page);
+            state = Writable(page, group);
+            return state.Storage.Styles.ChangeCursor(pen) == GhosttySnapshotSetAddResult.Success;
+        }
+        // A refused cursor style is not an unrepresentable page: no cell was
+        // written and ChangeCursor already released the failed reference. Let
+        // the caller apply SGR rollback or cursor-restore default degradation.
+        if (!GrowMetadata(ref page, state, group,
+            result == GhosttySnapshotSetAddResult.OutOfMemory ? GhosttySnapshotCapacityDimension.Styles : null,
+            layout, preserveOnFailure: true)) return false;
+        return state.Storage.Styles.ChangeCursor(pen) == GhosttySnapshotSetAddResult.Success;
     }
 
     private bool Grow(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group,
@@ -261,14 +288,20 @@ internal sealed partial class GhosttySnapshotPageTracker
     }
 
     private bool GrowMetadata(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group,
-        GhosttySnapshotCapacityDimension? dimension, GhosttySnapshotAllocation layout)
+        GhosttySnapshotCapacityDimension? dimension, GhosttySnapshotAllocation layout, bool preserveOnFailure = false)
     {
         GhosttySnapshotPageCapacity capacity = page.Capacity;
         ulong used = state.Storage.Usage(dimension);
         if (dimension is { } growth && !layout.TryIncreaseCapacity(capacity, growth, used, group.Count, out capacity))
-            return Overflow(ref page, state, group);
+        {
+            if (!preserveOnFailure) Overflow(ref page, state, group);
+            return false;
+        }
         if (!state.Storage.Rebuild(capacity, restoreCursor: true, out GhosttySnapshotPageStorage? rebuilt))
-            return Overflow(ref page, state, group);
+        {
+            if (!preserveOnFailure) Overflow(ref page, state, group);
+            return false;
+        }
         state.Storage = rebuilt!;
         Replace(ref page, new(capacity, rebuilt!.Styles.Copy(), restoredGraphemes: rebuilt.Graphemes.Copy(),
             restoredHyperlinks: rebuilt.Hyperlinks.Copy()), state, group);
@@ -277,8 +310,9 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     private bool Overflow(ref GhosttySnapshotPageAllocation page, State state, List<TerminalRow> group)
     {
-        // Do not wrap a capacity or undercharge history while pressure-driven
-        // page splitting is still unimplemented. Rendering remains independent.
+        // Do not wrap a capacity or undercharge history on an unrepresentable
+        // mutation. Cursor-style pressure tries native splitting first; other
+        // overflow/degradation paths still need the complete mutation audit.
         Replace(ref page, new(page.Capacity, state.Storage.Styles.Copy(), metadataOverflow: true,
             restoredGraphemes: state.Storage.Graphemes.Copy(), restoredHyperlinks: state.Storage.Hyperlinks.Copy()), state, group);
         return false;

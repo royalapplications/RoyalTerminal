@@ -166,7 +166,8 @@ public sealed class ManagedSnapshotCursorAllocationTests
         TerminalRowBuffer rows = new(1);
         rows.Add(row);
         GhosttySnapshotStyle bold = new(default, default, default, 1);
-        tracker.ChangeCursor(rows, 1, row, default, bold, new(4096));
+        uint counter = 0;
+        Assert.True(tracker.ChangeCursor(rows, 1, row, default, bold, new(4096), new(4, 1), ref counter));
         GhosttySnapshotPageTracker retained = tracker.Copy();
         tracker.DiscardCursor(1);
         Assert.False(tracker.IsCurrent(1, row, bold));

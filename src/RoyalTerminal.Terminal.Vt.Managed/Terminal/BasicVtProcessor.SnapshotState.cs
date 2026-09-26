@@ -83,8 +83,8 @@ public sealed partial class BasicVtProcessor
         int row = Math.Min(state.CursorY, _screen.ViewportRows - 1);
         TerminalRow cursorRow = rows[rows.Count - _screen.ViewportRows + row];
         (int x, int y, bool wrap) = state.GetCursorPosition(cursorRow.Columns, _screen.ViewportRows);
-        TerminalCell pen = GhosttySnapshotLivePage.DecodeStyle(state.Pen, _theme);
-        _screen.SnapshotStyleChanged(state.Key, row, default, state.Pen);
+        GhosttySnapshotStyle restoredPen = ChangeSnapshotStyle(state.Key, row, default, state.Pen);
+        TerminalCell pen = GhosttySnapshotLivePage.DecodeStyle(restoredPen, _theme);
         SavedCursorState? saved = DecodeSnapshotSavedCursor(state.SavedCursor);
         ManagedCharsetState charset = ManagedCharsetState.FromSnapshot(state.Charset);
         SemanticPen semantic = new() { Content = (TerminalSemanticContent)state.SemanticContent, ClearAtEndOfLine = state.SemanticContentClearEol };
@@ -124,14 +124,14 @@ public sealed partial class BasicVtProcessor
         int linkToken = state.TryGetHyperlink(out GhosttySnapshotHyperlink link)
             ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId) : 0;
         ref uint counter = ref (state.Key == 0 ? ref _primaryHyperlinkImplicitCounter : ref _alternateHyperlinkImplicitCounter);
-        linkToken = _screen.SnapshotHyperlinkChanged(state.Key, row, state.Pen, linkToken, ref counter, restart: true);
+        linkToken = _screen.SnapshotHyperlinkChanged(state.Key, row, restoredPen, linkToken, ref counter, restart: true);
         if (state.Key == 0)
         {
-            _snapshotPrimaryPen = state.Pen; _snapshotPrimaryProtected = state.Protected; _snapshotPrimaryHyperlink = linkToken;
+            _snapshotPrimaryPen = restoredPen; _snapshotPrimaryProtected = state.Protected; _snapshotPrimaryHyperlink = linkToken;
         }
         else
         {
-            _snapshotAlternatePen = state.Pen; _snapshotAlternateProtected = state.Protected; _snapshotAlternateHyperlink = linkToken;
+            _snapshotAlternatePen = restoredPen; _snapshotAlternateProtected = state.Protected; _snapshotAlternateHyperlink = linkToken;
         }
         if ((state.Key == 1) != _inAltScreen) return;
         (_cursorCol, _cursorRow, _delayedWrap) = (x, y, wrap);

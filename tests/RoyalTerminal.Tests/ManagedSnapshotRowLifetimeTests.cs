@@ -193,7 +193,8 @@ public sealed class ManagedSnapshotRowLifetimeTests
         TerminalRowBuffer rows = screen.GetSnapshotRows(0)!;
         GhosttySnapshotPageTracker tracker = new();
         GhosttySnapshotStyle bold = new(default, default, default, 1);
-        tracker.ChangeCursor(rows, 0, rows[0], default, bold, new(4096));
+        uint counter = 0;
+        Assert.True(tracker.ChangeCursor(rows, 0, rows[0], default, bold, new(4096), screen, ref counter));
         tracker.RetireRows(rows, 0, 1);
         rows.RemoveFirst();
         Assert.True(tracker.IsCurrent(0, rows[0], bold));

@@ -3950,7 +3950,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // cursorCopy loads the entering style at the dormant cursor's page
         // before moving to the copied position. Preserve that allocation event.
         if (_screen.TracksSnapshotMetadata)
-            _screen.SnapshotStyleChanged(1, _savedAlternateCursorRow, _snapshotAlternatePen, CaptureSnapshotPen());
+            ChangeSnapshotStyle(1, _savedAlternateCursorRow, _snapshotAlternatePen, CaptureSnapshotPen());
 
         // Scrolling margins are terminal-wide and survive screen switches.
     }
@@ -3998,7 +3998,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _currentProtected = _snapshotPrimaryProtected;
         }
         else if (_screen.TracksSnapshotMetadata)
-            _screen.SnapshotStyleChanged(0, _savedMainCursorRow, _snapshotPrimaryPen, CaptureSnapshotPen());
+            ChangeSnapshotStyle(0, _savedMainCursorRow, _snapshotPrimaryPen, CaptureSnapshotPen());
 
         // Scrolling margins are terminal-wide and survive screen switches.
 
@@ -4107,7 +4107,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void RecordSnapshotPenChange(GhosttySnapshotStyle previous)
     {
         GhosttySnapshotStyle current = CaptureSnapshotPen();
-        if (previous != current) _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, previous, current);
+        if (previous != current) ChangeSnapshotStyle(_inAltScreen ? 1 : 0, _cursorRow, previous, current, restorePreviousOnFailure: true);
     }
 
     private void ResetAttributes()
@@ -4999,6 +4999,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // fresh identity even on height-only/reserved-width resizes.
             int hyperlink = cursorLease is not null ? cursorLease.Complete(_cursorRow, ref hyperlinkCounter)
                 : _screen.RestoreSnapshotResizeCursor(key, _cursorRow, resizePen, resizeHyperlink, ref hyperlinkCounter);
+            if (!_screen.SnapshotCursorStyleIsCurrent(key, _cursorRow, resizePen))
+            {
+                // The inactive-buffer resize borrows cursor coordinates, not
+                // the active processor pen. Update only its dormant register.
+                if (snapshotPen.HasValue)
+                {
+                    if (key == 0) _snapshotPrimaryPen = default;
+                    else _snapshotAlternatePen = default;
+                }
+                else ResetAttributes();
+            }
             ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateCursor : ManagedResizeCheckpoint.PrimaryCursor);
             return hyperlink;
         }

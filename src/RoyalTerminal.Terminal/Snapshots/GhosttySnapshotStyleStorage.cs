@@ -283,7 +283,7 @@ internal sealed class GhosttySnapshotStyleStorage
         }
     }
 
-    private int CellId(int index) => _cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)
+    internal int CellId(int index) => _cells.TryGetValue(index >> ChunkShift, out CellChunk? chunk)
         ? chunk.Ids[index & (ChunkSize - 1)] : 0;
 
     private void StoreCell(int index, int id)

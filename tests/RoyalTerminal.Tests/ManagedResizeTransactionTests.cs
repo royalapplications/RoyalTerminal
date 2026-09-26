@@ -83,6 +83,30 @@ public sealed class ManagedResizeTransactionTests
     }
 
     [Fact]
+    public void FailureRestoresPenRegistersAfterAStagedStyleChange()
+    {
+        TerminalScreen screen = new(8, 2) { SnapshotScrollbackQuota = new() };
+        using BasicVtProcessor processor = new(screen);
+        Write(processor, "\u001b[1;3;4:3;9;53;38;5;123;48;2;17;34;51;58;2;68;85;102mA");
+        byte[] before = processor.GetBinarySnapshot();
+        TerminalCell expected = screen.GetViewportRow(0).ReadOnlyCells[0];
+        // Exercise the pen side of rollback independently of where physical
+        // allocation fails: resize may degrade a restored pen before a later
+        // fallible stage. Mutation is confined to the staged processor state.
+        processor.ResizeCheckpoint = phase =>
+        {
+            if (phase != ManagedResizeCheckpoint.Ready) return;
+            Write(processor, "\u001b[0m");
+            throw new OutOfMemoryException("After staged pen degradation");
+        };
+        Assert.Throws<OutOfMemoryException>(() => processor.ResizeScreen(8, 2, 80, 40, false));
+        processor.ResizeCheckpoint = null;
+        Assert.Equal(before, processor.GetBinarySnapshot());
+        Write(processor, "A");
+        Assert.Equal(expected, screen.GetViewportRow(0).ReadOnlyCells[1]);
+    }
+
+    [Fact]
     public void FailurePreservesMouseMotionSuppressionAndSuccessResetsIt()
     {
         TerminalScreen screen = new(8, 2);
@@ -190,9 +214,11 @@ public sealed class ManagedResizeTransactionTests
     [Fact]
     public void FailedShrinkDoesNotRetireTheOriginalPlacement()
     {
-        TerminalScreen screen = new(8, 3);
+        TerminalScreen screen = new(8, 3, scrollbackLimit: 0);
         using BasicVtProcessor processor = new(screen);
-        Write(processor, "\u001b[3;1H\u001b_Ga=T,i=1,f=32,s=1,v=1,C=1;/wAA/w==\u001b\\\u001b[H");
+        // Keep the bottom cursor row, so shrinking a no-history screen retires
+        // the image's top row. A bottom image pin would prevent blank trimming.
+        Write(processor, "\u001b_Ga=T,i=1,f=32,s=1,v=1,C=1;/wAA/w==\u001b\\\u001b[3;1H");
         Assert.Equal(1, screen.GetKittyPlacements().Length);
         FailAt(processor, ManagedResizeCheckpoint.Graphics);
         Assert.Throws<OutOfMemoryException>(() => processor.ResizeScreen(8, 1, 80, 20, false));

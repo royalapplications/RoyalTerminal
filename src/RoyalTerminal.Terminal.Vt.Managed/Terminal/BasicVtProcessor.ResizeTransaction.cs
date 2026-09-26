@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Terminal;
 
@@ -33,6 +34,12 @@ public sealed partial class BasicVtProcessor
         private readonly SavedCursorState? _alternateSaved = owner._alternateSavedCursor;
         private readonly (int Active, int Primary, int Alternate) _links = (owner._currentHyperlinkId, owner._snapshotPrimaryHyperlink, owner._snapshotAlternateHyperlink);
         private readonly (uint Primary, uint Alternate) _counters = (owner._primaryHyperlinkImplicitCounter, owner._alternateHyperlinkImplicitCounter);
+        private readonly (GhosttySnapshotStyle Primary, GhosttySnapshotStyle Alternate) _pens = (owner._snapshotPrimaryPen, owner._snapshotAlternatePen);
+        private readonly (uint Foreground, uint Background, SgrColorKind ForegroundKind, SgrColorKind BackgroundKind, int ForegroundIndex, int BackgroundIndex) _colors =
+            (owner._currentFg, owner._currentBg, owner._currentFgKind, owner._currentBgKind, owner._currentFgPaletteIndex, owner._currentBgPaletteIndex);
+        private readonly (uint Color, TerminalColorIdentity Identity, bool HasColor, TerminalUnderlineStyle Style) _underline =
+            (owner._currentUnderlineColor, owner._currentUnderlineIdentity, owner._currentHasUnderlineColor, owner._currentUnderlineStyle);
+        private readonly (CellAttributes Attributes, CellDecorations Decorations) _attributes = (owner._currentAttrs, owner._currentDecorations);
         private readonly (int Top, int Bottom, int Left, int Right) _margins = (owner._scrollTop, owner._scrollBottom, owner._scrollLeft, owner._scrollRight);
         private readonly (uint Width, uint Height, uint CellWidth, uint CellHeight) _pixels = (owner._widthPx, owner._heightPx, owner._reportCellWidthPx, owner._reportCellHeightPx);
         private readonly TimeSpan? _animationDelay = owner._animationNextTickDelay;
@@ -52,6 +59,10 @@ public sealed partial class BasicVtProcessor
             owner._alternateSavedCursor = _alternateSaved;
             (owner._currentHyperlinkId, owner._snapshotPrimaryHyperlink, owner._snapshotAlternateHyperlink) = _links;
             (owner._primaryHyperlinkImplicitCounter, owner._alternateHyperlinkImplicitCounter) = _counters;
+            (owner._snapshotPrimaryPen, owner._snapshotAlternatePen) = _pens;
+            (owner._currentFg, owner._currentBg, owner._currentFgKind, owner._currentBgKind, owner._currentFgPaletteIndex, owner._currentBgPaletteIndex) = _colors;
+            (owner._currentUnderlineColor, owner._currentUnderlineIdentity, owner._currentHasUnderlineColor, owner._currentUnderlineStyle) = _underline;
+            (owner._currentAttrs, owner._currentDecorations) = _attributes;
             (owner._scrollTop, owner._scrollBottom, owner._scrollLeft, owner._scrollRight) = _margins;
             (owner._widthPx, owner._heightPx, owner._reportCellWidthPx, owner._reportCellHeightPx) = _pixels;
             owner._animationNextTickDelay = _animationDelay;

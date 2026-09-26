@@ -24,19 +24,25 @@ public sealed partial class TerminalScreen
             _snapshotPageTracker?.IsCurrent(key, rows[rows.Count - ViewportRows + cursorRow], pen) == true;
     }
 
-    internal void SnapshotStyleChanged(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current)
+    internal bool SnapshotStyleChanged(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current)
     {
-        if (!TracksSnapshotMetadata) return;
+        uint counter = 0;
+        return SnapshotStyleChanged(key, cursorRow, previous, current, ref counter);
+    }
+
+    internal bool SnapshotStyleChanged(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current, ref uint hyperlinkCounter)
+    {
+        if (!TracksSnapshotMetadata) return true;
         TerminalRowBuffer? rows = GetSnapshotRows(key);
-        if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return;
+        if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return true;
         int index = rows.Count - ViewportRows + cursorRow;
         TerminalRow row = rows[index];
-        if (_snapshotPageTracker?.IsCurrent(key, row, current) == true) return;
+        if (_snapshotPageTracker?.IsCurrent(key, row, current) == true) return true;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
         if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout))
             _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
-        if (!tracker.IsCurrent(key, row, current)) tracker.ChangeCursor(rows, key, row, previous, current, layout, this);
+        return tracker.IsCurrent(key, row, current) || tracker.ChangeCursor(rows, key, row, previous, current, layout, this, ref hyperlinkCounter);
     }
 
     internal GhosttySnapshotPageTracker.RowEdit EditSnapshotRowMetadata(TerminalRow row)
@@ -64,7 +70,7 @@ public sealed partial class TerminalScreen
         int token, ref uint counter, bool restart = false)
     {
         if (!TracksSnapshotMetadata) return token;
-        SnapshotStyleChanged(key, cursorRow, pen, pen);
+        SnapshotStyleChanged(key, cursorRow, pen, pen, ref counter);
         TerminalRowBuffer? rows = GetSnapshotRows(key);
         if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return token;
         return _snapshotPageTracker!.ChangeHyperlink(this, rows, key, rows[rows.Count - ViewportRows + cursorRow],
@@ -89,7 +95,7 @@ public sealed partial class TerminalScreen
 
     internal int RestoreSnapshotResizeCursor(int key, int cursorRow, GhosttySnapshotStyle pen, int token, ref uint counter)
     {
-        SnapshotStyleChanged(key, cursorRow, default, pen);
+        if (!SnapshotStyleChanged(key, cursorRow, default, pen, ref counter)) pen = default;
         // Screen.resize restarts even on a surviving page. Unlike ordinary
         // same-page motion, that consumes a new implicit identity each time.
         TerminalHyperlink? link = null;

@@ -35,8 +35,8 @@ public sealed partial class BasicVtProcessor
         GhosttySnapshotStyle pen = default;
         if (_screen.TracksSnapshotMetadata)
         {
-            pen = CaptureSnapshotPen();
-            RecordSnapshotCursorStyle(pen);
+            // Page migration may refuse the old pen; use the accepted style.
+            pen = RecordSnapshotCursorStyle(CaptureSnapshotPen());
         }
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
         if (_screen.TracksSnapshotMetadata)

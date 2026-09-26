@@ -69,7 +69,7 @@ public sealed partial class BasicVtProcessor
             _delayedWrap = _originMode = _currentProtected = false;
             _charsets = new();
             ResetAttributes();
-            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, departingRow, previous, default);
+            ChangeSnapshotStyle(_inAltScreen ? 1 : 0, departingRow, previous, default);
             return;
         }
         _cursorCol = Math.Clamp(saved.Column, 0, _screen.Columns - 1);
@@ -93,7 +93,7 @@ public sealed partial class BasicVtProcessor
         // Ghostty restoreCursor applies the saved style before cursorAbsolute.
         // Accounting at only the destination would miss growth at the old page.
         if (_screen.TracksSnapshotMetadata)
-            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, departingRow, previous, CaptureSnapshotPen());
+            ChangeSnapshotStyle(_inAltScreen ? 1 : 0, departingRow, previous, CaptureSnapshotPen());
     }
 
     // Ghostty Screen.resize temporarily tracks the saved cursor's actual cell,
