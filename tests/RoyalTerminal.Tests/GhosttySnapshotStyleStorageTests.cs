@@ -281,4 +281,65 @@ public sealed class GhosttySnapshotStyleStorageTests
         Assert.Equal(0, storage.Count);
         Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, storage.ObserveCell(0, visible, empty: false));
     }
+
+    [Fact]
+    public void ReflowRunCopyRetainsCountsAndInlineObservationsAcrossChunks()
+    {
+        GhosttySnapshotStyleStorage source = new(4), destination = new(4);
+        source.ChangeCursor(Bold);
+        for (int i = 0; i < 600; i++) source.WriteCursorToCell(i);
+        source.ObserveInlineBackground(300, new(1, 5, 0, 0));
+        GhosttySnapshotStyleStorage.CopyCache cache = default;
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellsFrom(250, source, 0, 300, ref cache, out int first));
+        Assert.Equal(300, first);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellsFrom(550, source, 300, 300, ref cache, out int second));
+        Assert.Equal(300, second);
+        Assert.Equal(600, destination.CellCount);
+        Assert.Equal(1, destination.Count);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.ObserveCell(550,
+            Bold with { Background = new(1, 5, 0, 0) }, empty: true));
+        Assert.Equal(Bold, destination.CellStyle(550));
+        destination.ClearCells(250, 599);
+        Assert.Equal(1, destination.Count);
+        destination.ClearCell(849);
+        Assert.Equal(0, destination.Count);
+        Assert.Equal(600, source.CellCount);
+    }
+
+    [Fact]
+    public void ReflowCopyFailureLeavesOnlyTheCompletedPrefixForRebuildAndRetry()
+    {
+        GhosttySnapshotStyleStorage source = new(8), destination = new(4);
+        source.ChangeCursor(Bold); source.WriteCursorToCell(0); source.WriteCursorToCell(1);
+        source.ChangeCursor(Italic); source.WriteCursorToCell(2);
+        source.ChangeCursor(Faint); source.WriteCursorToCell(3); source.WriteCursorToCell(4);
+        GhosttySnapshotStyleStorage.CopyCache cache = default;
+        Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, destination.CopyCellsFrom(0, source, 0, 5, ref cache, out int copied));
+        Assert.Equal(3, copied);
+        Assert.Equal(3, destination.CellCount);
+        Assert.Equal(default, destination.CellStyle(3));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.Rebuild(8, out GhosttySnapshotStyleStorage? rebuilt));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, rebuilt!.CopyCellsFrom(3, source, 3, 2, ref cache, out int remainder));
+        Assert.Equal(2, remainder);
+        Assert.Equal(5, rebuilt.CellCount);
+        for (int i = 0; i < 5; i++) Assert.Equal(source.CellStyle(i), rebuilt.CellStyle(i));
+        rebuilt.ClearCells(0, 5);
+        Assert.Equal(0, rebuilt.Count);
+    }
+
+    [Fact]
+    public void ReflowStyleCacheDoesNotReuseIdsAcrossSourceOrDestinationTables()
+    {
+        GhosttySnapshotStyleStorage first = new(4), second = new(4), destination = new(4), nextPage = new(4);
+        first.ChangeCursor(Bold); first.WriteCursorToCell(0);
+        second.ChangeCursor(Italic); second.WriteCursorToCell(0);
+        GhosttySnapshotStyleStorage.CopyCache cache = default;
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellsFrom(0, first, 0, 1, ref cache, out _));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, destination.CopyCellsFrom(1, second, 0, 1, ref cache, out _));
+        Assert.Equal(Bold, destination.CellStyle(0));
+        Assert.Equal(Italic, destination.CellStyle(1));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, nextPage.CopyCellsFrom(0, second, 0, 1, ref cache, out _));
+        Assert.Equal(Italic, nextPage.CellStyle(0));
+        Assert.Equal(1, nextPage.Count);
+    }
 }

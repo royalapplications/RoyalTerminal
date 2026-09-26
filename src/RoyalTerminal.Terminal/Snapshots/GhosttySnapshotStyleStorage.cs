@@ -149,6 +149,54 @@ internal sealed class GhosttySnapshotStyleStorage
         return GhosttySnapshotSetAddResult.Success;
     }
 
+    // Scoped to an append-only reflow traversal. Existing destination cells
+    // keep the cached ID alive; a page replacement/rebuild changes Storage and
+    // therefore invalidates the cache without consulting a global generation.
+    internal struct CopyCache
+    {
+        internal GhosttySnapshotStyleStorage? Source, Destination;
+        internal int SourceId, DestinationId;
+    }
+
+    internal GhosttySnapshotSetAddResult CopyCellsFrom(int destination, GhosttySnapshotStyleStorage source,
+        int index, int count, ref CopyCache cache, out int copied)
+    {
+        if (ReferenceEquals(this, source)) throw new InvalidOperationException("Reflow copies require separate source storage.");
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        copied = 0;
+        while (copied < count)
+        {
+            int sourceId = source.CellId(checked(index + copied));
+            int run = 1;
+            while (run < count - copied && source.CellId(checked(index + copied + run)) == sourceId) run++;
+            if (sourceId != 0)
+            {
+                int id;
+                if (ReferenceEquals(cache.Source, source) && ReferenceEquals(cache.Destination, this) && cache.SourceId == sourceId)
+                {
+                    id = cache.DestinationId;
+                    _styles.UseMultiple(id, run);
+                }
+                else
+                {
+                    GhosttySnapshotSetAddResult result = _styles.TryAddWithId(source._styles.Get(sourceId), sourceId, out id);
+                    if (result != GhosttySnapshotSetAddResult.Success) return result;
+                    _styles.UseMultiple(id, run - 1);
+                    cache = new() { Source = source, Destination = this, SourceId = sourceId, DestinationId = id };
+                }
+                for (int offset = 0; offset < run; offset++)
+                {
+                    int target = checked(destination + copied + offset);
+                    StoreCell(target, id);
+                    if (source.InlineStyle(checked(index + copied + offset)) is { } observed)
+                        (_observedInlineStyles ??= [])[target] = observed;
+                }
+            }
+            copied += run;
+        }
+        return GhosttySnapshotSetAddResult.Success;
+    }
+
     private GhosttySnapshotStyle? InlineStyle(int index)
         => _observedInlineStyles is not null && _observedInlineStyles.TryGetValue(index, out GhosttySnapshotStyle value) ? value : null;
 

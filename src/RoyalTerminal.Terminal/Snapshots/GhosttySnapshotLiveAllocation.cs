@@ -98,7 +98,9 @@ internal static class GhosttySnapshotLiveAllocation
     private static bool TryMeasureCapacity(TerminalScreen screen, List<TerminalRow> rows,
         GhosttySnapshotAllocation layout, GhosttySnapshotPageCapacity original, out GhosttySnapshotPageCapacity capacity)
     {
-        HashSet<GhosttySnapshotStyle> styles = [];
+        int trackedStyleCount = 0;
+        bool trackedStyles = rows[0].SnapshotAllocation is { } page && screen.TryGetSnapshotStyleUsage(page, rows, out trackedStyleCount);
+        HashSet<GhosttySnapshotStyle>? styles = trackedStyles ? null : [];
         HashSet<int> links = [];
         int columns = 1;
         ulong graphemes = 0, temporaryGrapheme = 0, graphemeCells = 0, strings = 0, linkedCells = 0;
@@ -107,8 +109,11 @@ internal static class GhosttySnapshotLiveAllocation
             columns = Math.Max(columns, row.PreservedColumns);
             foreach (ref readonly TerminalCell cell in row.ReadOnlyPreservedCells)
             {
-                GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cell);
-                if (style != default) styles.Add(style);
+                if (styles is not null)
+                {
+                    GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cell);
+                    if (style != default) styles.Add(style);
+                }
                 if (cell.Grapheme is { Length: > 0 } text)
                 {
                     ulong scalars = 0;
@@ -137,7 +142,10 @@ internal static class GhosttySnapshotLiveAllocation
             capacity = original;
             return false; // Saturate rather than wrap and accidentally admit history.
         }
-        GhosttySnapshotMetadataUsage usage = new((ulong)styles.Count, graphemeCells, graphemes, temporaryGrapheme,
+        // A current event tracker is authoritative: inline background-only
+        // cells need no style entry, while an unprinted cursor can own one.
+        int styleCount = trackedStyles ? trackedStyleCount : styles!.Count;
+        GhosttySnapshotMetadataUsage usage = new((ulong)styleCount, graphemeCells, graphemes, temporaryGrapheme,
             (ulong)links.Count, linkedCells, strings);
         return layout.TryFitMetadata(original with
         {

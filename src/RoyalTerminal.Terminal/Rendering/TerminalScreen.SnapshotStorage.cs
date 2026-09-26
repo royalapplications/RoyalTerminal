@@ -45,11 +45,18 @@ public sealed partial class TerminalScreen
         GhosttySnapshotAllocation layout = new(alignment);
         for (int i = 0; i < _rows.Count; i++)
             if (_rows[i].PreservedColumns is < 1 or > ushort.MaxValue) return null;
+        GhosttySnapshotStyleTracker tracker = _snapshotStyleTracker ??= new();
+        bool allAccounted = true;
+        for (int i = 0; i < _rows.Count; i++) allAccounted &= _rows[i].SnapshotAllocation is not null;
+        // Existing PAGE seeds are more precise than visible styles (notably
+        // inline background cells). Reconcile them before the generic metadata
+        // checkpoint; otherwise that estimate can invent a style allocation.
+        if (allAccounted) _ = tracker.ReflowSources(_rows, layout);
         // Observe live content before reflow replaces its rows. A metadata
         // overflow may become representable after reflow splits the content;
         // retain its existing page identity instead of dropping all accounting.
         _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
-        return new(_rows, columns, layout);
+        return new(_rows, columns, layout, tracker);
     }
     // Allocate a lineage only when a decoder tracks this terminal. COW publication
     // preserves it; a separately restored terminal receives a different identity.

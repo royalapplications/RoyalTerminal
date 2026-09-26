@@ -2740,14 +2740,15 @@ public sealed partial class TerminalScreen
                     mappedPosition = new TerminalGridPosition(column, destinationRow);
                 }
 
-                // Managed cells retain their own style and string references, so complete
-                // runs can be copied without Ghostty's native style-id remapping. Keep
-                // malformed wide pairs and row-edge spacers on the scalar path.
+                // Cell payloads still copy in bulk. Snapshot-aware reflow also
+                // records native style-ID/refcount copies before the payload;
+                // ordinary screens skip that bookkeeping entirely.
                 int runLength = GetReflowCopyRunLength(
                     logicalLine[sourceIndex..], semanticRows.IsEmpty ? columns - column
                         : Math.Min(columns - column, semanticRows[semanticIndex].End - sourceIndex));
                 if (runLength > 0)
                 {
+                    snapshotAllocation?.CopyStyles(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
                     logicalLine.Slice(sourceIndex, runLength).CopyTo(row.Cells[column..]);
                     if (mappedPosition is null && trackedLogicalOffset >= 0 &&
                         trackedLogicalOffset <= sourceIndex + runLength)
@@ -2797,10 +2798,13 @@ public sealed partial class TerminalScreen
                 }
 
                 cell.Width = (byte)width;
+                snapshotAllocation?.CopyStyles(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
                 row[column] = cell;
 
                 if (width == 2 && column + 1 < columns)
                 {
+                    snapshotAllocation?.CopyStyles(row, column + 1, snapshotSources, ref snapshotSourceIndex,
+                        sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]) ? sourceIndex + 1 : sourceIndex, 1);
                     row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
                         ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                 }

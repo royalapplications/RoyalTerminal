@@ -12,7 +12,7 @@ namespace RoyalTerminal.Terminal.Snapshots;
 /// </summary>
 internal sealed class GhosttySnapshotReflowAllocation
 {
-    internal readonly record struct Source(int Start, GhosttySnapshotPageAllocation Page);
+    internal readonly record struct Source(int Start, GhosttySnapshotPageAllocation Page, int Row);
 
     private readonly GhosttySnapshotAllocation _layout;
     private readonly int _columns;
@@ -22,11 +22,21 @@ internal sealed class GhosttySnapshotReflowAllocation
     private List<TerminalRow>? _deferredBlanks;
     private GhosttySnapshotPageAllocation? _memoSource;
     private GhosttySnapshotPageCapacity _memoCapacity;
+    private readonly GhosttySnapshotStyleTracker? _tracker;
+    private readonly Dictionary<GhosttySnapshotPageAllocation, GhosttySnapshotStyleStorage>? _sourceStyles;
+    private readonly List<TerminalRow> _destinationRows = [];
+    private GhosttySnapshotStyleStorage? _destinationStyles;
+    private GhosttySnapshotStyleStorage.CopyCache _styleCache;
 
-    internal GhosttySnapshotReflowAllocation(TerminalRowBuffer source, int columns, GhosttySnapshotAllocation layout)
+    internal GhosttySnapshotReflowAllocation(TerminalRowBuffer source, int columns, GhosttySnapshotAllocation layout,
+        GhosttySnapshotStyleTracker? tracker = null)
     {
         _layout = layout;
         _columns = columns;
+        _tracker = tracker;
+        // Reconciliation can replace source capacities. Capture provenance only
+        // afterwards; the borrowed tables then stay read-only for this resize.
+        _sourceStyles = tracker?.ReflowSources(source, layout);
         for (int i = 0; i < source.Count; i++)
         {
             GhosttySnapshotPageAllocation page = source[i].SnapshotAllocation
@@ -39,13 +49,15 @@ internal sealed class GhosttySnapshotReflowAllocation
         // first source page, including when all source rows are blank.
         GhosttySnapshotPageAllocation first = source[0].SnapshotAllocation!;
         _destinationPage = new(Adjust(first, firstPage: true));
+        if (tracker is not null) _destinationStyles = new(_destinationPage.Capacity.Styles);
     }
 
     internal static void CaptureSource(List<Source> sources, int offset, TerminalRow row)
     {
         GhosttySnapshotPageAllocation page = row.SnapshotAllocation!;
-        if (sources.Count == 0 || !ReferenceEquals(sources[^1].Page, page))
-            sources.Add(new(offset, page));
+        // Keep physical row offsets even within one page: trimmed hard lines,
+        // rotations and skipped spacer heads need not be contiguous cells.
+        sources.Add(new(offset, page, row.SnapshotAllocationRow));
     }
 
     internal void DeferBlank(TerminalRow row) => (_deferredBlanks ??= []).Add(row);
@@ -68,6 +80,7 @@ internal sealed class GhosttySnapshotReflowAllocation
             AppendCore(row, null);
             destination.Add(row);
         }
+        FinishPage();
     }
 
     internal void AccountResult(TerminalScreen screen, TerminalRowBuffer rows)
@@ -84,6 +97,7 @@ internal sealed class GhosttySnapshotReflowAllocation
     {
         if (_nextRow == _destinationPage.Capacity.Rows)
         {
+            FinishPage();
             GhosttySnapshotPageCapacity capacity;
             if (source is null)
                 capacity = _layout.InitialCapacity(_columns);
@@ -96,11 +110,78 @@ internal sealed class GhosttySnapshotReflowAllocation
                 _memoCapacity = capacity;
             }
             _destinationPage = new(capacity);
+            if (_tracker is not null) _destinationStyles = new(capacity.Styles);
+            _destinationRows.Clear();
             _nextRow = 0;
         }
         row.SnapshotAllocation = _destinationPage;
         row.SnapshotAllocationRow = _nextRow++;
         row.SnapshotAllocationUnmodified = false;
+        _destinationRows.Add(row);
+    }
+
+    internal void CopyStyles(TerminalRow row, int column, ReadOnlySpan<Source> sources, ref int sourceRun, int sourceIndex, int count)
+    {
+        if (_destinationStyles is null || count == 0 || _destinationPage.MetadataOverflow) return;
+        while (count > 0)
+        {
+            while (sourceRun + 1 < sources.Length && sourceIndex >= sources[sourceRun + 1].Start) sourceRun++;
+            Source source = sources[sourceRun];
+            int run = sourceRun + 1 < sources.Length ? Math.Min(count, sources[sourceRun + 1].Start - sourceIndex) : count;
+            if (!_sourceStyles!.TryGetValue(source.Page, out GhosttySnapshotStyleStorage? styles))
+            {
+                MarkOverflow();
+                return;
+            }
+            int offset = checked(source.Row * source.Page.Capacity.Columns + sourceIndex - source.Start);
+            int target = checked(row.SnapshotAllocationRow * _columns + column);
+            bool retried = false;
+            while (run > 0)
+            {
+                GhosttySnapshotSetAddResult result = _destinationStyles!.CopyCellsFrom(target, styles, offset, run, ref _styleCache, out int copied);
+                offset += copied; target += copied; column += copied; sourceIndex += copied; count -= copied; run -= copied;
+                if (result == GhosttySnapshotSetAddResult.Success) break;
+                if (copied > 0) retried = false;
+                if (retried) { MarkOverflow(); return; }
+                if (!GrowStyles(result)) return;
+                retried = true;
+            }
+        }
+    }
+
+    private bool GrowStyles(GhosttySnapshotSetAddResult reason)
+    {
+        GhosttySnapshotPageCapacity capacity = _destinationPage.Capacity;
+        if (reason == GhosttySnapshotSetAddResult.OutOfMemory &&
+            !_layout.TryIncreaseCapacity(capacity, GhosttySnapshotCapacityDimension.Styles,
+                (ulong)_destinationStyles!.Count, _nextRow, out capacity))
+        {
+            MarkOverflow();
+            return false;
+        }
+        if (_destinationStyles!.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? rebuilt) != GhosttySnapshotSetAddResult.Success)
+        {
+            MarkOverflow();
+            return false;
+        }
+        // Like ReflowCursor.increaseCapacity, copy only the populated prefix;
+        // there is no cursor pen on the replacement until Screen.resize ends.
+        _destinationStyles = rebuilt;
+        ReplaceDestination(new(capacity));
+        return true;
+    }
+
+    private void MarkOverflow() => ReplaceDestination(new(_destinationPage.Capacity, metadataOverflow: true));
+
+    private void ReplaceDestination(GhosttySnapshotPageAllocation page)
+    {
+        _destinationPage = page;
+        foreach (TerminalRow row in _destinationRows) row.SnapshotAllocation = page;
+    }
+
+    private void FinishPage()
+    {
+        if (_destinationStyles is not null) _tracker!.InstallReflowPage(_destinationPage, _destinationStyles, _destinationRows);
     }
 
     private GhosttySnapshotPageCapacity Adjust(GhosttySnapshotPageAllocation source, bool firstPage)

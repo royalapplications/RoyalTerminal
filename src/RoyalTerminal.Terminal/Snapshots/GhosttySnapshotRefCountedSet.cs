@@ -177,6 +177,14 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
         Item item = LiveItem(id);
         item.References = checked(item.References + 1);
     }
+
+    internal void UseMultiple(int id, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (id == 0 || count == 0) return;
+        Item item = LiveItem(id);
+        item.References = checked(item.References + count);
+    }
     internal T Get(int id) => LiveItem(id).Value;
     internal int ReferenceCount(int id) => (uint)id < (uint)_items.Count ? _items[id]?.References ?? 0 : 0;
 

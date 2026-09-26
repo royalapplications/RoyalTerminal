@@ -291,6 +291,23 @@ public sealed class GhosttySnapshotNativeStorageTests
         Assert.InRange(bytes, 1, 64 * 1024);
     }
 
+    [Fact]
+    public void GroupedUseChecksOverflowAndPreservesOneLiveEntry()
+    {
+        GhosttySnapshotRefCountedSet<Value> set = new(4, new Context());
+        int id = set.Add(new(1, 0));
+        set.UseMultiple(id, 100);
+        Assert.Equal(101, set.ReferenceCount(id));
+        Assert.Equal(1, set.Count);
+        Assert.Throws<ArgumentOutOfRangeException>(() => set.UseMultiple(id, -1));
+        set.UseMultiple(id, int.MaxValue - 101);
+        Assert.Throws<OverflowException>(() => set.UseMultiple(id, 1));
+        Assert.Equal(int.MaxValue, set.ReferenceCount(id));
+        set.ReleaseMultiple(id, int.MaxValue);
+        Assert.Equal(0, set.Count);
+        set.UseMultiple(0, 20);
+    }
+
     private readonly record struct Value(int Id, ulong Hash);
     private sealed class Context : IGhosttySnapshotSetContext<Value>
     {

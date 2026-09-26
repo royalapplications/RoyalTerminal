@@ -26,7 +26,8 @@ public sealed partial class BasicVtProcessor
         try
         {
             ResizeActiveScreenBuffer(columns, rows, reflowOnResize,
-                Span<TerminalGridPosition>.Empty, preserveViewportTopOnRowsIncrease);
+                Span<TerminalGridPosition>.Empty, preserveViewportTopOnRowsIncrease,
+                alternate ? _snapshotPrimaryPen : _snapshotAlternatePen);
             if (alternate)
                 (_savedMainCursorCol, _savedMainCursorRow, _savedMainDelayedWrap) = (_cursorCol, _cursorRow, _delayedWrap);
             else

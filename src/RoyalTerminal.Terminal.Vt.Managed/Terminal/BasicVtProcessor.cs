@@ -4894,8 +4894,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private void ResizeActiveScreenBuffer(int columns, int rows, bool reflowOnResize,
-        Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease)
+        Span<TerminalGridPosition> trackedAbsolutePositions, bool preserveViewportTopOnRowsIncrease,
+        GhosttySnapshotStyle? snapshotPen = null)
     {
+        GhosttySnapshotStyle resizePen = _screen.TracksSnapshotStyles ? snapshotPen ?? CaptureSnapshotPen() : default;
+        if (_screen.TracksSnapshotStyles)
+            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
         bool alternateScreen = _inAltScreen;
         bool gridSizeChanged = columns != _screen.Columns || rows != _screen.ViewportRows;
         bool discardHiddenCells = columns < _screen.Columns &&
@@ -4963,6 +4967,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             try { ClearPromptForRedraw(); }
             finally { _screen.ScrollOffset = scrollOffset; }
         }
+        // Screen.resize retains the old pen reference through row mutation,
+        // then restores it on the remapped page after prompt clearing. Reflow
+        // builds fresh cell-only style tables, so even an unchanged pen moves.
+        if (_screen.TracksSnapshotStyles)
+            _screen.SnapshotStyleChanged(_inAltScreen ? 1 : 0, _cursorRow, resizePen, resizePen);
     }
 
     private void ApplyResizeState(int columns, int rows)

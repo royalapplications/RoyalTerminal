@@ -66,6 +66,12 @@ public sealed partial class TerminalScreen
     internal void SnapshotStyleRowsObserved(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows)
         => _snapshotStyleTracker?.ObserveRowSlots(page, rows);
 
+    internal bool TryGetSnapshotStyleUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows, out int count)
+    {
+        count = 0;
+        return _snapshotStyleTracker?.TryGetStyleUsage(page, rows, out count) == true;
+    }
+
     private void RetireSnapshotRows(int start, int count)
     {
         if (!TracksSnapshotStyles || count == 0) return;
