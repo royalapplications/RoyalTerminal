@@ -1581,7 +1581,11 @@ public sealed partial class TerminalScreen
     /// <summary>
     /// Moves the non-empty active viewport into scrollback and clears the active viewport.
     /// </summary>
-    public void MoveViewportToScrollbackAndClear()
+    public void MoveViewportToScrollbackAndClear() => MoveViewportToScrollbackAndClearCore();
+
+    // Return the active-area displacement so the parser can reload its cursor
+    // pin rather than unconditionally homing a cursor on a retained blank row.
+    internal int MoveViewportToScrollbackAndClearCore(bool clearActiveRows = true)
     {
         if (_alternateBufferActive)
         {
@@ -1591,15 +1595,16 @@ public sealed partial class TerminalScreen
             ClearKittyGraphics();
             ScrollOffset = 0;
             InvalidateAll();
-            return;
+            return ViewportRows;
         }
 
         DiscardTransientResizeRows();
         ScrollOffset = 0;
 
-        AppendBlankRowsAndTrimScrollback(GetNonEmptyViewportRowCount());
+        int movedRows = GetNonEmptyViewportRowCount();
+        AppendBlankRowsAndTrimScrollback(movedRows);
 
-        ClearViewportRows();
+        if (clearActiveRows) ClearViewportRows();
         ClearRasterGraphicsInViewportRectangle(
             0,
             Math.Max(0, ViewportRows - 1),
@@ -1608,6 +1613,7 @@ public sealed partial class TerminalScreen
         ClearKittyGraphics();
         ScrollOffset = 0;
         InvalidateAll();
+        return movedRows;
     }
 
     /// <summary>
@@ -1664,13 +1670,23 @@ public sealed partial class TerminalScreen
     {
         for (int viewportRow = ViewportRows - 1; viewportRow >= 0; viewportRow--)
         {
-            if (RowHasContent(GetViewportRow(viewportRow)) || RowHasRasterContent(viewportRow))
+            if (RowHasScrollClearContent(GetViewportRow(viewportRow)) || RowHasRasterContent(viewportRow))
             {
                 return viewportRow + 1;
             }
         }
 
         return 0;
+    }
+
+    private static bool RowHasScrollClearContent(TerminalRow row)
+    {
+        // Ghostty Cell.isEmpty includes wide spacers and erased background
+        // cells. A row without text can still need preserving in history.
+        foreach (ref readonly TerminalCell cell in row.ReadOnlyCells)
+            if (cell.HasContent || cell.Width != 1 || cell.BackgroundIdentity.Kind != TerminalColorKind.Default)
+                return true;
+        return false;
     }
 
     private bool RowHasRasterContent(int viewportRow)
@@ -1764,9 +1780,10 @@ public sealed partial class TerminalScreen
             return;
         }
 
-        if (HasFiniteSnapshotQuota)
+        if (TracksSnapshotMetadata)
         {
-            // Each newly exposed tail page has its own byte-recycling event.
+            // Assign physical tail slots even without a finite quota. Each
+            // newly exposed page also has its own byte-recycling event.
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) AddRow();
             return;
         }

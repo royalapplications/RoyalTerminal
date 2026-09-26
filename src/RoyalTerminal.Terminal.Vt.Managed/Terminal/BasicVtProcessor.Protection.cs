@@ -38,6 +38,10 @@ public sealed partial class BasicVtProcessor
         }
         else
         {
+            // Ghostty applies its prompt scroll-clear heuristic before the
+            // protected row clear too. Protection keeps the original cells
+            // in history, not on the newly cleared active area.
+            if (ShouldScrollOnEraseDisplay()) ScrollClearDisplay();
             for (int row = 0; row < _screen.ViewportRows; row++)
                 ClearUnprotectedCells(row, 0, _screen.Columns);
             _kittyStore.ClearScreen(_screen, (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
@@ -51,12 +55,8 @@ public sealed partial class BasicVtProcessor
     {
         if (mode is < 0 or > 2) return;
         TerminalRow row = _screen.GetViewportRow(_cursorRow);
-        int start = mode == 0 ? _cursorCol : 0;
-        int end = mode == 1 ? _cursorCol + 1 : row.Columns;
-        // EL includes both halves if its edge intersects a wide glyph.
-        if (start > 0 && row.ReadOnlyCells[start].Width == 0 && !row.ReadOnlyCells[start].IsWideSpacerHead) start--;
-        if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
-        if (mode != 1) ResetProtectedRowWrap(row);
+        (int start, int end) = GetLineEraseRange(row, mode);
+        if (mode != 1) ResetCursorRowSoftWrap(row);
         ClearUnprotectedCells(_cursorRow, start, end);
         ResetDelayedWrap();
     }
@@ -70,12 +70,12 @@ public sealed partial class BasicVtProcessor
         // protection. Upstream explicitly documents this protected-wide edge case.
         SplitCharacterEditBoundary(row, _cursorCol);
         SplitCharacterEditBoundary(row, end);
-        ResetProtectedRowWrap(row);
+        ResetCursorRowSoftWrap(row);
         ClearUnprotectedCells(_cursorRow, _cursorCol, end);
         ResetDelayedWrap();
     }
 
-    private void ResetProtectedRowWrap(TerminalRow row)
+    private void ResetCursorRowSoftWrap(TerminalRow row)
     {
         // A spacer head cannot survive removing its row's wrap marker.
         if (row.ReadOnlyCells[^1].IsWideSpacerHead) EraseCells(row, row.Columns - 1, 1);

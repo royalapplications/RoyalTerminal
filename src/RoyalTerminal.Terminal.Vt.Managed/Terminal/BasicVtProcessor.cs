@@ -4263,6 +4263,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 1: // From start to cursor
+                // Ghostty erases the cursor row first, including both halves
+                // of a wide glyph, before retiring metadata in earlier rows.
+                EraseInLine(1);
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
                     ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow > 0)
@@ -4273,21 +4276,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                         0,
                         _screen.Columns - 1);
                 }
-                if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
-                {
-                    var rowToCursor = _screen.GetViewportRow(_cursorRow);
-                    ClearPreservedCellsForMutation(rowToCursor);
-                    EraseCells(rowToCursor, 0, Math.Min(_cursorCol + 1, _screen.Columns));
-                    NormalizeRowWideCells(rowToCursor);
-                    rowToCursor.IsDirty = true;
-                }
                 break;
 
             case 2: // Entire display
-                if (!_inAltScreen && (ScrollOnEraseInDisplay ||
-                    _screen.GetViewportRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None))
+                if (ShouldScrollOnEraseDisplay())
                 {
-                    _screen.MoveViewportToScrollbackAndClear();
+                    ScrollClearDisplay();
                     for (var r = 0; r < _screen.ViewportRows; r++)
                         ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 }
@@ -4306,10 +4300,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 22: // Kitty extension: move viewport into scrollback and clear display
-                _screen.MoveViewportToScrollbackAndClear();
-                _cursorCol = 0;
-                _cursorRow = 0;
-                ResetDelayedWrap();
+                ScrollClearDisplay();
                 break;
         }
 
@@ -4320,6 +4311,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             PublishKittyGraphics();
         }
         _screen.InvalidateAll();
+    }
+
+    private bool ShouldScrollOnEraseDisplay() => !_inAltScreen && (ScrollOnEraseInDisplay ||
+        _screen.GetViewportRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None);
+
+    private void ScrollClearDisplay()
+    {
+        int movedRows = _screen.MoveViewportToScrollbackAndClearCore(clearActiveRows: false);
+        // Screen.cursorReload retains a pin still in the active area. Only a
+        // pin that moved into history is relocated to the active top-left.
+        if (_cursorRow < movedRows)
+        {
+            _cursorCol = 0;
+            _cursorRow = 0;
+        }
+        else _cursorRow -= movedRows;
+        RecordSnapshotCursorStyle();
+        ResetDelayedWrap();
     }
 
     private void EraseInLine(int mode, bool selective = false)
@@ -4336,31 +4345,32 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var row = _screen.GetViewportRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
+        (int start, int end) = GetLineEraseRange(row, mode);
         switch (mode)
         {
             case 0: // From cursor to end of line
-                EraseCells(row, _cursorCol, _screen.Columns - _cursorCol);
-                ResetRowSoftWrap(row);
+                ResetCursorRowSoftWrap(row);
+                EraseCells(row, start, end - start);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
-                    _cursorCol,
+                    start,
                     _screen.Columns - 1);
                 break;
 
             case 1: // From start to cursor
-                EraseCells(row, 0, Math.Min(_cursorCol + 1, _screen.Columns));
+                EraseCells(row, start, end - start);
                 _screen.ClearRasterGraphicsInViewportRectangle(
                     _cursorRow,
                     _cursorRow,
                     0,
-                    _cursorCol);
+                    end - 1);
                 break;
 
             case 2: // Entire line
                 TerminalSemanticPrompt prompt = row.SemanticPrompt;
                 bool continuation = row.IsWrapContinuation;
-                ResetRowSoftWrap(row);
+                ResetCursorRowSoftWrap(row);
                 ClearRow(row, _currentFg, _currentBg, CurrentBackgroundIdentity);
                 row.SemanticPrompt = prompt;
                 row.IsWrapContinuation = continuation;
@@ -4372,7 +4382,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
         }
 
-        NormalizeRowWideCells(row);
         row.IsDirty = true;
     }
 
@@ -4470,7 +4479,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             styles.Clear(start, RightMargin + 1 - start);
             row.Cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
         }
-        ResetProtectedRowWrap(row);
+        ResetCursorRowSoftWrap(row);
         ResetDelayedWrap();
         NormalizeRowWideCells(row);
         row.IsDirty = true;
@@ -4497,7 +4506,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
         SplitCharacterEditBoundary(row, _cursorCol);
         SplitCharacterEditBoundary(row, end);
-        ResetProtectedRowWrap(row);
+        ResetCursorRowSoftWrap(row);
         ResetDelayedWrap();
         EraseCells(row, _cursorCol, end - _cursorCol);
         NormalizeRowWideCells(row);
