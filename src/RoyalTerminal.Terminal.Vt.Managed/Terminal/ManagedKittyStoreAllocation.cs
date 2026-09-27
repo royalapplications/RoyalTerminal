@@ -11,4 +11,5 @@ internal enum ManagedKittyStoreAllocation
     PlacementCapacity,
     Anchor,
     Placement,
+    ScrollRestoreCapacity,
 }

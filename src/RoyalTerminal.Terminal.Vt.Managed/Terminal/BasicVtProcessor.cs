@@ -1691,9 +1691,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
                 (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
                 windowShift: !down && _scrollTop == 0 && !_inAltScreen && !HasHorizontalMargins,
-                left: _scrollLeft, right: RightMargin);
+                left: _scrollLeft, right: RightMargin, allocationCheckpoint: KittyStoreAllocationCheckpoint);
         else if (adjustImages)
-            _kittyStore.BeginPinScroll(_screen, down ? 0 : -count, index && _screen.ViewportRows > 1);
+            _kittyStore.BeginPinScroll(_screen, down ? 0 : -count, index && _screen.ViewportRows > 1,
+                KittyStoreAllocationCheckpoint);
         try
         {
             // SU/SD use a temporary cursor; page entry can grow metadata or
@@ -4169,7 +4170,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 3: // Scrollback only
-                bool restoreImagePins = _kittyStore.PlacementCount > 0 && _kittyStore.BeginHistoryErase(_screen);
+                bool restoreImagePins = _kittyStore.PlacementCount > 0 &&
+                    _kittyStore.BeginHistoryErase(_screen, KittyStoreAllocationCheckpoint);
                 try { _screen.EraseActiveHistory(); }
                 finally { if (restoreImagePins) _kittyStore.EndMarginScroll(_screen); }
                 break;
@@ -4270,7 +4272,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom || !CursorInsideHorizontalMargins) return;
         count = Math.Clamp(count, 1, _scrollBottom - _cursorRow + 1);
         bool restoreImages = _kittyStore.PlacementCount > 0;
-        if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0);
+        if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0,
+            allocationCheckpoint: KittyStoreAllocationCheckpoint);
         try
         {
             if (HasHorizontalMargins)

@@ -13,7 +13,8 @@ internal sealed partial class ManagedKittyGraphicsStore
     // A no-history SU/IND uses PageList.eraseRow: pins below the erased row
     // move upward, but pins already on row zero survive without cropping.
     // The host's generic text anchors instead follow/discard row contents.
-    internal void BeginPinScroll(TerminalScreen screen, int delta, bool resetTopColumn)
+    internal void BeginPinScroll(TerminalScreen screen, int delta, bool resetTopColumn,
+        Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
     {
         _marginScrollRestores.Clear();
         int activeTop = screen.GetAbsoluteRowForViewportRow(0);
@@ -25,14 +26,15 @@ internal sealed partial class ManagedKittyGraphicsStore
             // IND's bounded rotation additionally resets a pin already at
             // the physical origin to column zero; SU's eraseRow does not.
             int column = resetTopColumn && row == 0 ? 0 : origin.Column;
-            _marginScrollRestores.Add(new(anchor, column, Math.Max(0, row + delta)));
+            QueueScrollRestore(new(anchor, column, Math.Max(0, row + delta)), allocationCheckpoint);
         }
     }
 
     // ED3 uses PageList.eraseHistory, whose removed pins migrate to the
     // first surviving page without becoming garbage (including whole-page
     // erasure). Preserve this independently of generic host text anchors.
-    internal bool BeginHistoryErase(TerminalScreen screen)
+    internal bool BeginHistoryErase(TerminalScreen screen,
+        Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
     {
         _marginScrollRestores.Clear();
         int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
@@ -41,7 +43,7 @@ internal sealed partial class ManagedKittyGraphicsStore
         {
             if (placement.Anchor is not { } anchor || !screen.TryResolveAnchor(anchor, out var origin)) continue;
             int row = origin.Row - activeTop;
-            _marginScrollRestores.Add(new(anchor, row < 0 ? 0 : origin.Column, Math.Max(0, row)));
+            QueueScrollRestore(new(anchor, row < 0 ? 0 : origin.Column, Math.Max(0, row)), allocationCheckpoint);
         }
         return _marginScrollRestores.Count > 0;
     }
@@ -50,7 +52,8 @@ internal sealed partial class ManagedKittyGraphicsStore
     // generic row movement can prune pins, then restore them after rows settle.
     // Virtual placements follow text; relative placements follow their root.
     internal void BeginMarginScroll(TerminalScreen screen, int top, int bottom, int delta,
-        uint cellWidth, uint cellHeight, bool windowShift = false, int left = 0, int right = int.MaxValue)
+        uint cellWidth, uint cellHeight, bool windowShift = false, int left = 0, int right = int.MaxValue,
+        Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
     {
         _marginScrollRestores.Clear();
         int activeTop = screen.GetAbsoluteRowForViewportRow(0);
@@ -96,16 +99,36 @@ internal sealed partial class ManagedKittyGraphicsStore
                     }
                 }
             }
-            _marginScrollRestores.Add(new(anchor, origin.Column, finalRow));
+            QueueScrollRestore(new(anchor, origin.Column, finalRow), allocationCheckpoint);
         }
         if (clippedAny) RemoveOrphans(screen);
     }
 
     internal void EndMarginScroll(TerminalScreen screen)
     {
-        foreach (MarginScrollRestore restore in _marginScrollRestores)
-            screen.MoveAnchor(restore.Anchor, screen.GetAbsoluteRowForViewportRow(restore.Row), restore.Column);
-        _marginScrollRestores.Clear();
+        try
+        {
+            foreach (MarginScrollRestore restore in _marginScrollRestores)
+                screen.MoveAnchor(restore.Anchor, screen.GetAbsoluteRowForViewportRow(restore.Row), restore.Column);
+        }
+        finally { _marginScrollRestores.Clear(); }
+    }
+
+    private void QueueScrollRestore(MarginScrollRestore restore,
+        Action<ManagedKittyStoreAllocation>? allocationCheckpoint)
+    {
+        // Ghostty scrollMarginsBegin keeps clipping/removal mutations when its
+        // restore append runs out of memory and lets generic pin tracking handle
+        // just that placement. Never abort the text operation after clipping.
+        // Apply the same safe degradation to managed-only pin/history scratch.
+        // Retained capacity needs neither allocation nor a checkpoint callback.
+        try
+        {
+            if (_marginScrollRestores.Count == _marginScrollRestores.Capacity)
+                allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.ScrollRestoreCapacity);
+            _marginScrollRestores.Add(restore);
+        }
+        catch (OutOfMemoryException) { }
     }
 
     private readonly record struct MarginScrollRestore(TerminalScreenAnchor Anchor, int Column, int Row);
