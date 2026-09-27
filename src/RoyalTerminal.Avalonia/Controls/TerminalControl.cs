@@ -2286,6 +2286,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        CancelPendingHyperlinkRequest();
         _hostVisibility.Dispose();
         _notificationHostDetached = true;
         BindNotificationHost(_vtProcessor, null);
@@ -5361,6 +5362,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = normalized;
+        _hoveredLinkDisplayText = normalized is null ? null : TerminalHyperlinkSafety.SanitizeDisplay(normalized);
         UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
@@ -6112,6 +6114,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StopPty()
     {
+        CancelPendingHyperlinkRequest();
         _dragDropBehavior.Cancel();
         FlushPendingTransportResize();
         SetPendingTransportOutputAcceptance(acceptOutput: false);
@@ -7601,6 +7604,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _lastPointerColumn = -1;
         _lastPointerRow = -1;
         _hoveredLinkUrl = null;
+        _hoveredLinkDisplayText = null;
 
         if (hadHover)
         {
@@ -7671,6 +7675,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = nextUrl;
+        _hoveredLinkDisplayText = nextUrl is null ? null : TerminalHyperlinkSafety.SanitizeDisplay(nextUrl);
         return true;
     }
 
@@ -7688,8 +7693,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         TerminalRow row = _screen.GetViewportRow(_lastPointerRow);
-        int hyperlinkId = row[_lastPointerColumn].HyperlinkId;
-        if (hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
+        int hyperlinkId = row.ReadOnlyCells[_lastPointerColumn].HyperlinkId;
+        if (EnableOsc8Hyperlinks && hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
         {
             resolvedUrl = resolved;
             return true;
@@ -7714,17 +7719,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
-        {
-            return false;
-        }
-
-        return TryActivateHyperlink(uri);
+        return ActivateUntrustedHyperlink(url);
     }
 
     /// <summary>
-    /// Activates a hyperlink resolved from terminal content (for example on Ctrl/Cmd+click).
-    /// Override in tests or hosts that need custom navigation behavior.
+    /// Activates a directly allowed hyperlink resolved from terminal content (for example on Ctrl/Cmd+click).
+    /// Override for custom navigation; non-direct requests go to <see cref="HyperlinkHost"/>.
     /// </summary>
     protected virtual bool TryActivateHyperlink(Uri uri)
     {
@@ -8132,7 +8132,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         out TerminalHighlightSpan span)
     {
         span = default;
-        if (_screen is null)
+        if (_screen is null || !EnableOsc8Hyperlinks)
         {
             return false;
         }

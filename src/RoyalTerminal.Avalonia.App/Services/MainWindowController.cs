@@ -39,6 +39,7 @@ using RoyalTerminal.Avalonia.Settings;
 using RoyalTerminal.Avalonia.App.Views;
 using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Avalonia.App.Services.Notifications;
+using RoyalTerminal.Avalonia.App.Services.Links;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Shaders;
@@ -2796,6 +2797,8 @@ internal sealed class MainWindowController
     {
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
+        standaloneControl.HyperlinkHost = new DesktopTerminalHyperlinkHost(
+            new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window));
         ApplyFontSettings(standaloneControl);
         standaloneControl.TextHighlightingMode = _viewModel.TextHighlightingMode;
         standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;

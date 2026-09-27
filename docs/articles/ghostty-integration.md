@@ -13,6 +13,52 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Untrusted hyperlink dispatch
+
+Both engines now route producer-supplied OSC 8 links through a shared safety
+boundary before the operating-system launcher, following
+[Ghostty #13634](https://github.com/ghostty-org/ghostty/pull/13634) and its pinned
+[`UntrustedURL` policy](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/macos/Sources/Helpers/UntrustedURL.swift).
+Well-formed HTTP/HTTPS and nonempty mailto targets retain direct opening.
+Malformed, relative, remote-file and unsafe-Unicode targets cannot dispatch.
+Unsafe scalars are escaped visibly without normalizing web/custom target
+spellings; ordinary previews reuse the original string. The explicit
+`EnableOsc8Hyperlinks` switch defaults to true and does not disable plain-text
+web-link recognition. Hover lookup reads cells without acquiring mutable row
+storage. Raw link identity remains available separately from the safe preview.
+
+The reusable control exposes `ITerminalHyperlinkHost` for non-direct requests;
+without a host they fail closed. Requests are bounded to one pending operation
+per control and canceled on host replacement, OSC 8 disable, detach or session
+stop. Host failure/cancellation never enables an unrestricted fallback.
+The application shell wires a passive compiled-XAML dialog and framework-free
+ReactiveUI view model. Custom schemes require explicit confirmation showing the
+escaped target and the registered application: a Launch Services bundle ID on
+macOS, or an application display name from GIO/Windows associations. Association
+lookup runs off the UI thread and never invokes a shell. Unknown/unavailable
+handlers cannot be confirmed. Cancel is the default action. Blocked targets
+remain copyable only by an explicit user action; copying preserves the original
+target, not its escaped display spelling. Cancellation is checked again after
+association lookup and after confirmation, before launching.
+
+Local-file opening is **not yet complete**: the classifier produces an
+`InspectFile` request, and the current application host displays it as blocked.
+Canonical/symlink-resolved previews, regular-file/directory inspection,
+executable/content-type checks and safe-file dispatch still need their platform
+implementation. This is deliberately stricter than Ghostty's safe-file path,
+not a claim of complete #13634 parity. The other dialog and native association
+bindings are also awaiting the final cross-platform validation pass.
+
+For comparison,
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalApp/TerminalPage.cpp)
+filters supported/safe URIs before confirmation, and
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/browser/OscLinkProvider.ts)
+defaults to web schemes unless an embedder supplies a link handler. RoyalTerminal
+follows Ghostty's scheme/Unicode policy with an application-owned decision UI,
+rather than treating every absolute URI as safe. Focused classifier, host,
+view-model, headless-dialog and both-engine click cases are authored; they have
+not yet been executed.
+
 ## Font discovery and startup
 
 The shared Skia renderer follows Ghostty's
