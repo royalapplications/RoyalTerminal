@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--managed-search-prepend", StringComparer.Ordinal))
+{
+    ManagedSearchPrependBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--snapshot-palette", StringComparer.Ordinal))
 {
     SnapshotPaletteBenchmark.Run();

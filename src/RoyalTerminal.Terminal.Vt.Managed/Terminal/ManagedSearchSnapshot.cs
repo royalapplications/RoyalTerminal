@@ -60,6 +60,20 @@ internal sealed class ManagedSearchSnapshot
         return Rows.CommonPrefix(other.Rows);
     }
 
+    internal int PrependedRows(ManagedSearchSnapshot other, CancellationToken cancellation)
+    {
+        int added = Rows.Length - other.Rows.Length;
+        if (added <= 0 || Columns != other.Columns || Alternate != other.Alternate) return 0;
+        // Compare immutable storage/layout identities, not text hashes. Check
+        // the active tail first so ordinary append/edit work rejects quickly.
+        for (int row = other.Rows.Length - 1; row >= 0; row--)
+        {
+            if ((row & 255) == 0) cancellation.ThrowIfCancellationRequested();
+            if (!Rows[row + added].HasSameSearchContent(other.Rows[row])) return 0;
+        }
+        return added;
+    }
+
     internal ManagedSearchSnapshot Slice(int start)
         => new(Rows.Slice(start), Columns, ViewportRows, Alternate, _storage);
 }

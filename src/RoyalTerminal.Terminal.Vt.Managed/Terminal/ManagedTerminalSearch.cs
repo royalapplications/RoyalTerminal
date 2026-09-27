@@ -12,7 +12,7 @@ namespace RoyalTerminal.Terminal;
 /// Immutable COW rows and restart checkpoints retain completed history work.
 /// The scanner is owned by one caller/worker; capture requires the screen lock.
 /// </summary>
-internal sealed class ManagedTerminalSearch
+internal sealed partial class ManagedTerminalSearch
 {
     private string _needle = string.Empty;
     private int[] _failure = [];
@@ -20,8 +20,8 @@ internal sealed class ManagedTerminalSearch
     private int _matched;
     private int _nextPoint;
     private ManagedSearchSnapshot? _snapshot;
-    private readonly List<TerminalSearchMatch> _results = [];
-    private readonly List<Checkpoint> _checkpoints = [];
+    private List<TerminalSearchMatch> _results = [];
+    private List<Checkpoint> _checkpoints = [];
     private int _scannedRows;
     private bool _complete;
     private CancellationToken _cancellation;
@@ -52,6 +52,7 @@ internal sealed class ManagedTerminalSearch
             return;
         }
         int unchanged = Math.Min(snapshot.CommonPrefix(_snapshot), _scannedRows);
+        PrependReuse? prepend = PreparePrependReuse(snapshot, unchanged, cancellation);
         int checkpointIndex = _checkpoints.Count - 1;
         while (checkpointIndex >= 0 && _checkpoints[checkpointIndex].Row > unchanged) checkpointIndex--;
         Checkpoint checkpoint = checkpointIndex >= 0 ? _checkpoints[checkpointIndex] : default;
@@ -77,6 +78,13 @@ internal sealed class ManagedTerminalSearch
         {
             _scannedRows = rowIndex;
             cancellation.ThrowIfCancellationRequested();
+            if (prepend is not null && ReusePrependedTail(prepend, rowIndex, blankCells, blankRows, lastPoint, cancellation))
+            {
+                _scannedRows = snapshot.Rows.Length;
+                _complete = true;
+                destination.AddRange(_results);
+                return;
+            }
             // Preserve only the live KMP prefix, not a whole needle-sized ring.
             // Bound checkpoint memory for huge needles with long self-overlaps.
             if (_matched <= 256 && rowIndex - lastCheckpointRow >= 64)
