@@ -36,6 +36,11 @@ dirty flag. Existing callers request zero overscan and retain their viewport-onl
 iteration contract. Native rebuilding, ABI manifest regeneration and authored
 regression execution remain deferred to final validation.
 
+The desktop action mirror also includes the appended `CopyTitleToClipboard`,
+`MoveTabToNewWindow` and `ResizeWindow` tags and the window-size union payload.
+This raw action binding does not enable application-driven window resizing in
+RoyalTerminal; the new opt-in shared-host policy still needs implementation.
+
 ## Untrusted hyperlink dispatch
 
 Both engines now route producer-supplied OSC 8 links through a shared safety

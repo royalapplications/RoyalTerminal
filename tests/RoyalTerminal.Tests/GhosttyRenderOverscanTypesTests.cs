@@ -76,4 +76,20 @@ public sealed class GhosttyRenderOverscanTypesTests
         Assert.Equal(0, checksum);
         Assert.Equal(0, allocated);
     }
+
+    [Fact]
+    public unsafe void DesktopWindowActionsRetainHeaderOrderAndUnionLayout()
+    {
+        Assert.Equal((int)GhosttyActionTag.Readonly + 1, (int)GhosttyActionTag.CopyTitleToClipboard);
+        Assert.Equal((int)GhosttyActionTag.Readonly + 2, (int)GhosttyActionTag.MoveTabToNewWindow);
+        Assert.Equal((int)GhosttyActionTag.Readonly + 3, (int)GhosttyActionTag.ResizeWindow);
+        Assert.Equal(8, sizeof(GhosttyResizeWindow));
+        GhosttyResizeWindow size = new() { Width = 800, Height = 600 };
+        Assert.Equal(4, (byte*)&size.Height - (byte*)&size);
+        GhosttyAction action = default;
+        action.Data.ResizeWindow = size;
+        Assert.Equal(800u, action.Data.ResizeWindow.Width);
+        Assert.Equal(600u, action.Data.ResizeWindow.Height);
+        Assert.Equal(0, (byte*)&action.Data.ResizeWindow - (byte*)&action.Data);
+    }
 }
