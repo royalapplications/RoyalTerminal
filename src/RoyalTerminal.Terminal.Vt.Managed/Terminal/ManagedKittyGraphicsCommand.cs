@@ -38,8 +38,8 @@ internal sealed class ManagedKittyGraphicsCommand
     {
         result = null;
         if (maxPayloadBytes < 0) return false;
-        ManagedKittyGraphicsParser parser = new(maxPayloadBytes);
-        return parser.TryAppend(input) && parser.TryComplete(out result);
+        return ManagedKittyGraphicsParser.TryCreate(maxPayloadBytes, out ManagedKittyGraphicsParser parser) &&
+            parser.TryAppend(input) && parser.TryComplete(out result);
     }
 
     internal void SetData(ReadOnlyMemory<byte> data) => _data = data;

@@ -8,18 +8,22 @@ using System.Runtime.CompilerServices;
 
 namespace RoyalTerminal.Terminal;
 
+internal enum ManagedKittyParserAllocation { Command, Payload }
+
 /// <summary>
 /// Single-command streaming parser. Control fields have fixed storage; only
 /// encoded payload counts against the bound. Failure discards this command,
 /// never a previously accepted multi-command image transmission.
+/// Mutable owner: keep active instances in one field/local, and pass by ref.
 /// </summary>
-internal sealed class ManagedKittyGraphicsParser
+internal struct ManagedKittyGraphicsParser
 {
     [InlineArray(11)]
     private struct Temporary { private byte _element0; }
 
     private readonly int _limit;
-    private ManagedKittyGraphicsCommand? _command = new();
+    private readonly Action<ManagedKittyParserAllocation>? _allocationCheckpoint;
+    private ManagedKittyGraphicsCommand? _command;
     private Temporary _temporary;
     private int _count;
     private byte _key;
@@ -27,10 +31,31 @@ internal sealed class ManagedKittyGraphicsParser
     private byte[] _payload = [];
     private int _length;
 
-    internal ManagedKittyGraphicsParser(int maxPayloadBytes)
+    internal int PayloadCapacity => _payload?.Length ?? 0;
+
+    internal ManagedKittyGraphicsParser(int maxPayloadBytes,
+        Action<ManagedKittyParserAllocation>? allocationCheckpoint = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxPayloadBytes);
         _limit = maxPayloadBytes;
+        _allocationCheckpoint = allocationCheckpoint;
+        allocationCheckpoint?.Invoke(ManagedKittyParserAllocation.Command);
+        _command = new();
+    }
+
+    internal static bool TryCreate(int maxPayloadBytes, out ManagedKittyGraphicsParser parser,
+        Action<ManagedKittyParserAllocation>? allocationCheckpoint = null)
+    {
+        try
+        {
+            parser = new(maxPayloadBytes, allocationCheckpoint);
+            return true;
+        }
+        catch (OutOfMemoryException)
+        {
+            parser = default;
+            return false;
+        }
     }
 
     internal bool TryAppend(ReadOnlySpan<byte> input)
@@ -80,7 +105,12 @@ internal sealed class ManagedKittyGraphicsParser
         if (required > _payload.Length)
         {
             int capacity = (int)Math.Min(_limit, Math.Max(required, Math.Max(256L, _payload.Length * 2L)));
-            Array.Resize(ref _payload, capacity);
+            try
+            {
+                _allocationCheckpoint?.Invoke(ManagedKittyParserAllocation.Payload);
+                Array.Resize(ref _payload, capacity);
+            }
+            catch (OutOfMemoryException) { return Reject(); }
         }
         remaining.CopyTo(_payload.AsSpan(_length));
         _length = required;

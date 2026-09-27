@@ -113,7 +113,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private int _apcIdentifierLength;
     private ManagedUnknownApcCapture _apcUnknownCapture;
     private bool _apcKittyRecognized;
-    private ManagedKittyGraphicsParser? _apcKittyParser;
+    private ManagedKittyGraphicsParser _apcKittyParser;
     private bool _glyphProtocolEnabled;
     private bool _apcGlyphRecognized;
     private bool _apcUnknownRecognized;
@@ -1067,7 +1067,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcIdentifierLength = 0;
         _apcUnknownCapture.Reset(UnknownSequenceMaxBytes);
         _apcKittyRecognized = false;
-        _apcKittyParser = null;
+        _apcKittyParser = default;
         _apcTruncated = false;
         _apcGlyphRecognized = false;
         _apcUnknownRecognized = false;
@@ -2638,13 +2638,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (!_apcUnknownRecognized && !_apcKittyRecognized && _apcIdentifierLength == 0 && payload[0] == (byte)'G')
         {
             _apcKittyRecognized = true;
-            if (_kittyStore.Enabled) _apcKittyParser = new(_options.KittyGraphicsMaxApcBytes);
+            if (_kittyStore.Enabled)
+                _ = ManagedKittyGraphicsParser.TryCreate(_options.KittyGraphicsMaxApcBytes, out _apcKittyParser,
+                    KittyParserAllocationCheckpoint);
             payload = payload[1..];
         }
         if (_apcKittyRecognized)
         {
-            if (_apcKittyParser is not null && !_apcKittyParser.TryAppend(payload))
-                _apcKittyParser = null;
+            if (!_apcKittyParser.TryAppend(payload)) _apcKittyParser = default;
             return;
         }
         ReadOnlySpan<byte> glyphIdentifier = "25a1"u8;
@@ -2705,7 +2706,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             if (_apcKittyRecognized)
             {
-                if (_apcKittyParser is not null && _apcKittyParser.TryComplete(out ManagedKittyGraphicsCommand? command))
+                if (_apcKittyParser.TryComplete(out ManagedKittyGraphicsCommand? command))
                     ProcessKittyCommand(command);
                 return;
             }

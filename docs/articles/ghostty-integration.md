@@ -1562,6 +1562,37 @@ accepted chunked image nor change its quiet policy. Normal APC exit/cancellation
 reset and parser-continuation behavior are preserved. Focused split-input, resource
 and ownership tests are added; allocation measurements and execution remain pending.
 
+Kitty parser state is now stored by value in the processor, removing a separate
+heap parser owner for each APC while retaining one independently owned command.
+Active parser values must not be copied; helper calls take them by reference.
+Command-object or payload-growth allocation failure silently discards that APC
+and releases its payload, matching the native handler's ignore transition. It
+does not modify an earlier accepted image transfer, its quiet policy or its
+pending frame target. Completion still decodes in place and transfers the buffer
+once, without a second payload allocation. Disabled Kitty creates no command.
+Only storage-allocation failures are caught; unrelated exceptions and host reply
+callback failures retain their normal propagation.
+
+Managed Kitty responses now format the bounded numeric header in 64 stack bytes
+and encode the message directly into one owned byte array. Quiet/no-ID replies
+and absent consumers skip formatting. Image ID/number, placement and frame ordering
+remain unchanged; host-supplied messages retain their previous ASCII replacement
+policy and are not truncated to the header buffer's size. This follows
+[Ghostty's parser and response encoding](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_command.zig)
+and [stream effect guard](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/stream_terminal.zig).
+As for the glyph path, [xterm.js APC capture](https://github.com/xtermjs/xterm.js/blob/master/src/common/parser/ApcParser.ts)
+rejects bounded handler payloads but does not define the same owned CLR command
+or retained native image-transmission state. Windows Terminal's dispatch does not
+provide the Kitty response/storage contract; pinned Ghostty remains the reference.
+
+Thirty-six new failure/ownership/formatting cases are authored, including rejected
+continuation/retransmission quiet inheritance, all scalar-field maxima and parser
+owner allocation. `--kitty-parser` adds four ingestion workloads; the identical
+harness can run against pre-change `2f5c325f` for its heap-parser baseline.
+`--kitty-replies` adds six paired StringBuilder/byte-encoding workloads. These
+tests and benchmarks remain unrun, along with CI; fewer parser/response temporary
+objects are expected, but measured end-to-end gains remain unproven.
+
 Graphics payload decoding follows Ghostty's default simdutf forgiving-base64
 policy: optional final padding, ignored ASCII whitespace and unused final bits,
 but rejected misplaced/excess padding and invalid alphabet characters. Full

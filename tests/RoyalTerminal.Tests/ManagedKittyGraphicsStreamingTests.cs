@@ -101,8 +101,8 @@ public sealed class ManagedKittyGraphicsStreamingTests
         Assert.True(parser.TryAppend("a=p,i=1,"u8));
         // Warm the exact signed/unsigned header path, not just the initial
         // action field. Keep assertions and first-use setup outside measurement.
-        Assert.True(MeasureControlStream(parser, 1_000).Accepted);
-        (bool accepted, long allocated) = MeasureControlStream(parser, count);
+        Assert.True(MeasureControlStream(ref parser, 1_000).Accepted);
+        (bool accepted, long allocated) = MeasureControlStream(ref parser, count);
         Assert.True(accepted);
         Assert.Equal(0, allocated);
         Assert.True(parser.TryAppend("p=1"u8));
@@ -115,7 +115,7 @@ public sealed class ManagedKittyGraphicsStreamingTests
     // As in BenchmarkDotNet's GC measurement helpers, avoid tier-0/OSR in the
     // measuring method itself. Production parser optimization remains unchanged.
     [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
-    private static (bool Accepted, long Allocated) MeasureControlStream(ManagedKittyGraphicsParser parser, int count)
+    private static (bool Accepted, long Allocated) MeasureControlStream(ref ManagedKittyGraphicsParser parser, int count)
     {
         ReadOnlySpan<byte> header = "i=73,z=-1,"u8;
         bool accepted = true;

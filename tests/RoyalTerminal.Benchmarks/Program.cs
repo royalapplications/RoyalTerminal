@@ -71,6 +71,18 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--kitty-parser", StringComparer.Ordinal))
+{
+    KittyParserBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-replies", StringComparer.Ordinal))
+{
+    KittyReplyBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--glyph-replies", StringComparer.Ordinal))
 {
     GlyphReplyBenchmark.Run();

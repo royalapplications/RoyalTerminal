@@ -1,7 +1,6 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
-using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Terminal;
@@ -11,6 +10,7 @@ public sealed partial class BasicVtProcessor
     private TimeSpan? _animationNextTickDelay;
     private long _animationTickTimestamp;
     private bool _kittyPublicationPending;
+    internal Action<ManagedKittyParserAllocation>? KittyParserAllocationCheckpoint { get; set; }
 
     private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
@@ -84,18 +84,9 @@ public sealed partial class BasicVtProcessor
         if (changed || _kittyStore.Revision != initialRevision) PublishKittyGraphics();
         if (!respond || quiet == 2 || quiet == 1 && error == "OK") return;
         if (responseId == 0 && responseCommand.ImageNumber == 0) return;
-        StringBuilder reply = new("\x1b_G");
-        if (responseId != 0) reply.Append("i=").Append(responseId);
-        if (responseCommand.ImageNumber != 0)
-        {
-            if (responseId != 0) reply.Append(',');
-            reply.Append("I=").Append(responseCommand.ImageNumber);
-        }
-        if (responseCommand.PlacementId != 0)
-            reply.Append(",p=").Append(responseCommand.PlacementId);
-        if (responseFrame != 0) reply.Append(",r=").Append(responseFrame);
-        reply.Append(';').Append(error).Append("\x1b\\");
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(reply.ToString()));
+        if (ResponseCallback is { } callback)
+            callback(ManagedKittyResponseFormatter.Format(responseId, responseCommand.ImageNumber,
+                responseCommand.PlacementId, responseFrame, error));
     }
 
     private bool ProcessKittyTransmission(ManagedKittyGraphicsCommand command,
