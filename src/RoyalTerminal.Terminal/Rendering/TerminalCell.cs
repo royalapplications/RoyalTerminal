@@ -1742,6 +1742,7 @@ public sealed partial class TerminalScreen
 
     private void ClearAllCore(TerminalRowBuffer rows)
     {
+        _renderScrollFraction = 0;
         ClearExternalRenderRows();
         // A reset replaces both buffers; do not resize/clear the dormant one
         // only to discard it. Replacement rows are prepared before selection.
@@ -2329,6 +2330,7 @@ public sealed partial class TerminalScreen
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
+        _renderScrollFraction = 0;
         ClearExternalRenderRows();
         int oldColumns = Columns;
         int oldViewportRows = ViewportRows;

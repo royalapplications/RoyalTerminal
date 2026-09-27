@@ -32,7 +32,7 @@ public partial class TerminalControl
             var range = preedit.Range(column, _screen.Columns - 1);
             column = range.Caret;
         }
-        Point point = new(column * renderer.CellWidth, row * renderer.CellHeight);
+        Point point = new(column * renderer.CellWidth, (row - _screen.RenderScrollFraction) * renderer.CellHeight);
         point = _presenter?.TranslatePoint(point, this) ?? new Point(point.X + Padding.Left, point.Y + Padding.Top);
         return new Rect(point, new Size(Math.Max(1, width * renderer.CellWidth), Math.Max(1, renderer.CellHeight)));
     }

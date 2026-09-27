@@ -107,6 +107,40 @@ public readonly ref struct TerminalRenderViewport
 
 public sealed partial class TerminalScreen
 {
+    private double _renderScrollFraction;
+
+    /// <summary>
+    /// Fraction of viewport row zero scrolled above the visible surface. Set under
+    /// the screen lock. Presentation state is retained across terminal-state
+    /// publication; unavailable bottom overscan suppresses the effective offset.
+    /// </summary>
+    public double RenderScrollFraction
+    {
+        get => _renderScrollFraction != 0 && GetRenderViewport(new(0, 1)).CapturedOverscan.Below != 0
+            ? _renderScrollFraction : 0;
+        set
+        {
+            if (!double.IsFinite(value) || value < 0 || value >= 1)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            if (_renderScrollFraction == value) return;
+            _renderScrollFraction = value;
+            TerminalRenderViewport rows = GetRenderViewport(new(0, 1));
+            for (int index = 0; index < rows.Count; index++) rows[index].Row.IsDirty = true;
+        }
+    }
+
+    /// <summary>Extra row needed to fill the surface after fractional translation.</summary>
+    public TerminalRenderOverscan RenderScrollOverscan => new(0, RenderScrollFraction == 0 ? (ushort)0 : (ushort)1);
+
+    /// <summary>Maps a surface pixel Y to an available presented row, including a partially visible bottom row.</summary>
+    public int GetRenderRowAtPixel(double y, double cellHeight)
+    {
+        if (!double.IsFinite(y) || !double.IsFinite(cellHeight) || cellHeight <= 0) return 0;
+        double row = Math.Floor(y / cellHeight + RenderScrollFraction);
+        int last = Math.Max(0, ViewportRows - 1 + RenderScrollOverscan.Below);
+        return (int)Math.Clamp(row, 0, last);
+    }
+
     /// <summary>
     /// Borrows the viewport plus existing adjacent history rows without allocating
     /// or copying cells. The caller must keep this screen stable for the view's lifetime.

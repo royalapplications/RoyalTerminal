@@ -38,6 +38,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
+    ITerminalFractionalViewportScrollSource,
     ITerminalRenderOverscanSink,
     ITerminalSelectionExportSource,
     ITerminalWordSelectionSource,
@@ -1050,16 +1051,36 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     /// <inheritdoc />
     public void SetViewportOffsetRows(ulong offsetRows)
+        => SetViewportScrollPosition(new(offsetRows, 0));
+
+    /// <inheritdoc />
+    public void SetViewportScrollPosition(TerminalViewportScrollPosition position)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         ViewportScrollMapping mapping = GetViewportScrollMapping();
-        ulong clampedOffsetRows = Math.Min(offsetRows, mapping.EffectiveMaxOffsetRows);
+        ulong clampedOffsetRows = Math.Min(position.TopRow, mapping.EffectiveMaxOffsetRows);
+        double fraction = clampedOffsetRows == mapping.EffectiveMaxOffsetRows ? 0 : position.FractionalRow;
+        TerminalRenderOverscan priorOverscan = EffectiveRenderOverscan;
+        bool phaseChanged = fraction != _requestedRenderScrollFraction;
+        _requestedRenderScrollFraction = fraction;
         ulong targetNativeOffsetRows = mapping.EffectiveBaseOffsetRows + clampedOffsetRows;
-        if (targetNativeOffsetRows == _scrollbar.Offset)
+        if (targetNativeOffsetRows == _scrollbar.Offset && !phaseChanged)
         {
+            if (!_renderHeld) _screen.RenderScrollFraction = fraction;
             return;
         }
+
+        // Subrow motion inside an already captured row changes only the render
+        // transform. Do not recopy native cells or rebuild the image scene.
+        if (phaseChanged && !_renderHeld && _renderMirrorRows is not null &&
+            targetNativeOffsetRows == _scrollbar.Offset && targetNativeOffsetRows == _renderViewportTop &&
+            priorOverscan == EffectiveRenderOverscan)
+        {
+            _screen.RenderScrollFraction = fraction;
+            return;
+        }
+        _renderOverscanRequestChanged |= phaseChanged;
 
         _terminal.ScrollViewport(
             GhosttyVtNative.GhosttyTerminalScrollViewport.AbsoluteRow(
@@ -1549,6 +1570,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void PrepareResizeSync()
     {
+        _requestedRenderScrollFraction = 0;
         _forceFullScreenSyncAfterResize = true;
     }
 
@@ -1668,6 +1690,10 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ResetManagedState()
     {
+        _renderViewportTop = 0;
+        _renderViewportBase = 0;
+        _requestedRenderScrollFraction = 0;
+        _screen.RenderScrollFraction = 0;
         ReleaseRenderMirror();
         _cursorCol = 0;
         _cursorRow = 0;
@@ -1698,6 +1724,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ResetSessionInputState()
     {
+        _requestedRenderScrollFraction = 0;
+        _screen.RenderScrollFraction = 0;
         ReleaseRenderMirror();
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
@@ -1709,6 +1737,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private unsafe void SyncScreenFromNative()
     {
         _renderViewportTop = _scrollbar.Offset;
+        _renderViewportBase = GetViewportScrollMapping().EffectiveBaseOffsetRows;
         int nativeColumns = _renderState.GetColumns();
         int nativeRows = _renderState.GetRows();
         bool gridChanged = nativeColumns != _screen.Columns || nativeRows != _screen.ViewportRows;
@@ -1721,7 +1750,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
         bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
         bool fullRefresh = gridChanged || forceFullScreenSyncAfterResize || _renderOverscanRequestChanged ||
-            (_renderOverscan != default && (_renderMirrorRows is null ||
+            (EffectiveRenderOverscan != default && (_renderMirrorRows is null ||
                 !ReferenceEquals(_screen.ExternalRenderRows, _renderMirrorRows))) ||
             dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
@@ -1744,7 +1773,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _screen.DefaultForeground = GhosttyTerminal.ToArgb(colors.Foreground);
         _screen.DefaultBackground = GhosttyTerminal.ToArgb(colors.Background);
 
-        if (_renderOverscan != default)
+        if (EffectiveRenderOverscan != default)
         {
             SyncOverscanRenderRows(fullRefresh, colors, palette);
         }
@@ -1775,6 +1804,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
         SyncKittyGraphicsFromNative(fullRefresh || dirty != GhosttyVtNative.GhosttyRenderStateDirty.False);
         _renderState.Clean();
+        _screen.RenderScrollFraction = _requestedRenderScrollFraction;
         _renderOverscanRequestChanged = false;
         if (forceFullScreenSyncAfterResize)
         {
@@ -2175,7 +2205,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _kittyVirtualRelatives.Clear();
         bool hasVirtual = false;
         bool imagesChanged = false;
-        TerminalRenderOverscan capturedOverscan = _screen.GetRenderViewport(_renderOverscan).CapturedOverscan;
+        TerminalRenderOverscan capturedOverscan = _screen.GetRenderViewport(EffectiveRenderOverscan).CapturedOverscan;
 
         _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
         graphics.Populate(_kittyPlacementIterator);

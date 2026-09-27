@@ -1049,6 +1049,10 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void RaiseScrollInvalidated(EventArgs e)
     {
+        if (_screen is not null)
+            lock (_screen.SyncRoot) SyncManagedRenderScrollFractionLocked();
+        _textInputMethodClient?.NotifyCursorChanged();
+        RefreshPixelPointer();
         _scrollInvalidated?.Invoke(this, e);
         RequestAncestorScrollViewerOffsetSync();
     }
@@ -3954,7 +3958,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             int previousViewportRow = startAbsoluteRow - topRow - 1;
             if ((uint)previousViewportRow >= (uint)_screen.ViewportRows ||
-                !_screen.GetViewportRow(previousViewportRow).WrapsToNext)
+                !GetPresentedRowLocked(previousViewportRow).WrapsToNext)
             {
                 break;
             }
@@ -3967,7 +3971,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             int viewportRow = endAbsoluteRow - topRow;
             if ((uint)viewportRow >= (uint)_screen.ViewportRows ||
-                !_screen.GetViewportRow(viewportRow).WrapsToNext)
+                !GetPresentedRowLocked(viewportRow).WrapsToNext)
             {
                 break;
             }
@@ -3986,7 +3990,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return 1;
         }
 
-        TerminalRow row = _screen.GetViewportRow(viewportRow);
+        TerminalRow row = GetPresentedRowLocked(viewportRow);
         ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
         for (int column = cells.Length - 1; column >= 0; column--)
         {
@@ -4075,8 +4079,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return 0;
         }
 
-        int row = (int)(point.Y / _renderer.CellHeight);
-        return Math.Clamp(row, 0, _screen.ViewportRows - 1);
+        return _screen.GetRenderRowAtPixel(point.Y, _renderer.CellHeight);
     }
 
     private int GetSelectionMaxAbsoluteRowLocked()
@@ -4182,7 +4185,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
-        int viewportRows = _screen?.ViewportRows ?? int.MaxValue;
+        int viewportRows = _screen is null ? int.MaxValue : PresentedRowCount;
         if (ReferenceEquals(_selectionViewportSpansSource, _selectionAnchorSpans) &&
             ReferenceEquals(_selectionViewportSpansRenderer, _renderer) &&
             _selectionViewportSpansTopRow == topRow && _selectionViewportSpansRows == viewportRows)
@@ -5042,6 +5045,11 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void HandlePointerWheelScroll(PointerWheelEventArgs e, bool forwardToInputSink)
     {
+        if (TryHandlePixelWheel(e.Delta.Y))
+        {
+            e.Handled = true;
+            return;
+        }
         if (TryGetViewportScrollSource(out ITerminalViewportScrollSource? viewportScrollSource))
         {
             int deltaRows = e.Delta.Y > 0
@@ -7284,6 +7292,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool SendPointerEvent(TerminalPointerEvent pointerEvent)
     {
+        if (_screen is not null && _renderer is not null && _screen.RenderScrollFraction != 0)
+            pointerEvent = pointerEvent with { Y = pointerEvent.Y + _screen.RenderScrollFraction * _renderer.CellHeight };
         ITerminalInputSink? inputSink = TerminalSessionService.InputSink;
         if (inputSink is not null)
         {
@@ -7544,6 +7554,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         bool hadHover = _hoveredLinkUrl is not null;
         _lastPointerColumn = -1;
         _lastPointerRow = -1;
+        _pixelPointerPoint = null;
         _hoveredLinkUrl = null;
         HyperlinkPreviewTargetChanged();
 
@@ -7555,6 +7566,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void UpdatePointerCell(Point point)
     {
+        _pixelPointerPoint = point;
         ResumeHyperlinkPreview();
         if (_renderer is null || _screen is null)
         {
@@ -7572,9 +7584,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         int col = (int)Math.Floor(point.X / _renderer.CellWidth);
-        int row = (int)Math.Floor(point.Y / _renderer.CellHeight);
+        int row = _screen.GetRenderRowAtPixel(point.Y, _renderer.CellHeight);
         col = Math.Clamp(col, 0, _screen.Columns - 1);
-        row = Math.Clamp(row, 0, _screen.ViewportRows - 1);
 
         if (col == _lastPointerColumn && row == _lastPointerRow)
         {
@@ -7602,7 +7613,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             _lastPointerColumn < 0 ||
             _lastPointerRow < 0 ||
             (uint)_lastPointerColumn >= (uint)_screen.Columns ||
-            (uint)_lastPointerRow >= (uint)_screen.ViewportRows)
+            (uint)_lastPointerRow >= (uint)PresentedRowCount)
         {
             return false;
         }
@@ -7629,12 +7640,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             _lastPointerColumn < 0 ||
             _lastPointerRow < 0 ||
             (uint)_lastPointerColumn >= (uint)_screen.Columns ||
-            (uint)_lastPointerRow >= (uint)_screen.ViewportRows)
+            (uint)_lastPointerRow >= (uint)PresentedRowCount)
         {
             return false;
         }
 
-        TerminalRow row = _screen.GetViewportRow(_lastPointerRow);
+        TerminalRow row = _screen.GetRenderViewport(_screen.RenderScrollOverscan)[_lastPointerRow].Row;
         int hyperlinkId = row.ReadOnlyCells[_lastPointerColumn].HyperlinkId;
         if (EnableOsc8Hyperlinks && hyperlinkId > 0 && _screen.TryGetHyperlinkUrl(hyperlinkId, out string? resolved))
         {
@@ -7818,6 +7829,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         lock (_screen.SyncRoot)
         {
+            SyncManagedRenderScrollFractionLocked();
             if (_renderer is not null)
             {
                 UpdateRendererParityStateLocked();
@@ -7964,7 +7976,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
                 ? TerminalHighlightKind.SearchSelected
                 : TerminalHighlightKind.SearchMatch;
             int firstRow = Math.Max(match.AbsoluteRow, viewportTopAbsoluteRow);
-            int lastRow = Math.Min(match.EndAbsoluteRow, viewportTopAbsoluteRow + _screen.ViewportRows - 1);
+            int lastRow = Math.Min(match.EndAbsoluteRow, viewportTopAbsoluteRow + PresentedRowCount - 1);
             for (int row = firstRow; row <= lastRow; row++)
             {
                 _highlightSpanScratch.Add(new TerminalHighlightSpan(
@@ -8050,7 +8062,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int row = _lastPointerRow;
         int column = _lastPointerColumn;
-        if ((uint)row >= (uint)_screen.ViewportRows || (uint)column >= (uint)_screen.Columns)
+        if ((uint)row >= (uint)PresentedRowCount || (uint)column >= (uint)_screen.Columns)
         {
             return;
         }
@@ -8079,7 +8091,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        TerminalRow terminalRow = _screen.GetViewportRow(row);
+        TerminalRow terminalRow = GetPresentedRowLocked(row);
         ReadOnlySpan<TerminalCell> cells = terminalRow.ReadOnlyCells;
         if ((uint)column >= (uint)cells.Length)
         {
@@ -8125,7 +8137,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return false;
         }
 
-        TerminalRow terminalRow = _screen.GetViewportRow(row);
+        TerminalRow terminalRow = GetPresentedRowLocked(row);
         if (TryBuildRowTextColumnMap(terminalRow, out int rowTextLength))
         {
             ReadOnlySpan<char> rowText = _rowTextScratch.AsSpan(0, rowTextLength);
@@ -8629,6 +8641,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             }
 
             int nextOffset = _scrollData.ToScreenScrollOffsetRows(_screen.MaxScrollOffset);
+            SyncManagedRenderScrollFractionLocked();
             if (_screen.ScrollOffset == nextOffset)
             {
                 return;
@@ -8812,7 +8825,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return Math.Max(0, _screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset);
         }
 
-        ulong topAbsoluteRow = GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
+        ulong topAbsoluteRow = UsesPixelScrolling && viewportScrollSource is ITerminalFractionalViewportScrollSource fractional
+            ? fractional.PublishedViewportPosition.TopRow : GetViewportTopAbsoluteRowUlong(viewportScrollSource.ViewportScrollState);
         return topAbsoluteRow > int.MaxValue
             ? int.MaxValue
             : (int)topAbsoluteRow;
@@ -8845,6 +8859,11 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         ulong clampedOffsetRows = Math.Min(viewportState.OffsetRows, viewportState.MaxOffsetRows);
         double targetOffset = clampedOffsetRows * cellHeight;
+        if (UsesPixelScrolling && viewportScrollSource is ITerminalFractionalViewportScrollSource fractional)
+        {
+            TerminalViewportScrollPosition position = fractional.PublishedViewportPosition;
+            targetOffset = (position.TopRow + position.FractionalRow) * cellHeight;
+        }
         if (targetOffset > _scrollData.MaxOffset)
         {
             targetOffset = _scrollData.MaxOffset;
@@ -8868,6 +8887,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         TerminalViewportScrollState viewportState = viewportScrollSource.ViewportScrollState;
         ulong maxOffsetRows = viewportState.MaxOffsetRows;
+        if (UsesPixelScrolling && viewportScrollSource is ITerminalFractionalViewportScrollSource fractional)
+        {
+            fractional.SetViewportScrollPosition(GetPixelScrollPosition(maxOffsetRows));
+            SyncScrollDataFromNativeViewportLocked(viewportScrollSource);
+            return;
+        }
         ulong targetOffsetRows;
         if (_scrollData.MaxOffset <= 0 || maxOffsetRows == 0)
         {
@@ -8928,7 +8953,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         int topAnchoredRows = screenMaxOffsetRows - scrollOffset;
         topAnchoredRows = Math.Clamp(topAnchoredRows, 0, screenMaxOffsetRows);
-        double scaledOffset = (_scrollData.MaxOffset * topAnchoredRows) / screenMaxOffsetRows;
+        double scaledOffset = (_scrollData.MaxOffset * (topAnchoredRows + (UsesPixelScrolling ? _screen.RenderScrollFraction : 0))) / screenMaxOffsetRows;
         _scrollData.Offset = scaledOffset;
     }
 

@@ -705,9 +705,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(screen);
 
+        double scrollFraction = screen.RenderScrollFraction;
+        if (scrollFraction != 0) overscan = new(overscan.Above, Math.Max(overscan.Below, (ushort)1));
         TerminalRenderViewport renderRows = screen.GetRenderViewport(overscan);
         PrepareRegisteredGlyphCache(screen);
         canvas.Save();
+        if (scrollFraction != 0) canvas.Translate(0, -(float)(scrollFraction * _cellHeight));
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
         ReadOnlySpan<CompiledTextHighlightRule> textHighlightRules = _compiledTextHighlightRules;

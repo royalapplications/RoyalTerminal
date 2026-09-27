@@ -43,6 +43,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private long _lastShaderTimestamp;
     private int _shaderFrame;
     private TerminalCursorRenderSnapshot _lastCursorSnapshot;
+    private double _lastRenderScrollFraction;
     private readonly SKPaint _clearPaint = new()
     {
         IsAntialias = false,
@@ -185,14 +186,28 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 if (!EnsureTerminalSurface(width, height, renderScale, lease))
                 {
                     canvas.Clear(background);
-                    renderer.RenderFull(canvas, screen);
+                    canvas.Save();
+                    try
+                    {
+                        if (screen.RenderScrollFraction != 0)
+                            canvas.ClipRect(new SKRect(0, 0, screen.Columns * renderer.CellWidth, screen.ViewportRows * renderer.CellHeight));
+                        renderer.RenderFull(canvas, screen);
+                    }
+                    finally { canvas.Restore(); }
                     return;
                 }
 
-                bool fullRedraw = !_cachedFrameValid || _forceFullRedrawRequested;
+                double scrollFraction = screen.RenderScrollFraction;
+                bool fullRedraw = !_cachedFrameValid || _forceFullRedrawRequested || scrollFraction != _lastRenderScrollFraction;
+                // A translated image scene requires all overlapping cell layers
+                // to be repainted together. Text-only stationary phases retain
+                // row damage; image-region damage can refine this conservative path.
+                fullRedraw |= scrollFraction != 0 && (screen.HasKittyGraphics || screen.HasRasterGraphics ||
+                    !screen.GetKittyPlacements(screen.RenderScrollOverscan).IsEmpty);
                 if (_invalidateViewportRequested)
                 {
-                    screen.InvalidateViewport();
+                    TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+                    for (int index = 0; index < rows.Count; index++) rows[index].Row.IsDirty = true;
                 }
 
                 bool cursorChanged = MarkCursorRowsDirtyIfNeeded(renderer, screen);
@@ -209,6 +224,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                     terminalCanvas.Scale(renderScale.X, renderScale.Y);
                     try
                     {
+                        if (scrollFraction != 0)
+                            terminalCanvas.ClipRect(new SKRect(0, 0, screen.Columns * renderer.CellWidth, screen.ViewportRows * renderer.CellHeight));
                         if (!fullRedraw)
                         {
                             ClearDirtyViewportRows(terminalCanvas, renderer, screen, background, logicalWidth);
@@ -229,6 +246,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 }
 
                 _lastCursorSnapshot = TerminalCursorRenderSnapshot.From(renderer);
+                _lastRenderScrollFraction = scrollFraction;
                 terminalFrame = _terminalSurface!.Surface.Snapshot();
             }
 
@@ -488,9 +506,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private static bool HasDirtyViewportRows(TerminalScreen screen)
     {
-        for (int row = 0; row < screen.ViewportRows; row++)
+        TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+        for (int row = 0; row < rows.Count; row++)
         {
-            if (screen.GetViewportRow(row).IsDirty)
+            if (rows[row].Row.IsDirty)
             {
                 return true;
             }
@@ -509,14 +528,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _clearPaint.Color = background;
         float rowWidth = Math.Max(canvasWidth, screen.Columns * renderer.CellWidth);
         float rowHeight = Math.Max(1f, renderer.CellHeight);
-        for (int row = 0; row < screen.ViewportRows; row++)
+        TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+        double fraction = screen.RenderScrollFraction;
+        for (int row = 0; row < rows.Count; row++)
         {
-            if (!screen.GetViewportRow(row).IsDirty)
+            if (!rows[row].Row.IsDirty)
             {
                 continue;
             }
 
-            float y = row * renderer.CellHeight;
+            float y = (float)((rows[row].ViewportY - fraction) * renderer.CellHeight);
             canvas.DrawRect(0, y, rowWidth, rowHeight, _clearPaint);
         }
     }

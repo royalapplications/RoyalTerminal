@@ -12,12 +12,22 @@ public sealed partial class GhosttyVtProcessor
     private TerminalRenderOverscan _appliedRenderOverscan;
     private bool _renderOverscanRequestChanged;
     private ulong _renderViewportTop;
+    private ulong _renderViewportBase;
+    private double _requestedRenderScrollFraction;
     private TerminalRow[]? _renderMirrorRows;
     private TerminalRow[]? _spareRenderMirrorRows;
     private ushort _renderMirrorAbove;
     private bool _renderMirrorAlternate;
     private Dictionary<GhosttyVtNative.GhosttyRenderStateRowId, TerminalRow>? _renderRowCache;
     private Dictionary<GhosttyVtNative.GhosttyRenderStateRowId, TerminalRow>? _spareRenderRowCache;
+
+    /// <inheritdoc />
+    public TerminalViewportScrollPosition PublishedViewportPosition => new(
+        _renderViewportTop > _renderViewportBase ? _renderViewportTop - _renderViewportBase : 0,
+        _screen.RenderScrollFraction);
+
+    private TerminalRenderOverscan EffectiveRenderOverscan => new(_renderOverscan.Above,
+        _requestedRenderScrollFraction == 0 ? _renderOverscan.Below : Math.Max(_renderOverscan.Below, (ushort)1));
 
     /// <inheritdoc />
     public TerminalRenderOverscan RenderOverscan
@@ -39,7 +49,8 @@ public sealed partial class GhosttyVtProcessor
     private void PrepareRenderOverscan()
     {
         TerminalRenderOverscan request = default;
-        if (_renderOverscan != default &&
+        TerminalRenderOverscan requested = EffectiveRenderOverscan;
+        if (requested != default &&
             _terminal.GetActiveScreen() != GhosttyVtNative.GhosttyTerminalScreen.Alternate)
         {
             GhosttyVtNative.GhosttyTerminalScrollbar scrollbar = _terminal.GetScrollbar();
@@ -48,8 +59,8 @@ public sealed partial class GhosttyVtProcessor
             ulong firstAccessible = maxOffset - Math.Min(maxOffset, (ulong)_screen.ScrollbackLimit);
             ulong top = Math.Min(scrollbar.Offset, maxOffset);
             request = new(
-                (ushort)Math.Min((ulong)_renderOverscan.Above, top > firstAccessible ? top - firstAccessible : 0),
-                (ushort)Math.Min((ulong)_renderOverscan.Below, maxOffset - top));
+                (ushort)Math.Min((ulong)requested.Above, top > firstAccessible ? top - firstAccessible : 0),
+                (ushort)Math.Min((ulong)requested.Below, maxOffset - top));
         }
         if (request == _appliedRenderOverscan) return;
         _renderState.SetOverscan(new() { Above = request.Above, Below = request.Below });

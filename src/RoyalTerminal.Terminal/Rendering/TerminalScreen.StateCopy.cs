@@ -22,6 +22,7 @@ public sealed partial class TerminalScreen
         copy._primaryRasterPlacements = CopyOptionalPlacements(_primaryRasterPlacements);
         copy._alternateRasterPlacements = CopyOptionalPlacements(_alternateRasterPlacements);
         CopyScalarStateTo(copy);
+        copy._renderScrollFraction = _renderScrollFraction;
         CopyExternalRenderRowsTo(copy);
         CopyRegistry(_hyperlinksById, copy._hyperlinksById);
         CopyRegistry(_hyperlinkIdsByUrl, copy._hyperlinkIdsByUrl);
