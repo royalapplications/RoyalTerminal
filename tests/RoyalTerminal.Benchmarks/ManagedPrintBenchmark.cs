@@ -12,13 +12,25 @@ internal static class ManagedPrintBenchmark
     {
         const int iterations = 25_000;
         Console.WriteLine("Managed print/state only; no renderer/PTY; median of 7 samples, 25,000 feeds; warmed, zero scrollback.");
-        foreach (string name in new[] { "ascii", "dec-special", "save-restore" })
+        foreach (string name in new[] { "ascii", "unicode", "wide", "rep", "styled", "snapshot-styled", "dec-special", "save-restore" })
         {
             TerminalScreen screen = new(80, 24, 0);
-            using BasicVtProcessor processor = new(screen, new() { ContinuationMaxBytes = 0 });
+            using BasicVtProcessor seed = new(screen, new() { ContinuationMaxBytes = name == "snapshot-styled" ? 1_048_576 : 0 });
+            using ManagedTerminalSnapshot? snapshot = name == "snapshot-styled"
+                ? ManagedTerminalSnapshot.Restore(seed.GetBinarySnapshot()) : null;
+            BasicVtProcessor processor = snapshot?.Processor ?? seed;
+            screen = snapshot?.Screen ?? screen;
             if (name == "dec-special") processor.Process("\u001b(0"u8);
-            byte[] bytes = name == "save-restore" ? "\u001b7\u001b8"u8.ToArray() : Encoding.ASCII.GetBytes(new string('q', 79) + "\r");
-            for (int i = 0; i < 2000; i++) processor.Process(bytes);
+            byte[] bytes = Encoding.UTF8.GetBytes(name switch
+            {
+                "save-restore" => "\u001b7\u001b8",
+                "unicode" => new string('λ', 79) + "\r",
+                "wide" => new string('界', 39) + "\r",
+                "rep" => "q\u001b[78b\r",
+                "styled" or "snapshot-styled" => "\u001b[31;1m" + new string('q', 79) + "\r\u001b[32;3m" + new string('r', 79) + "\r",
+                _ => new string('q', 79) + "\r",
+            });
+            for (int i = 0; i < iterations; i++) processor.Process(bytes);
             double[] milliseconds = new double[7];
             long[] allocations = new long[7];
             for (int sample = 0; sample < 7; sample++)

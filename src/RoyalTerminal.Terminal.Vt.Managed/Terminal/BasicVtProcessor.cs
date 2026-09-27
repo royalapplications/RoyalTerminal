@@ -546,15 +546,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 _utf8Remaining == 0 &&
                 b is >= 0x20 and < 0x7F)
             {
-                int end = i + 1;
-                while (end < data.Length && data[end] is >= 0x20 and < 0x7F)
-                {
-                    end++;
-                }
-
-                ProcessPrintableAscii(data[i..end]);
+                int length = data[i..].IndexOfAnyExceptInRange((byte)0x20, (byte)0x7E);
+                int end = length < 0 ? data.Length : i + length;
+                PrintSlice(data[i..end]);
                 i = end - 1;
                 continue;
+            }
+
+            if (_state == ParserState.Ground && _utf8Remaining == 0 && b >= 0xC2)
+            {
+                int decoded = PrintUtf8Slice(data[i..]);
+                if (decoded > 0)
+                {
+                    i += decoded - 1;
+                    continue;
+                }
             }
 
             // Finish/reject a partial scalar before interpreting controls, including
@@ -675,14 +681,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (consumed == 0) consumed = data.Length;
         _continuation.Track(data[continuationSegmentStart..consumed],
             continuationStart < continuationSegmentStart ? -1 : continuationStart - continuationSegmentStart, IsParserGround);
-    }
-
-    private void ProcessPrintableAscii(ReadOnlySpan<byte> data)
-    {
-        for (int index = 0; index < data.Length; index++)
-        {
-            PutChar(data[index]);
-        }
     }
 
     /// <inheritdoc />
@@ -3493,11 +3491,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     break;
                 }
 
-                int count = Math.Max(1, p0);
-                for (int i = 0; i < count; i++)
-                {
-                    PutChar(_lastGraphicCodepoint);
-                }
+                PrintRepeat(Math.Max(1, p0));
                 break;
             }
 

@@ -14,6 +14,9 @@ internal struct ManagedCharsetState
     public ManagedCharsetState() => _bits = 2 << 10; // UTF-8 sets; GL=G0, GR=G2.
     internal readonly ushort Bits => _bits;
 
+    internal readonly bool IsPrintIdentity => (_bits >> 12) == 0 &&
+        ((_bits >> (((_bits >> 8) & 3) * 2)) & 3) <= 1;
+
     internal static ManagedCharsetState FromSnapshot(Snapshots.GhosttySnapshotCharset state)
         => new() { _bits = state.Bits };
 

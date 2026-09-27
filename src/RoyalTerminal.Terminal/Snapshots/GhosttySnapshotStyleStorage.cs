@@ -105,6 +105,32 @@ internal sealed class GhosttySnapshotStyleStorage
         StoreCell(index, _cursorId);
     }
 
+    // Terminal.printSlice updates a contiguous old-style run's references once.
+    // The cursor already owns its style, so this cannot grow or rehash the set.
+    internal void WriteCursorToCells(int start, int count)
+    {
+        int end = checked(start + count);
+        for (int index = start; index < end;)
+        {
+            int id = CellId(index), next = index + 1;
+            while (next < end && CellId(next) == id) next++;
+            if (id != _cursorId)
+            {
+                _styles.ReleaseMultiple(id, next - index);
+                _styles.UseMultiple(_cursorId, next - index);
+                for (; index < next; index++)
+                {
+                    RemoveCell(index);
+                    if (_cursorId != 0) StoreCell(index, _cursorId);
+                }
+            }
+            else
+            {
+                for (; index < next; index++) _observedInlineStyles?.Remove(index);
+            }
+        }
+    }
+
     internal void ClearCell(int index)
     {
         int id = RemoveCell(index);

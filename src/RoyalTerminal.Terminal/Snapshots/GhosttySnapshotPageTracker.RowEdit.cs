@@ -48,6 +48,13 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (owner is not null) state.Storage.Graphemes.Clear(checked(Offset + column));
         }
 
+        // The printer has checked that these cells contain no grapheme/link
+        // metadata and installed the accepted cursor pen before opening the edit.
+        internal void WriteSimpleCursorRun(int start, int count)
+        {
+            if (owner is not null) state.Storage.Styles.WriteCursorToCells(checked(Offset + start), count);
+        }
+
         internal void Write(int column, GhosttySnapshotStyle style)
         {
             if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;

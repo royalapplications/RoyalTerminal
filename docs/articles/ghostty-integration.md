@@ -13,6 +13,48 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Batched managed printing
+
+Managed input now writes eligible narrow and wide runs with one row-local cell
+template and one writable COW span. ASCII uses the runtime's vectorized range
+scan without decoding; UTF-8 and REP use bounded 256-codepoint stack storage.
+Snapshot-backed rows update contiguous old-style reference counts in groups.
+Wrapping, page transitions, complex cells, hyperlinks, grapheme joins, character
+sets, insert mode and disabled wrap retain the scalar printer's semantics.
+Incomplete UTF-8 remains with the streaming decoder. Managed cells contain CLR
+references, so Ghostty's packed-u64 SIMD stores are not copied into their layout.
+
+The behavior follows Ghostty's
+[printSlice implementation](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/Terminal.zig)
+and [batched REP change](https://github.com/ghostty-org/ghostty/pull/13625).
+[Windows Terminal's string writer](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+and [xterm.js's print/REP handlers](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
+also share printing paths. RoyalTerminal retains Ghostty's last-codepoint REP,
+not xterm.js's whole-grapheme extension.
+
+`ManagedPrintSliceTests` compares bulk input against byte-at-a-time scalar input,
+native Ghostty, retained COW readers, snapshot style capacities and round trips.
+Three seeded edit/resize sequences add 900 mutation checkpoints. The maintained
+`--managed-print` benchmark compares printing only, without PTY or renderer work.
+One local macOS arm64 Release comparison against `b649ce2`, with tiered compilation
+disabled in both processes to exclude tier-promotion timing, measured the median
+of seven 25,000-feed samples after 25,000 warmups:
+
+| Workload | Before (ms) | Batched (ms) |
+| --- | ---: | ---: |
+| ASCII row redraw | 71.151 | 7.823 |
+| Narrow Unicode row redraw | 92.116 | 16.312 |
+| Wide-cell overwrite (scalar cleanup) | 79.386 | 78.839 |
+| REP | 72.421 | 11.105 |
+| Alternating styled redraw | 142.780 | 18.101 |
+| Snapshot-backed styled redraw | 1244.675 | 267.859 |
+| DEC special charset (scalar) | 71.262 | 75.185 |
+
+Allocations were unchanged: zero in the untracked workloads and 100,000,000 bytes
+per sample for snapshot-backed styled redraws, including their existing SGR/page
+bookkeeping. These isolated numbers do not establish application throughput,
+cross-platform performance, or gains for every fallback workload.
+
 ## Snapshot history accounting
 
 Incremental history admission measures logical Ghostty page bytes, not CLR heap

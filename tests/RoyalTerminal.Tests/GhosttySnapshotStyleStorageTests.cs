@@ -16,6 +16,23 @@ public sealed class GhosttySnapshotStyleStorageTests
     private static GhosttySnapshotStyle Faint => new(default, default, default, 4);
 
     [Fact]
+    public void BatchedCursorWritesPreserveGroupedReferencesAcrossChunkBoundaries()
+    {
+        GhosttySnapshotStyleStorage bulk = new(8), scalar = new(8);
+        foreach (GhosttySnapshotStyle pen in new[] { Bold, Italic, default, Faint, Faint, default })
+        {
+            Assert.Equal(scalar.ChangeCursor(pen), bulk.ChangeCursor(pen));
+            bulk.WriteCursorToCells(200, 600);
+            for (int index = 200; index < 800; index++) scalar.ChangeCell(index, pen);
+            Assert.Equal(scalar.CellCount, bulk.CellCount);
+            Assert.Equal(scalar.Count, bulk.Count);
+            for (int index = 0; index < 900; index++) Assert.Equal(scalar.CellStyle(index), bulk.CellStyle(index));
+        }
+        Assert.Equal(0, bulk.CellCount);
+        Assert.Equal(0, bulk.Count);
+    }
+
+    [Fact]
     public void CursorOnlyChangesReuseDeadTailWithoutAccumulatingStyles()
     {
         GhosttySnapshotStyleStorage storage = new(4);
