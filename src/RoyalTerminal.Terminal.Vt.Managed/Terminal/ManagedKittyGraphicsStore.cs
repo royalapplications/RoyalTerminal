@@ -147,6 +147,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         _nextImageId = 2147483647;
         _nextInternalPlacementId = 0;
         _marginScrollRestores.Clear();
+        _publication = null;
         _storedBytes = 0;
         _generation++;
     }
@@ -324,7 +325,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         internal bool PreferredOver(PlacementKey other) => Internal != other.Internal ? !Internal : Id < other.Id;
     }
 
-    internal sealed class Placement(TerminalScreenAnchor? anchor, PlacementKey? parent, bool virtualPlacement,
+    internal sealed partial class Placement(TerminalScreenAnchor? anchor, PlacementKey? parent, bool virtualPlacement,
         int horizontalOffset, int verticalOffset, ManagedKittyPlacementOptions options)
     {
         internal TerminalScreenAnchor? Anchor { get; } = anchor;

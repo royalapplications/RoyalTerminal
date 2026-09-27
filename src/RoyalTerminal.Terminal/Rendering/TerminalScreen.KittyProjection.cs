@@ -20,16 +20,60 @@ public sealed partial class TerminalScreen
     private TerminalKittyAnchoredPlacement[]? _kittyAnchoredPlacements;
     private KittyProjectionState? _kittyProjectionState;
 
-    /// <summary>Retains tracked placement recipes, including images outside the viewport.</summary>
+    /// <summary>
+    /// Retains tracked placement recipes, including images outside the viewport.
+    /// Pixel-only updates preserve immutable projection/placeholder caches. Anchor
+    /// moves and cell edits are still detected when the next frame is projected.
+    /// </summary>
     internal void ReplaceAnchoredKittyGraphics(
         IReadOnlyList<TerminalKittyImageSource> images,
-        IReadOnlyList<TerminalKittyAnchoredPlacement> placements)
+        IReadOnlyList<TerminalKittyAnchoredPlacement> placements,
+        IReadOnlyList<TerminalKittyPlaceholderTarget> targets,
+        IReadOnlyList<TerminalKittyRelativePlacement> relatives,
+        uint cellWidth, uint cellHeight)
     {
+        if (MatchesAnchoredKittyPlacements(placements) && MatchesKittyImageDimensions(images) &&
+            MatchesKittyPlaceholderScene(targets, relatives, cellWidth, cellHeight))
+        {
+            // Image registry ownership is independent in every screen state copy.
+            for (int i = 0; i < images.Count; i++) _kittyImagesById[images[i].ImageId] = images[i];
+            InvalidateViewport();
+            return;
+        }
+
         ReplaceKittyGraphics(images, null);
         _kittyAnchoredPlacements = new TerminalKittyAnchoredPlacement[placements.Count];
         for (int i = 0; i < placements.Count; i++) _kittyAnchoredPlacements[i] = placements[i];
-        Array.Sort(_kittyAnchoredPlacements, static (left, right) =>
-            TerminalKittyImagePlacement.ComparePaintOrder(left.Geometry, right.Geometry));
+        // The publisher supplies paint-ordered recipes. Keep that order for
+        // comparison and preserve the existing ordering of equal-z placements.
+        SetKittyPlaceholderScene(targets, relatives, cellWidth, cellHeight);
+    }
+
+    private bool MatchesAnchoredKittyPlacements(IReadOnlyList<TerminalKittyAnchoredPlacement> placements)
+    {
+        if (_kittyAnchoredPlacements is null || _kittyAnchoredPlacements.Length != placements.Count) return false;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            TerminalKittyAnchoredPlacement left = _kittyAnchoredPlacements[i], right = placements[i];
+            if (!ReferenceEquals(left.Anchor, right.Anchor) || left.ColumnOffset != right.ColumnOffset ||
+                left.RowOffset != right.RowOffset || left.Columns != right.Columns || left.Rows != right.Rows ||
+                !TerminalKittyImagePlacement.GeometryEquals(left.Geometry, right.Geometry)) return false;
+        }
+        return true;
+    }
+
+    private bool MatchesKittyImageDimensions(IReadOnlyList<TerminalKittyImageSource> images)
+    {
+        if (_kittyImagesById.Count != images.Count) return false;
+        for (int i = 0; i < images.Count; i++)
+        {
+            TerminalKittyImageSource image = images[i];
+            // Placeholder geometry also depends on source dimensions, even
+            // when the virtual placement's ID and cell extent are unchanged.
+            if (!_kittyImagesById.TryGetValue(image.ImageId, out TerminalKittyImageSource? prior) ||
+                prior.WidthPx != image.WidthPx || prior.HeightPx != image.HeightPx) return false;
+        }
+        return true;
     }
 
     private void RefreshKittyProjection()
