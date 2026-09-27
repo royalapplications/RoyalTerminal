@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using RoyalTerminal.Avalonia.Rendering;
 using SkiaSharp;
 using Xunit;
@@ -187,13 +188,21 @@ public sealed class TerminalPreferredEmojiFontTests
         SKTypeface preferred = Load("NotoColorEmoji.ttf");
         Matcher matcher = new(() => preferred);
         using TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
-        for (int i = 0; i < 100; i++) _ = resolver.ResolveTypeface(primary, "#\uFE0F", CultureInfo.InvariantCulture);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++) _ = resolver.ResolveTypeface(primary, "#\uFE0F", CultureInfo.InvariantCulture);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Warm the measured method as well as the resolver. Runtime tiering
+        // and assertion setup must not be counted as steady-state font work.
+        for (int i = 0; i < 10; i++) _ = MeasureWarmPreferredFallback(resolver, primary);
+        long allocated = MeasureWarmPreferredFallback(resolver, primary);
         Assert.Equal(0, allocated);
         Assert.Single(matcher.Families);
         Assert.Equal(0, matcher.CharacterRequests);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long MeasureWarmPreferredFallback(TerminalFontResolver resolver, SKTypeface primary)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) _ = resolver.ResolveTypeface(primary, "#\uFE0F", CultureInfo.InvariantCulture);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     [Fact]
