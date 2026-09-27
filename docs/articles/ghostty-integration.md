@@ -274,6 +274,39 @@ coverage, primary ownership, negative caching and whole-grapheme fallback.
 foreground font initialization. These are isolated font timings, not a
 first-window or end-to-end rendering speedup claim.
 
+## Managed color publication
+
+Ghostty's [shared dynamic-palette defaults](https://github.com/ghostty-org/ghostty/commit/d1cd56a56c4244d9d9fadae028cbffc23a1d3d1a)
+avoid duplicating configured defaults per terminal. Managed color state already
+shares its immutable configured theme; it now also caches its latest effective
+theme and palette independently. Repeated identical OSC overrides and resets of
+absent overrides reuse the render view. Foreground/background/cursor changes
+retain the existing materialized palette. Actual palette changes, a different
+configured palette and snapshot installation invalidate the appropriate caches.
+Each owner retains at most one effective theme/palette, not a history of colors.
+
+Equal-to-default application overrides still acquire and retain their explicit
+mask, survive configuration changes and reset to the newest configured default.
+Snapshot nullable defaults remain protocol state rather than host render fallbacks.
+Published themes/palettes and COW row readers remain immutable. Palette batches
+copy each backing array once and apply both configured and application explicit
+flags directly; `WithColor` also avoids its former redundant defensive recopy.
+Public constructors and exported arrays still make defensive copies. Screen
+theme revision, invalidation and recoloring behavior is unchanged.
+
+[Windows Terminal RenderSettings](https://github.com/microsoft/terminal/blob/main/src/renderer/base/RenderSettings.cpp)
+and [xterm.js ThemeService](https://github.com/xtermjs/xterm.js/blob/master/src/browser/services/ThemeService.ts)
+also distinguish current colors from reset defaults. Ghostty defines the managed
+override-mask/configuration contract; the immutable caching is a CLR-specific
+equivalent, not a transplant of native palette storage. Eighteen new cases cover
+sharing, repeat allocations, dynamic changes, equal defaults, configuration,
+reset, invalid batches, defensive ownership, snapshot installation and held/COW
+publication. These tests and `--managed-colors` are authored but unrun. Its six
+scenarios separate repeated OSC colors, cursor changes with an overridden palette,
+palette changes/resets and immutable palette copies. Allocation and timing
+comparisons with the previous implementation remain deferred to final validation;
+no measured speedup is claimed.
+
 ## Managed snapshot record scratch
 
 The managed binary snapshot encoder follows Ghostty's

@@ -47,6 +47,12 @@ if (args.Contains("--managed-raster", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-colors", StringComparer.Ordinal))
+{
+    ManagedColorBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
 {
     ApcIngestionBenchmark.Run();

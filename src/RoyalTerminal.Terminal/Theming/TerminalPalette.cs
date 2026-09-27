@@ -14,6 +14,14 @@ public sealed class TerminalPalette
     private readonly uint[] _colors;
     private readonly bool[] _explicit;
 
+    // Only internally cloned arrays may transfer ownership. Public construction
+    // and ToArray remain defensive copies, so published palettes stay immutable.
+    private TerminalPalette(uint[] ownedColors, bool[] ownedExplicit)
+    {
+        _colors = ownedColors;
+        _explicit = ownedExplicit;
+    }
+
     /// <summary>
     /// Initializes a palette from an exact 256-entry color array.
     /// </summary>
@@ -94,6 +102,21 @@ public sealed class TerminalPalette
     /// </summary>
     public uint[] ToArray() => _colors.ToArray();
 
+    /// <summary>Copies a batch of application overrides into one immutable palette.</summary>
+    internal TerminalPalette WithOverrides(Dictionary<int, uint> overrides)
+    {
+        if (overrides.Count == 0) return this;
+        uint[] colors = (uint[])_colors.Clone();
+        bool[] explicitEntries = (bool[])_explicit.Clone();
+        foreach ((int index, uint color) in overrides)
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)PaletteSize);
+            colors[index] = color;
+            explicitEntries[index] = true;
+        }
+        return new(colors, explicitEntries);
+    }
+
     /// <summary>
     /// Returns a new palette with one entry updated.
     /// </summary>
@@ -112,7 +135,7 @@ public sealed class TerminalPalette
             nextExplicit[index] = true;
         }
 
-        return new TerminalPalette(nextColors, EnumerateExplicit(nextExplicit));
+        return new TerminalPalette(nextColors, nextExplicit);
     }
 
     /// <summary>
@@ -139,16 +162,5 @@ public sealed class TerminalPalette
             TerminalThemeDefaults.Base16Canonical.AsSpan(),
             TerminalPaletteGenerationMode.Canonical);
         return new TerminalPalette(colors);
-    }
-
-    private static IEnumerable<int> EnumerateExplicit(bool[] explicitMap)
-    {
-        for (int i = 0; i < explicitMap.Length; i++)
-        {
-            if (explicitMap[i])
-            {
-                yield return i;
-            }
-        }
     }
 }

@@ -10,6 +10,10 @@ namespace RoyalTerminal.Terminal;
 internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
 {
     private TerminalTheme _configuredTheme = configuredTheme;
+    // Immutable render views belong to this color-state owner. Dynamic RGB
+    // changes need a new theme, not another 256-entry palette materialization.
+    private TerminalTheme? _effectiveTheme = configuredTheme;
+    private TerminalPalette? _effectivePalette = configuredTheme.Palette;
     private Dictionary<int, uint>? _paletteOverrides;
     private uint? _foreground;
     private uint? _background;
@@ -20,6 +24,8 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
 
     internal void Configure(TerminalTheme theme)
     {
+        if (!ReferenceEquals(_configuredTheme.Palette, theme.Palette)) _effectivePalette = null;
+        if (!ReferenceEquals(_configuredTheme, theme)) _effectiveTheme = null;
         _configuredTheme = theme;
         _defaultForeground = theme.DefaultForeground;
         _defaultBackground = theme.DefaultBackground;
@@ -49,6 +55,8 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
         // protocol/snapshot state; the host fallback is only for rendering.
         _configuredTheme = configured;
         _paletteOverrides = overrides;
+        _effectiveTheme = null;
+        _effectivePalette = null;
         _defaultForeground = Argb(header.Foreground.Default);
         _defaultBackground = Argb(header.Background.Default);
         _defaultCursor = Argb(header.CursorColor.Default);
@@ -80,7 +88,12 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
 
     internal void SetPalette(int index, uint color)
     {
+        // Equal-to-default is still an explicit OSC override: only an
+        // already-recorded identical override is a no-op.
+        if (_paletteOverrides is not null && _paletteOverrides.TryGetValue(index, out uint previous) && previous == color) return;
         (_paletteOverrides ??= new())[index] = color;
+        _effectiveTheme = null;
+        _effectivePalette = null;
     }
 
     internal uint GetPalette(int index) => _paletteOverrides is not null && _paletteOverrides.TryGetValue(index, out uint color)
@@ -90,48 +103,45 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
     {
         if (index is int value)
         {
-            _paletteOverrides?.Remove(value);
+            if (_paletteOverrides?.Remove(value) != true) return;
         }
         else
         {
-            _paletteOverrides?.Clear();
+            if (_paletteOverrides is not { Count: > 0 }) return;
+            _paletteOverrides.Clear();
         }
+        _effectiveTheme = null;
+        _effectivePalette = null;
     }
 
     internal void SetDynamic(int selector, uint? color)
     {
         switch (selector)
         {
-            case 10: _foreground = color; break;
-            case 11: _background = color; break;
-            case 12: _cursor = color; break;
+            case 10 when _foreground != color: _foreground = color; break;
+            case 11 when _background != color: _background = color; break;
+            case 12 when _cursor != color: _cursor = color; break;
+            default: return;
         }
+        _effectiveTheme = null;
     }
 
     internal TerminalTheme GetEffectiveTheme()
     {
+        if (_effectiveTheme is { } cached) return cached;
         if (_foreground is null && _background is null && _cursor is null &&
             (_paletteOverrides is null || _paletteOverrides.Count == 0))
         {
             // Share the immutable configured palette until an application changes it.
-            return _configuredTheme;
+            _effectivePalette = _configuredTheme.Palette;
+            return _effectiveTheme = _configuredTheme;
         }
 
-        TerminalPalette palette = _configuredTheme.Palette;
-        if (_paletteOverrides is { Count: > 0 })
-        {
-            uint[] colors = palette.ToArray();
-            HashSet<int> explicitEntries = new(palette.ExplicitOverrideIndexes);
-            foreach (KeyValuePair<int, uint> entry in _paletteOverrides)
-            {
-                colors[entry.Key] = entry.Value;
-                explicitEntries.Add(entry.Key);
-            }
+        TerminalPalette palette = _effectivePalette ??= _paletteOverrides is { Count: > 0 }
+            ? _configuredTheme.Palette.WithOverrides(_paletteOverrides)
+            : _configuredTheme.Palette;
 
-            palette = new TerminalPalette(colors, explicitEntries);
-        }
-
-        return new TerminalTheme(
+        return _effectiveTheme = new TerminalTheme(
             _foreground ?? _configuredTheme.DefaultForeground,
             _background ?? _configuredTheme.DefaultBackground,
             _cursor ?? _configuredTheme.CursorColor,
