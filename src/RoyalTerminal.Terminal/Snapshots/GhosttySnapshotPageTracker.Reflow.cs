@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Diagnostics.CodeAnalysis;
 using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Terminal.Snapshots;
@@ -52,13 +53,39 @@ internal sealed partial class GhosttySnapshotPageTracker
         _pages.AddOrUpdate(page, state);
     }
 
+    private bool TryGetCurrentState(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        [NotNullWhen(true)] out State? current)
+    {
+        current = null;
+        if (page.MetadataOverflow || !_pages.TryGetValue(page, out State? state)) return false;
+        // IReadOnlyList enumeration boxes List<T>'s enumerator. Indexing also
+        // lets the combined quota census validate all metadata in one pass.
+        for (int i = 0; i < rows.Count; i++)
+        {
+            TerminalRow row = rows[i];
+            if (!ReferenceEquals(row.SnapshotAllocation, page) ||
+                !state.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong? revision) || revision != row.SnapshotMetadataRevision)
+                return false;
+        }
+        current = state;
+        return true;
+    }
+
+    internal bool TryGetMetadataUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        out GhosttySnapshotMetadataUsage usage)
+    {
+        usage = default;
+        if (!TryGetCurrentState(page, rows, out State? state)) return false;
+        usage = new((ulong)state.Storage.Styles.Count, (ulong)state.Storage.Graphemes.Count,
+            state.Storage.Graphemes.AllocatedBytes, 0, (ulong)state.Storage.Hyperlinks.Count,
+            (ulong)state.Storage.Hyperlinks.CellCount, state.Storage.Hyperlinks.StringBytes);
+        return true;
+    }
+
     internal bool TryGetStyleUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows, out int count)
     {
         count = 0;
-        if (page.MetadataOverflow || !_pages.TryGetValue(page, out State? state)) return false;
-        foreach (TerminalRow row in rows)
-            if (!state.Revisions.TryGetValue(row.SnapshotAllocationRow, out ulong? revision) || revision != row.SnapshotMetadataRevision)
-                return false;
+        if (!TryGetCurrentState(page, rows, out State? state)) return false;
         count = state.Storage.Styles.Count;
         return true;
     }
@@ -67,7 +94,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         out ulong cells, out ulong bytes)
     {
         cells = bytes = 0;
-        if (!TryGetStyleUsage(page, rows, out _) || !_pages.TryGetValue(page, out State? state)) return false;
+        if (!TryGetCurrentState(page, rows, out State? state)) return false;
         cells = (ulong)state.Storage.Graphemes.Count;
         bytes = state.Storage.Graphemes.AllocatedBytes;
         return true;
@@ -77,7 +104,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         out ulong links, out ulong cells, out ulong bytes)
     {
         links = cells = bytes = 0;
-        if (!TryGetStyleUsage(page, rows, out _) || !_pages.TryGetValue(page, out State? state)) return false;
+        if (!TryGetCurrentState(page, rows, out State? state)) return false;
         links = (ulong)state.Storage.Hyperlinks.Count;
         cells = (ulong)state.Storage.Hyperlinks.CellCount;
         bytes = state.Storage.Hyperlinks.StringBytes;

@@ -166,6 +166,13 @@ public sealed partial class TerminalScreen
         catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
     }
 
+    internal bool TryGetSnapshotMetadataUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows,
+        out GhosttySnapshotMetadataUsage usage)
+    {
+        usage = default;
+        return _snapshotPageTracker?.TryGetMetadataUsage(page, rows, out usage) == true;
+    }
+
     internal bool TryGetSnapshotStyleUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows, out int count)
     {
         count = 0;

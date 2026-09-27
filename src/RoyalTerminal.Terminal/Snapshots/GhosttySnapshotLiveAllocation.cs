@@ -124,23 +124,19 @@ internal static class GhosttySnapshotLiveAllocation
     private static bool TryMeasureCapacity(TerminalScreen screen, List<TerminalRow> rows,
         GhosttySnapshotAllocation layout, GhosttySnapshotPageCapacity original, out GhosttySnapshotPageCapacity capacity)
     {
-        int trackedStyleCount = 0;
-        bool trackedStyles = rows[0].SnapshotAllocation is { } page && screen.TryGetSnapshotStyleUsage(page, rows, out trackedStyleCount);
-        HashSet<GhosttySnapshotStyle>? styles = trackedStyles ? null : [];
+        GhosttySnapshotMetadataUsage trackedUsage = default;
+        bool tracked = rows[0].SnapshotAllocation is { } page && screen.TryGetSnapshotMetadataUsage(page, rows, out trackedUsage);
+        HashSet<GhosttySnapshotStyle>? styles = tracked ? null : [];
         int columns = 1;
-        ulong graphemes = 0, temporaryGrapheme = 0, graphemeCells = 0, strings = 0, linkedCells = 0;
-        bool trackedGraphemes = rows[0].SnapshotAllocation is { } owner &&
-            screen.TryGetSnapshotGraphemeUsage(owner, rows, out graphemeCells, out graphemes);
-        ulong trackedLinkCount = 0;
-        bool trackedLinks = rows[0].SnapshotAllocation is { } linkOwner &&
-            screen.TryGetSnapshotHyperlinkUsage(linkOwner, rows, out trackedLinkCount, out linkedCells, out strings);
-        HashSet<int>? links = trackedLinks ? null : [];
+        ulong graphemes = trackedUsage.GraphemeBytes, temporaryGrapheme = 0, graphemeCells = trackedUsage.GraphemeCells,
+            strings = trackedUsage.StringBytes, linkedCells = trackedUsage.HyperlinkCells;
+        HashSet<int>? links = tracked ? null : [];
         foreach (TerminalRow row in rows)
         {
             columns = Math.Max(columns, row.PreservedColumns);
             // At quota checkpoints the mutation tracker already owns exact
             // counts. Do not scan every cell of fully accounted live history.
-            if (trackedStyles && trackedGraphemes && trackedLinks) continue;
+            if (tracked) continue;
             foreach (ref readonly TerminalCell cell in row.ReadOnlyPreservedCells)
             {
                 if (styles is not null)
@@ -148,7 +144,7 @@ internal static class GhosttySnapshotLiveAllocation
                     GhosttySnapshotStyle style = GhosttySnapshotLivePage.EncodeStyle(in cell);
                     if (style != default) styles.Add(style);
                 }
-                if (!trackedGraphemes && cell.Grapheme is { Length: > 0 } text)
+                if (cell.Grapheme is { Length: > 0 } text)
                 {
                     ulong scalars = 0;
                     foreach (Rune _ in text.EnumerateRunes()) scalars++;
@@ -178,9 +174,8 @@ internal static class GhosttySnapshotLiveAllocation
         }
         // A current event tracker is authoritative: inline background-only
         // cells need no style entry, while an unprinted cursor can own one.
-        int styleCount = trackedStyles ? trackedStyleCount : styles!.Count;
-        GhosttySnapshotMetadataUsage usage = new((ulong)styleCount, graphemeCells, graphemes, temporaryGrapheme,
-            trackedLinks ? trackedLinkCount : (ulong)links!.Count, linkedCells, strings);
+        GhosttySnapshotMetadataUsage usage = new(tracked ? trackedUsage.Styles : (ulong)styles!.Count,
+            graphemeCells, graphemes, temporaryGrapheme, tracked ? trackedUsage.Hyperlinks : (ulong)links!.Count, linkedCells, strings);
         return layout.TryFitMetadata(original with
         {
             Columns = (ushort)Math.Max(columns, original.Columns),

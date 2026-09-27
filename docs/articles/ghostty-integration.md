@@ -729,6 +729,20 @@ have committed. Twelve managed rollback/recovery cases and two native collision/
 pin regressions are authored but unrun. Rebuild the native extension before
 executing the native regressions: the previous library loops on their fixture.
 
+Quota capacity measurement now obtains styles, grapheme cells/bytes and hyperlink
+owners/cells/string bytes through one current-page census. It checks every supplied
+row revision once, rejects foreign page identities, and uses indexed access rather
+than boxed `IReadOnlyList` enumerators. Individual diagnostic queries share that
+allocation-free gate. Cursor-only references, occupied allocator slices and COW
+owners remain authoritative; dirty/untracked pages retain the existing cell-based
+fallback. This reduces revision walks and weak-table lookups without changing
+Ghostty's native allocation accounting or growth projection. Twelve new counter,
+single-pass, invalidation, identity, COW, host-write and warm-allocation cases are
+authored but unrun. `--managed-snapshot-usage` compares one combined query against
+three indexed queries for current and dirty-tail pages at four row counts; that
+paired baseline isolates traversal work, not the old enumerator allocations.
+Full checkpoint costs and before/after profiling remain unmeasured.
+
 This is not yet exact mutable allocator parity: the full failure/degradation and
 mutation-order audit remains unfinished. Cursor-style pressure splitting uses
 exact live row-layout selection, keeps the upper allocator and clones the suffix
