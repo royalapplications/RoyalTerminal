@@ -26,6 +26,16 @@ internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int max
         // Only a successfully stored suffix makes duplicates first-wins. A
         // failed entry cleared its prefix and a later duplicate may still fit.
         if (_suffixes.ContainsKey(cellIndex)) return;
+        if (rawSuffix is not null)
+        {
+            // The grid already filtered this owned array in wire order. Reuse
+            // its valid prefix count instead of decoding the same bytes again.
+            // The allocator still visits every replacement boundary and keeps
+            // the native 64-suffix live limit independently of raw retention.
+            int accepted = Math.Min(rawSuffix.Length, TerminalGraphemeStorage.MaximumSuffixCodepoints);
+            if (TryAccept(cellIndex, accepted)) _suffixes.Add(cellIndex, rawSuffix);
+            return;
+        }
         Span<uint> suffix = stackalloc uint[TerminalGraphemeStorage.MaximumSuffixCodepoints];
         int count = 0;
         for (int i = 0; i < encoded.Length && count < suffix.Length; i += 4)
@@ -34,14 +44,18 @@ internal sealed class GhosttySnapshotGraphemeRestore(uint capacityBytes, int max
             if (cp is 0 or > 0x10FFFF or (>= 0xD800 and <= 0xDFFF)) continue;
             suffix[count++] = cp;
         }
-        if (count == 0 || !TryStore(cellIndex, count)) return;
+        if (TryAccept(cellIndex, count)) _suffixes.Add(cellIndex, suffix[..count].ToArray());
+    }
+
+    private bool TryAccept(int cellIndex, int count)
+    {
+        if (count == 0 || !TryStore(cellIndex, count)) return false;
         if (count > maximumCodepoints - _codepoints)
             throw new InvalidDataException("Snapshot live graphemes exceed the configured codepoint limit.");
         _codepoints += count;
-        // Reuse the validated wire array for the ordinary first entry. A
-        // duplicate accepted only after native allocation failure owns a small
-        // separate array; never substitute it into the lossless raw grid.
-        _suffixes.Add(cellIndex, rawSuffix ?? suffix[..count].ToArray());
+        // A duplicate accepted after allocation failure owns its separate small
+        // array; it never substitutes that retry into the lossless raw grid.
+        return true;
     }
 
     private bool TryStore(int cellIndex, int codepoints)

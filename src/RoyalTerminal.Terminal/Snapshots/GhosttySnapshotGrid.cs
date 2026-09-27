@@ -115,22 +115,11 @@ internal sealed class GhosttySnapshotGrid
                 liveGraphemes?.Read(index, codepoints, null);
                 continue;
             }
-            int valid = 0;
-            for (int i = 0; i < length; i++)
-                if (ValidSuffix(BinaryPrimitives.ReadUInt32LittleEndian(codepoints[(i * 4)..]))) valid++;
-            if (valid == 0) continue;
-            if (valid > maximumSuffixCodepoints - acceptedCodepoints)
-                throw new InvalidDataException("Snapshot graphemes exceed the configured codepoint limit.");
-            uint[] suffix = new uint[valid];
-            int next = 0;
-            for (int i = 0; i < length; i++)
-            {
-                uint cp = BinaryPrimitives.ReadUInt32LittleEndian(codepoints[(i * 4)..]);
-                if (ValidSuffix(cp)) suffix[next++] = cp;
-            }
+            uint[] suffix = GhosttySnapshotSuffixCodec.Read(codepoints, maximumSuffixCodepoints - acceptedCodepoints);
+            if (suffix.Length == 0) continue;
             suffixes.Add(index, suffix);
             cells[index] |= 1; // Canonical kind-one cell, now backed by a suffix.
-            acceptedCodepoints += valid;
+            acceptedCodepoints += suffix.Length;
             liveGraphemes?.Read(index, codepoints, suffix);
         }
         consumed = data.Length - remaining.Length;
@@ -214,8 +203,6 @@ internal sealed class GhosttySnapshotGrid
     }
 
     private static int Width(ulong cell) => (int)((cell >> 42) & 3);
-    private static bool ValidScalar(uint cp) => cp <= 0x10FFFF && cp is not (>= 0xD800 and <= 0xDFFF);
-    private static bool ValidSuffix(uint cp) => cp != 0 && ValidScalar(cp);
 
     private static ReadOnlySpan<byte> Take(ref ReadOnlySpan<byte> remaining, int count)
     {

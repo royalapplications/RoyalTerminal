@@ -422,6 +422,20 @@ a grid scan. An oversized owned suffix is rejected instead of truncating its
 16-bit length field. Decode limits, suffix filtering, page ID resolution and
 live allocator reconstruction remain unchanged.
 
+Suffix decoding additionally counts valid nonzero scalars with runtime vectors
+before allocating the exact admitted output size. All-valid little-endian
+entries bulk-copy into owned arrays; malformed entries retain scalar filtering
+in wire order, including a scalar tail/nonaccelerated/big-endian path. NUL,
+surrogates and values above U+10FFFF do not consume the raw quota. Validated raw
+arrays also supply the live restore's prefix count without decoding those same
+bytes again. Its independent 64-suffix cap, allocation replacement boundaries,
+whole-prefix failure and duplicate retry order remain intact; raw retention can
+still be longer than live storage. This extends the buffered suffix work in
+[Ghostty's codec change](https://github.com/ghostty-org/ghostty/commit/593762cfa)
+without changing the lossless/raw versus bounded/live contract. New scalar-oracle,
+quota, ownership, duplicate/framing and allocator-replay cases are authored but
+unrun; the grid benchmark adds long-valid and filtered suffix workloads.
+
 [Windows Terminal text export](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
 and [xterm.js serialization](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-serialize/src/SerializeAddon.ts)
 do not define this binary format; Ghostty remains the wire reference. New scalar

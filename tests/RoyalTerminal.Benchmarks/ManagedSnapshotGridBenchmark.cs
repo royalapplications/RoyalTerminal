@@ -12,7 +12,7 @@ internal static class ManagedSnapshotGridBenchmark
         Console.WriteLine("Snapshot grid only: encode to Stream.Null / owned decode; median of 7 samples; setup excluded.");
         Console.WriteLine("| Workload | Operation | Iterations | Milliseconds | Allocated bytes |");
         Console.WriteLine("|---|---|---:|---:|---:|");
-        foreach (string name in new[] { "blank", "ascii", "bmp", "styled", "linked", "wide", "graphemes", "sparse-graphemes" })
+        foreach (string name in new[] { "blank", "ascii", "bmp", "styled", "linked", "wide", "graphemes", "sparse-graphemes", "long-graphemes", "filtered-graphemes" })
         {
             ulong[] cells = new ulong[columns * rows];
             Dictionary<int, uint[]> suffixes = [];
@@ -27,10 +27,18 @@ internal static class ManagedSnapshotGridBenchmark
                     "wide" when i % columns < columns - 1 => i % columns % 2 == 0 ? (0x754CUL << 2) | (1UL << 42) : 2UL << 42,
                     _ => (ulong)'x' << 2,
                 };
-                if (name == "graphemes" || name == "sparse-graphemes" && i % 127 == 0)
+                if (name == "graphemes" ||
+                    (name is "sparse-graphemes" or "long-graphemes" or "filtered-graphemes") && i % 127 == 0)
                 {
                     cells[i] |= 1;
-                    suffixes.Add(i, [0x301, 0x302, 0x1F3FB]);
+                    if (name is "long-graphemes" or "filtered-graphemes")
+                    {
+                        // Malformed scalars intentionally exercise wire filtering during decode.
+                        uint[] suffix = new uint[64];
+                        for (int cp = 0; cp < suffix.Length; cp++) suffix[cp] = name == "filtered-graphemes" && cp % 3 == 0 ? 0xD800U : 0x301U;
+                        suffixes.Add(i, suffix);
+                    }
+                    else suffixes.Add(i, [0x301, 0x302, 0x1F3FB]);
                 }
             }
             GhosttySnapshotGrid grid = GhosttySnapshotGrid.FromOwnedCells(columns, new byte[rows], cells, suffixes);
@@ -59,7 +67,7 @@ internal static class ManagedSnapshotGridBenchmark
         for (int i = 0; i < iterations; i++)
         {
             if (decode) last = GhosttySnapshotGrid.Read(encoded, grid.Columns, grid.Rows, grid.Cells.Length,
-                grid.Cells.Length * 3, out _);
+                grid.Cells.Length * 64, out _);
             else grid.WriteTo(Stream.Null);
         }
         double milliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
