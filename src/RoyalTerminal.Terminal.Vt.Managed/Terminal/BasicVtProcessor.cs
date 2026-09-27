@@ -1062,7 +1062,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetApcCommand()
     {
-        _apcBuffer.Clear();
+        ClearGlyphCommandBuffer();
         _apcIdentifier = 0;
         _apcIdentifierLength = 0;
         _apcUnknownCapture.Reset(UnknownSequenceMaxBytes);
@@ -2687,17 +2687,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _apcUnknownCapture.Append(payload);
             return;
         }
-        if (!_apcGlyphEnabled) return;
-        const int limit = 1024 * 1024;
-        int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
-        if (count > 0)
-        {
-            int offset = _apcBuffer.Count;
-            _apcBuffer.EnsureCapacity(offset + count);
-            CollectionsMarshal.SetCount(_apcBuffer, offset + count);
-            payload[..count].CopyTo(CollectionsMarshal.AsSpan(_apcBuffer)[offset..]);
-        }
-        if (count < payload.Length) _apcTruncated = true;
+        AppendGlyphCommand(payload);
     }
 
     private void BeginUnknownApc()
@@ -2721,9 +2711,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             if (_apcGlyphRecognized)
             {
-                if (_apcGlyphEnabled && !_apcTruncated &&
-                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer), _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
-                    _screen.NotifyGlyphGlossaryChanged();
+                ExecuteGlyphCommand();
                 return;
             }
             if (terminated && _apcUnknownRecognized && _apcUnknownCapture.MaximumBytes > 0 &&

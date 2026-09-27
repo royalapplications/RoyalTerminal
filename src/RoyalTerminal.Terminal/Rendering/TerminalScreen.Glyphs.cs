@@ -25,6 +25,10 @@ public sealed partial class TerminalScreen
 
     internal TerminalGlyphGlossary GlyphGlossary => _glyphGlossary ??= new();
 
+    // The protocol can query/clear an empty glossary without allocating it;
+    // first registration constructs it inside its recoverable allocation scope.
+    internal ref TerminalGlyphGlossary? GlyphGlossaryStorage => ref _glyphGlossary;
+
     internal void ReplaceGlyphGlossary(TerminalGlyphGlossary glossary)
     {
         _glyphGlossary = glossary.Count == 0 ? null : glossary;

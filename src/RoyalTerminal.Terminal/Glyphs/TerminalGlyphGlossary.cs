@@ -17,10 +17,21 @@ internal sealed class TerminalGlyphGlossary
     internal bool TryGet(uint codepoint, [NotNullWhen(true)] out TerminalGlyphRegistration? entry) => _entries.TryGetValue(codepoint, out entry);
     internal static bool IsPrivateUse(uint codepoint) => codepoint is >= 0xE000 and <= 0xF8FF or >= 0xF0000 and <= 0xFFFFD or >= 0x100000 and <= 0x10FFFD;
 
-    internal void Register(uint codepoint, TerminalGlyphRegistration entry)
+    internal void Register(uint codepoint, TerminalGlyphRegistration entry,
+        Action<TerminalGlyphAllocation>? allocationCheckpoint = null)
     {
         if (!IsPrivateUse(codepoint)) throw new ArgumentOutOfRangeException(nameof(codepoint));
-        if (_entries.ContainsKey(codepoint)) _order.Remove(codepoint);
+        bool existing = _entries.ContainsKey(codepoint);
+        if (!existing)
+        {
+            // Match Ghostty getOrPut-before-eviction. Reserve both managed
+            // collections before publishing an entry or changing FIFO order.
+            allocationCheckpoint?.Invoke(TerminalGlyphAllocation.RegistryCapacity);
+            _entries.EnsureCapacity(_entries.Count + 1);
+            allocationCheckpoint?.Invoke(TerminalGlyphAllocation.OrderCapacity);
+            _order.EnsureCapacity(_order.Count + 1);
+        }
+        else _order.Remove(codepoint); // Replacement needs no growth.
         _entries[codepoint] = entry;
         _order.Add(codepoint);
         if (_order.Count <= Capacity) return;

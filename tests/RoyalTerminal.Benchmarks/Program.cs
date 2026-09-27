@@ -71,6 +71,12 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--glyph-replies", StringComparer.Ordinal))
+{
+    GlyphReplyBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--graphics-publication", StringComparer.Ordinal))
 {
     GraphicsPublicationBenchmark.Run();

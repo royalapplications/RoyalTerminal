@@ -1437,6 +1437,50 @@ retain the Skia renderer, and other operating systems retain normal rendering,
 matching Ghostty's platform support for this setting. Glyph and font caches are
 bounded, invalidated when font settings change, and disposed with the renderer.
 
+## Glyph failure boundaries and replies
+
+Managed Glyph Protocol buffering now follows the pinned Ghostty APC handler:
+allocation failure or the 1 MiB body limit abandons the whole recognized command
+until exit, silently, without executing a retained prefix or reporting it as an
+unknown APC. An oversized bulk slice is rejected before reserving body storage.
+Small command scratch is reused up to 4096 bytes; larger scratch is released on
+completion, cancellation or rejection. Repeated large commands may consequently
+allocate more than the old permanently retained list; idle retention is bounded.
+
+Registration allocation failures during base64 scratch, outline/entry creation,
+lazy glossary creation or FIFO reservation return `out_of_memory`, respecting
+`reply=0/1/2`. Both dictionary and FIFO capacity are reserved before insertion,
+replacement ordering or eviction; failure leaves old entries/order intact.
+Existing-key replacement needs no reservation. Read-only queries and clear on an
+empty glossary no longer construct storage. Malformed registration codepoints
+report zero, rather than a partially parsed numeric prefix.
+
+Execution returns a value-type result before delivering replies. Register/clear
+requests publish their glyph revision before response formatting or host calls,
+including rejected mutations. Host callback exceptions propagate and are not
+reclassified as glyph-storage failures; owned response-array allocation can also
+still fail. Glyph replies now use bounded stack byte formatting and one owned
+callback array, with no intermediate response strings. Coverage augmentation
+uses the same formatter in both backends. No-consumer or suppressed replies skip
+formatting and coverage lookup entirely.
+
+These boundaries follow Ghostty's [APC handler](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/apc.zig),
+[glyph executor](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/apc/glyph/execute.zig),
+[FIFO glossary](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/apc/glyph/Glossary.zig)
+and `Terminal.glyphProtocol` dirty-before-effect ordering.
+[xterm.js APC handlers](https://github.com/xtermjs/xterm.js/blob/master/src/common/parser/ApcParser.ts)
+also reject oversized captured commands, but do not define Ghostty's glyph FIFO
+or error replies. [Windows Terminal dispatch](https://github.com/microsoft/terminal/blob/main/src/terminal/parser/OutputStateMachineEngine.cpp)
+does not supply this Glyph Protocol contract. The pinned Ghostty behavior is the
+reference; managed small-buffer reuse is an explicit allocation strategy choice.
+
+Fifty-one new cases cover fault stages, verbosity, FIFO eviction/replacement,
+parser recovery, bounded retention, observer ordering, lazy empty storage and
+byte-for-byte reply formatting/ownership. `--glyph-replies` adds six paired
+string-versus-byte encoding workloads. Tests, benchmark measurements and CI are
+deferred to final validation; reduced temporary allocation is the expected
+benefit, not a measured end-to-end performance claim.
+
 ## Graphics scene publication
 
 The shared screen prepares Kitty placements, placeholder lookup and image

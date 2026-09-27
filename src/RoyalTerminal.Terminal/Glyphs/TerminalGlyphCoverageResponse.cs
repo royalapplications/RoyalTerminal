@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Buffers.Text;
-using System.Text;
 
 namespace RoyalTerminal.Terminal.Glyphs;
 
@@ -12,16 +11,7 @@ internal static class TerminalGlyphCoverageResponse
         => Format(codepoint, glossary, HasSystemGlyph(source, codepoint));
 
     private static byte[] Format(uint codepoint, bool glossary, bool system)
-    {
-        string status = (system, glossary) switch
-        {
-            (true, true) => "system,glossary",
-            (true, false) => "system",
-            (false, true) => "glossary",
-            _ => string.Empty,
-        };
-        return Encoding.ASCII.GetBytes($"\u001b_25a1;q;cp={codepoint:x};status={status}\u001b\\");
-    }
+        => TerminalGlyphResponseFormatter.Query(codepoint, glossary, system);
 
     // Only rewrite a complete, canonical query reply emitted by our native
     // library. Other PTY traffic, unknown statuses and framing pass unchanged.

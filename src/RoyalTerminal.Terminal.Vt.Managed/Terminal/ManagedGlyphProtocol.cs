@@ -3,41 +3,40 @@
 
 using System.Buffers;
 using System.Buffers.Text;
-using System.Text;
 using RoyalTerminal.Terminal.Glyphs;
 
 namespace RoyalTerminal.Terminal;
 
 internal static class ManagedGlyphProtocol
 {
-    // Returns whether this is a mutation request, matching Ghostty's dirty flag
-    // even for a rejected registration. Font coverage belongs to the optional
-    // host source, not the parser or the session glossary.
-    internal static bool Execute(ReadOnlySpan<byte> command, TerminalGlyphGlossary glossary, Action<byte[]>? reply,
-        ITerminalGlyphCoverageSource? coverageSource = null)
+    internal readonly record struct Result(byte ResponseKind, bool Mutated = false, uint Codepoint = 0,
+        string? Error = null, bool Glossary = false);
+
+    // Execute without host callbacks so the caller can publish the glyph dirty
+    // revision before formatting/delivering effects, even on a rejected mutation.
+    internal static Result Execute(ReadOnlySpan<byte> command, ref TerminalGlyphGlossary? glossary,
+        Action<TerminalGlyphAllocation>? allocationCheckpoint = null)
     {
-        if (command.IsEmpty || command.Length > 1 && command[1] != ';') return false;
+        if (command.IsEmpty || command.Length > 1 && command[1] != ';') return default;
         ReadOnlySpan<byte> options = command.Length > 1 ? command[2..] : [];
         switch (command[0])
         {
             case (byte)'s':
-                Send("s;fmt=glyf", reply);
-                return false;
+                return new((byte)'s');
             case (byte)'q':
                 if (Option(options, "cp"u8, out ReadOnlySpan<byte> cpText) && Unsigned(cpText, 16, 0x1FFFFF, out uint cp))
-                    reply?.Invoke(TerminalGlyphCoverageResponse.Format(cp, glossary.TryGet(cp, out _), coverageSource));
-                return false;
+                    return new((byte)'q', Codepoint: cp, Glossary: glossary?.TryGet(cp, out _) == true);
+                return default;
             case (byte)'c':
                 string? clearError = null;
-                if (!Option(options, "cp"u8, out cpText)) glossary.Clear();
+                if (!Option(options, "cp"u8, out cpText)) glossary?.Clear();
                 else if (!Unsigned(cpText, 16, 0x1FFFFF, out cp)) clearError = "malformed_payload";
                 else if (!TerminalGlyphGlossary.IsPrivateUse(cp)) clearError = "out_of_namespace";
-                else glossary.Delete(cp);
-                Send(clearError is null ? "c;status=0" : $"c;status=1;reason={clearError}", reply);
-                return true;
+                else glossary?.Delete(cp);
+                return new((byte)'c', Mutated: true, Error: clearError);
             case (byte)'r':
                 int separator = options.LastIndexOf((byte)';');
-                if (separator < 0) return false; // Request classification fails before execution.
+                if (separator < 0) return default; // Request classification fails before execution.
                 ReadOnlySpan<byte> payload = options[(separator + 1)..];
                 options = options[..separator];
                 byte verbosity = 1;
@@ -45,16 +44,36 @@ internal static class ManagedGlyphProtocol
                     verbosity = (byte)(value[0] - '0');
                 cp = 0;
                 bool validCp = Option(options, "cp"u8, out cpText) && Unsigned(cpText, 16, 0x1FFFFF, out cp);
-                string? error = validCp ? Register(options, payload, cp, glossary) : "malformed_payload";
-                if (verbosity != 0 && (verbosity == 1 || error is not null))
-                    Send(error is null ? $"r;cp={cp:x};status=0" : $"r;cp={cp:x};status=1;reason={error}", reply);
-                return true;
+                if (!validCp) cp = 0;
+                string? error = validCp ? Register(options, payload, cp, ref glossary, allocationCheckpoint) : "malformed_payload";
+                bool respond = verbosity != 0 && (verbosity == 1 || error is not null);
+                return new(respond ? (byte)'r' : (byte)0, Mutated: true, Codepoint: cp, Error: error);
             default:
-                return false;
+                return default;
         }
     }
 
-    private static string? Register(ReadOnlySpan<byte> options, ReadOnlySpan<byte> payload, uint cp, TerminalGlyphGlossary glossary)
+    internal static void Send(in Result result, Action<byte[]>? reply, ITerminalGlyphCoverageSource? coverageSource)
+    {
+        if (reply is null || result.ResponseKind == 0) return;
+        byte[] bytes = result.ResponseKind switch
+        {
+            (byte)'s' => "\u001b_25a1;s;fmt=glyf\u001b\\"u8.ToArray(),
+            (byte)'q' => TerminalGlyphCoverageResponse.Format(result.Codepoint, result.Glossary, coverageSource),
+            _ => TerminalGlyphResponseFormatter.Status(result.ResponseKind, result.Codepoint, result.Error),
+        };
+        reply(bytes);
+    }
+
+    private static string? Register(ReadOnlySpan<byte> options, ReadOnlySpan<byte> payload, uint cp,
+        ref TerminalGlyphGlossary? glossary, Action<TerminalGlyphAllocation>? allocationCheckpoint)
+    {
+        try { return RegisterCore(options, payload, cp, ref glossary, allocationCheckpoint); }
+        catch (OutOfMemoryException) { return "out_of_memory"; }
+    }
+
+    private static string? RegisterCore(ReadOnlySpan<byte> options, ReadOnlySpan<byte> payload, uint cp,
+        ref TerminalGlyphGlossary? glossary, Action<TerminalGlyphAllocation>? allocationCheckpoint)
     {
         if (Option(options, "fmt"u8, out ReadOnlySpan<byte> format) && !format.SequenceEqual("glyf"u8)) return "malformed_payload";
         if (!Metric(options, "upm"u8, 1000, out uint upm) ||
@@ -79,11 +98,13 @@ internal static class ManagedGlyphProtocol
                 >= (byte)'0' and <= (byte)'9' or (byte)'+' or (byte)'/')) return "malformed_payload";
         if (padding == 2 && payload[^1] != '=') return "malformed_payload";
 
+        allocationCheckpoint?.Invoke(TerminalGlyphAllocation.DecodeBuffer);
         byte[] buffer = ArrayPool<byte>.Shared.Rent(Math.Max(size, 1));
         try
         {
             if (Base64.DecodeFromUtf8(payload, buffer, out int consumed, out int written) != OperationStatus.Done || consumed != payload.Length)
                 return "malformed_payload";
+            allocationCheckpoint?.Invoke(TerminalGlyphAllocation.Outline);
             if (!TerminalGlyphDecoder.TryDecode(buffer.AsSpan(0, written), out TerminalGlyphOutline? outline, out TerminalGlyphDecodeError error))
                 return error switch
                 {
@@ -94,7 +115,14 @@ internal static class ManagedGlyphProtocol
                 };
             // Ghostty validates options/payload before namespace or FIFO mutation.
             if (!TerminalGlyphGlossary.IsPrivateUse(cp)) return "out_of_namespace";
-            glossary.Register(cp, new(outline, upm, advance, height, width, layout));
+            allocationCheckpoint?.Invoke(TerminalGlyphAllocation.Registration);
+            TerminalGlyphRegistration registration = new(outline, upm, advance, height, width, layout);
+            if (glossary is null)
+            {
+                allocationCheckpoint?.Invoke(TerminalGlyphAllocation.Glossary);
+                glossary = new();
+            }
+            glossary.Register(cp, registration, allocationCheckpoint);
             return null;
         }
         finally { ArrayPool<byte>.Shared.Return(buffer); }
@@ -218,8 +246,4 @@ internal static class ManagedGlyphProtocol
         return found;
     }
 
-    private static void Send(string content, Action<byte[]>? reply)
-    {
-        if (reply is not null) reply(Encoding.ASCII.GetBytes("\u001b_25a1;" + content + "\u001b\\"));
-    }
 }

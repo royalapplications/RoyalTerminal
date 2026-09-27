@@ -31,6 +31,8 @@ public sealed class ManagedGlyphProtocolTests(ITestOutputHelper output)
     [InlineData("c")]
     [InlineData("r;cp=e000;AAAAAAAAAAAAAA==")]
     [InlineData("r;cp=41;AAAAAAAAAAAAAA==")]
+    [InlineData("r;cp=1fffffz;AAAAAAAAAAAAAA==")]
+    [InlineData("r;cp=200000;AAAAAAAAAAAAAA==")]
     [InlineData("r;cp=41;bad")]
     [InlineData("r;cp=dfff;AAAAAAAAAAAAAA==")]
     [InlineData("r;cp=f8ff;AAAAAAAAAAAAAA==")]
