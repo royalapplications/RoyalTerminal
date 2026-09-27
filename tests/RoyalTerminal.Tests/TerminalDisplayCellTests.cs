@@ -75,12 +75,14 @@ public sealed class TerminalDisplayCellTests
         Assert.Equal(0xFFFD, resolver.ResolveTypeface(primary, malformed).ReplacementCodepoint);
     }
 
-    [Fact]
-    public void ReplacementCanUseAnotherOwnedFont()
+    [Theory]
+    [InlineData("\U0010FFFE")]
+    [InlineData("\U0001F1E8\u0301")]
+    public void ReplacementCanUseAnotherOwnedFont(string text)
     {
         using SKTypeface primary = Load("NotoEmoji-Regular.ttf");
         using TerminalFontResolver resolver = new(new ReplacementMatcher());
-        TerminalFontResolution result = resolver.ResolveTypeface(primary, "\U0010FFFE");
+        TerminalFontResolution result = resolver.ResolveTypeface(primary, text);
         Assert.True(result.UsedFallback);
         Assert.Equal(0xFFFD, result.ReplacementCodepoint);
         Assert.True(result.Typeface.ContainsGlyph(0xFFFD));

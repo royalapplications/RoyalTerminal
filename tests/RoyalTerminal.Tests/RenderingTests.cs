@@ -224,6 +224,7 @@ public class RenderingTests
         {
             Assert.Same(baseTypeface, resolution.Typeface);
             Assert.False(resolution.UsedFallback);
+            Assert.Equal(0, resolution.ReplacementCodepoint);
             return;
         }
 
@@ -241,20 +242,33 @@ public class RenderingTests
             : new(expectedEmojiTypeface);
         if (expectedEmojiTypeface is not null &&
             expectedEmojiTypeface.Handle != baseTypeface.Handle &&
+            !TerminalFontCoverage.IsLastResort(expectedEmojiTypeface) &&
             expectedPresentation!.IsColorGlyph(expectedEmojiTypeface.GetGlyph(regionalIndicatorCodepoint)))
         {
             Assert.True(resolution.UsedFallback);
+            Assert.Equal(0, resolution.ReplacementCodepoint);
         }
 
-        if (resolution.UsedFallback)
+        Assert.Equal(baseTypeface.Handle != resolution.Typeface.Handle, resolution.UsedFallback);
+        Assert.False(TerminalFontCoverage.IsLastResort(resolution.Typeface));
+        if (resolution.ReplacementCodepoint != 0)
         {
-            using TerminalGlyphPresentation presentation = new(resolution.Typeface);
-            Assert.True(presentation.IsColorGlyph(resolution.Typeface.GetGlyph(regionalIndicatorCodepoint)));
-            Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
+            // UsedFallback describes font ownership, not source coverage:
+            // U+FFFD can itself require another font (as on Windows CI).
+            Assert.Contains(resolution.ReplacementCodepoint, new[] { 0xFFFD, (int)' ' });
+            Assert.True(resolution.Typeface.ContainsGlyph(resolution.ReplacementCodepoint));
+            if (baseTypeface.ContainsGlyph(0xFFFD))
+            {
+                Assert.Equal(0xFFFD, resolution.ReplacementCodepoint);
+                Assert.Same(baseTypeface, resolution.Typeface);
+            }
             return;
         }
 
-        Assert.Same(baseTypeface, resolution.Typeface);
+        Assert.True(resolution.UsedFallback);
+        Assert.True(resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint));
+        using TerminalGlyphPresentation presentation = new(resolution.Typeface);
+        Assert.True(presentation.IsColorGlyph(resolution.Typeface.GetGlyph(regionalIndicatorCodepoint)));
     }
 
     [Fact]
