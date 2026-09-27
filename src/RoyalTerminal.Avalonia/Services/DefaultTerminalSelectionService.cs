@@ -30,7 +30,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         string? text = null;
         bool usedRendererSelection = false;
 
-        if (screen is not null &&
+        if (owner is TerminalControl control && control.TryReadExpandedWordSelection(out text))
+        {
+            // Visible highlight spans are clipped. A word may start or end in
+            // off-viewport history owned only by the processor (native VT).
+            usedRendererSelection = true;
+        }
+        else if (screen is not null &&
             renderer is not null &&
             !renderer.GetSelectionSpans().IsEmpty)
         {

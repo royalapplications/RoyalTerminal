@@ -39,6 +39,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
     ITerminalSelectionExportSource,
+    ITerminalWordSelectionSource,
+    ITerminalBufferSelectionExportSource,
     ITerminalScreenSnapshotSource,
     ITerminalSnapshotExportSource,
     ITerminalSearchSource,
@@ -1805,15 +1807,19 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private bool TryCreateNativeSelection(
         TerminalSelectionRange selection,
-        out RoyalTerminal.GhosttySharp.GhosttySelection nativeSelection)
+        out RoyalTerminal.GhosttySharp.GhosttySelection nativeSelection,
+        bool absoluteSelection = false)
     {
         TerminalSelectionRange normalized = selection.Normalize();
         int startColumn = Math.Clamp(normalized.StartColumn, 0, Math.Max(0, _screen.Columns - 1));
         int endColumn = Math.Clamp(normalized.EndColumn, 0, Math.Max(0, _screen.Columns - 1));
-        int startRow = Math.Clamp(normalized.StartRow, 0, Math.Max(0, _screen.ViewportRows - 1));
-        int endRow = Math.Clamp(normalized.EndRow, 0, Math.Max(0, _screen.ViewportRows - 1));
         ViewportScrollMapping mapping = GetViewportScrollMapping();
-        ulong viewportOffset = mapping.EffectiveBaseOffsetRows + mapping.EffectiveOffsetRows;
+        int maxRow = absoluteSelection
+            ? (int)Math.Min(int.MaxValue, Math.Max(1UL, mapping.EffectiveTotalRows) - 1)
+            : Math.Max(0, _screen.ViewportRows - 1);
+        int startRow = Math.Clamp(normalized.StartRow, 0, maxRow);
+        int endRow = Math.Clamp(normalized.EndRow, 0, maxRow);
+        ulong viewportOffset = mapping.EffectiveBaseOffsetRows + (absoluteSelection ? 0 : mapping.EffectiveOffsetRows);
         uint startAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)startRow));
         uint endAbsoluteRow = checked((uint)Math.Min(uint.MaxValue, viewportOffset + (ulong)endRow));
 

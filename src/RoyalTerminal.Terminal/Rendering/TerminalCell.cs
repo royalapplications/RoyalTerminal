@@ -10,7 +10,8 @@ using RoyalTerminal.Terminal.Theming;
 namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
-/// Zero-based terminal grid position in viewport coordinates.
+/// Zero-based terminal grid position. Coordinates are viewport-relative unless
+/// the consuming API explicitly specifies absolute buffer coordinates.
 /// </summary>
 public readonly record struct TerminalGridPosition(int Column, int Row);
 

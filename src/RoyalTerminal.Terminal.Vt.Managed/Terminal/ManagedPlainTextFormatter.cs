@@ -9,7 +9,8 @@ namespace RoyalTerminal.Terminal;
 /// <summary>Plain export with Ghostty's deferred blank-cell/row semantics.</summary>
 internal static class ManagedPlainTextFormatter
 {
-    internal static string Format(TerminalScreen screen, in TerminalSnapshotExportOptions options)
+    internal static string Format(TerminalScreen screen, in TerminalSnapshotExportOptions options,
+        bool absoluteSelection = false)
     {
         if (screen.Columns <= 0 || screen.TotalRows <= 0) return string.Empty;
         int firstRow = 0, lastRow = screen.TotalRows - 1;
@@ -19,9 +20,12 @@ internal static class ManagedPlainTextFormatter
         {
             if (screen.ViewportRows <= 0) return string.Empty;
             selection = selection.Normalize();
-            int top = Math.Max(0, screen.TotalRows - screen.ViewportRows - screen.ScrollOffset);
-            firstRow = top + Math.Clamp(selection.StartRow, 0, screen.ViewportRows - 1);
-            lastRow = top + Math.Clamp(selection.EndRow, 0, screen.ViewportRows - 1);
+            int top = absoluteSelection ? 0 : screen.ViewportTopAbsoluteRow;
+            int rows = absoluteSelection ? screen.TotalRows : screen.ViewportRows;
+            int minimumRow = absoluteSelection
+                ? Math.Max(0, screen.TotalRows - screen.ViewportRows - screen.MaxScrollOffset) : 0;
+            firstRow = top + Math.Clamp(selection.StartRow, minimumRow, rows - 1);
+            lastRow = top + Math.Clamp(selection.EndRow, minimumRow, rows - 1);
             firstColumn = Math.Clamp(selection.StartColumn, 0, screen.Columns - 1);
             lastColumn = Math.Clamp(selection.EndColumn, 0, screen.Columns - 1);
             rectangle = selection.Rectangle;

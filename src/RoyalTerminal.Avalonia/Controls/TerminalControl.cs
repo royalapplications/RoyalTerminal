@@ -3904,6 +3904,18 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return new SelectionExtent(column, absoluteRow, column + 1, absoluteRow);
         }
 
+        if (_vtProcessor is ITerminalWordSelectionSource source)
+        {
+            if (source.TryGetWordExtent(new(column, absoluteRow), DefaultWordSelectionDelimiters,
+                out TerminalWordExtent word))
+            {
+                return new SelectionExtent(word.Start.Column, word.Start.Row, word.End.Column, word.End.Row);
+            }
+            return new SelectionExtent(column, absoluteRow, Math.Min(column + 1, Math.Max(1, _screen.Columns)), absoluteRow);
+        }
+
+        // Custom processors without a full-history boundary source retain the
+        // viewport-only shared-cell fallback; never scroll to perform a query.
         int viewportRow = absoluteRow - topRow;
         if ((uint)viewportRow >= (uint)_screen.ViewportRows)
         {

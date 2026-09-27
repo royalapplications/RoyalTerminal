@@ -3233,10 +3233,13 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         return control;
     }
 
-    private static async Task<TerminalControl> CreateTextSelectionControlAsync(string text)
+    private static async Task<TerminalControl> CreateTextSelectionControlAsync(string text,
+        VtProcessorPreference preference = VtProcessorPreference.Managed)
     {
         RecordingTransport transport = new();
-        TerminalControl control = CreateControlWithTransport(transport, preference: VtProcessorPreference.Managed);
+        IVtProcessorFactory? factory = preference == VtProcessorPreference.Native
+            ? new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]) : null;
+        TerminalControl control = CreateControlWithTransport(transport, factory, preference);
         control.Width = 640;
         control.Height = 400;
         Window window = new()
