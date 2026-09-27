@@ -148,6 +148,16 @@ The sixteen additional C exports are declared in
 
 - `ghostty_royal_modify_other_keys_2` copies the live legacy keyboard extension
   flag for host input routing, including synchronized-output holds and snapshots.
+- `ghostty_royal_visibility_get` / `ghostty_royal_visibility_set` expose host-owned
+  visibility independently of focus. The setter returns Ghostty-encoded mode
+  2033 transition bytes into a caller-owned buffer (nine bytes suffice), without
+  callbacks, allocations or VT replay. Serialize with terminal mutations and send
+  returned bytes through the client's ordered response path. Repeated assignments
+  and disabled reports produce no bytes. Invalid arguments do not mutate state;
+  a short buffer reports the required capacity without consuming the transition.
+  Visibility survives resets and is deliberately absent from snapshots, following
+  upstream [#13494](https://github.com/ghostty-org/ghostty/pull/13494).
+
 - `ghostty_royal_password_input_get` / `ghostty_royal_password_input_set` expose
   host-reported password metadata without VT replay or enabling OS secure input.
 - `ghostty_royal_mouse_shift_capture_set` sets or clears the nullable application

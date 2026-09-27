@@ -26,7 +26,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-public sealed class TerminalControlHeadlessInteractionTests
+public sealed partial class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaTheory]
     [InlineData(VtProcessorPreference.Managed)]

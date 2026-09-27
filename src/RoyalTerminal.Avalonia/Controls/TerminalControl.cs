@@ -1207,6 +1207,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             .WithDefaultBackground(ColorToArgb(DefaultBackground))
             .WithCursorColor(ColorToArgb(DefaultForeground));
 
+        _hostVisibility = new TerminalVisibilityObserver(this, OnHostVisibilityChanged);
         InitializeTerminal();
         RegisterKeyboardFallbackHandlers();
         RegisterPointerFallbackHandlers();
@@ -1724,6 +1725,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         Debug.Assert(_screen is not null, nameof(_screen) + " != null");
         IVtProcessor processor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
+        ApplyHostVisibility(processor, _hostVisibility.IsVisible);
         BindNotificationHost(processor, _notificationHost);
         ApplyGlyphCoverageSource(processor);
         ApplySixelGraphicsSettingToProcessor(processor);
@@ -2221,6 +2223,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _hostVisibility.Attach();
         _notificationHostDetached = false;
         BindNotificationHost(_vtProcessor, _notificationHost);
         _searchPaused = false;
@@ -2241,6 +2244,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _hostVisibility.Dispose();
         _notificationHostDetached = true;
         BindNotificationHost(_vtProcessor, null);
         _dragDropBehavior.Cancel();
@@ -2588,11 +2592,14 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void AttachEndpoint(ITerminalEndpoint endpoint)
     {
+        ArgumentNullException.ThrowIfNull(endpoint);
         ResetKeyboardInputState();
         StopPasswordInputMonitoring();
         _mouseModeTracker.Reset();
         ResetPointerButtons();
+        (Endpoint as ITerminalVisibilitySink)?.SetVisibility(false);
         TerminalSessionService.AttachEndpoint(endpoint);
+        (endpoint as ITerminalVisibilitySink)?.SetVisibility(_hostVisibility.IsVisible);
         ApplyContentScaleToEndpoint(endpoint);
 
         if (_renderer is not null)
@@ -2612,6 +2619,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     {
         ResetKeyboardInputState();
         StopPasswordInputMonitoring();
+        (Endpoint as ITerminalVisibilitySink)?.SetVisibility(false);
         TerminalSessionService.DetachEndpoint();
         _mouseModeTracker.Reset();
         ResetPointerButtons();

@@ -3598,7 +3598,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 996: // Report current color scheme.
                 EmitColorSchemeReport();
                 break;
-            case 998: // Report terminal visibility. The C embedding is potentially visible.
+            case 998: // Report host visibility, independently of focus.
                 EmitVisibilityReport();
                 break;
         }
@@ -3618,7 +3618,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void EmitVisibilityReport()
     {
-        ResponseCallback?.Invoke("\x1b[?999;1n"u8.ToArray());
+        ResponseCallback?.Invoke(_potentiallyVisible
+            ? "\x1b[?999;1n"u8.ToArray()
+            : "\x1b[?999;2n"u8.ToArray());
     }
 
     private void EmitInBandSizeReport()

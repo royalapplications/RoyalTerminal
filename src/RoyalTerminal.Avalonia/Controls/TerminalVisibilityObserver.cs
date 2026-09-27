@@ -9,7 +9,7 @@ namespace RoyalTerminal.Avalonia.Controls;
 
 // IsEffectivelyVisibleChanged is internal in Avalonia. Observe public ancestor
 // properties instead; reading the chain also avoids notification-order races.
-internal sealed class TerminalPresenterVisibility(Visual presenter, Action<bool> changed) : IDisposable
+internal sealed class TerminalVisibilityObserver(Visual presenter, Action<bool> changed) : IDisposable
 {
     private readonly List<Visual> _ancestors = new();
     internal bool IsVisible { get; private set; }

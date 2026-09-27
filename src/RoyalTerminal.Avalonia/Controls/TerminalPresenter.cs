@@ -20,7 +20,7 @@ namespace RoyalTerminal.Avalonia.Controls;
 public class TerminalPresenter : Control
 {
     private readonly Action _completeCompositionCommit;
-    private readonly TerminalPresenterVisibility _visibility;
+    private readonly TerminalVisibilityObserver _visibility;
     private CompositionCustomVisual? _compositionVisual;
     internal TerminalDrawHandler? DrawHandler { get; private set; }
     private SkiaTerminalRenderer? _renderer;
@@ -37,7 +37,7 @@ public class TerminalPresenter : Control
     public TerminalPresenter()
     {
         _completeCompositionCommit = CompleteCompositionCommit;
-        _visibility = new TerminalPresenterVisibility(this, SendVisibility);
+        _visibility = new TerminalVisibilityObserver(this, SendVisibility);
     }
 
     /// <summary>

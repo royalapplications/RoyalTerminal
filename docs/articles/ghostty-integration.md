@@ -13,6 +13,37 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Host visibility reports
+
+Both VT processors implement `ITerminalVisibilityState`, following
+[Ghostty #13494](https://github.com/ghostty-org/ghostty/pull/13494): `CSI ? 998 n`
+queries and every enable of mode 2033 report current host visibility; effective
+changes report only while enabled. `CSI ? 999 ; 1 n` means potentially visible,
+and `CSI ? 999 ; 2 n` means known hidden. Repeated host assignments are silent.
+Visibility survives RIS, API/session reset and synchronized-output publication;
+it is not serialized into snapshots or inferred from keyboard focus.
+
+`TerminalControl` observes itself and its visual ancestors, opacity, window
+hide/minimize and attachment. The visibility state is installed before a new VT
+processor consumes input. Updates use the same screen synchronization and response
+path as parsing, so they do not corrupt incomplete CSI/OSC input or wait for a
+render frame. External endpoints can opt into `ITerminalVisibilitySink`; old
+endpoints and ancestors stop receiving updates when detached. Unknown compositor
+occlusion/workspace suspension remains potentially visible: Avalonia's public host
+state does not expose Ghostty GTK's compositor suspension signal.
+
+The native embedding adds two repository-owned visibility accessors. The setter
+uses Ghostty's encoder and a caller-owned nine-byte buffer; it does not replay VT,
+allocate, retain pointers or call through a private wrapper layout. The managed
+wrapper returns owned response bytes for ordered delivery, and the native VT
+adapter forwards these to its normal response callback.
+
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+and [xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
+were checked for their separate focus-reporting paths. Their focus mode is not
+used as a substitute for Ghostty visibility reports. Focused protocol, native
+argument/buffer, snapshot and Avalonia lifecycle tests cover this distinction.
+
 ## Hidden-terminal rendering resources
 
 Both VT engines use the same visibility-aware Skia presenter. Hiding the

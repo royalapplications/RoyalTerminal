@@ -56,6 +56,20 @@ GHOSTTY_API GhosttyResult ghostty_royal_password_input_get(
 GHOSTTY_API GhosttyResult ghostty_royal_password_input_set(
     GhosttyTerminal terminal, uint8_t value);
 
+/** Reads host visibility (0 hidden, 1 potentially visible). Independent of focus,
+ * preserved across resets, not serialized in snapshots. Serialize all access. */
+GHOSTTY_API GhosttyResult ghostty_royal_visibility_get(
+    GhosttyTerminal terminal, uint8_t* output);
+/** Sets host visibility and copies a report only on a change while mode 2033 is
+ * enabled. Send the returned bytes to the client in terminal-response order.
+ * No callbacks, allocation, retained pointers or VT parsing. written is required.
+ * A 9-byte output buffer always suffices; null/zero is valid when no report is
+ * needed. OUT_OF_SPACE sets written to required capacity without changing state
+ * or output bytes. Invalid arguments leave state and outputs unchanged. */
+GHOSTTY_API GhosttyResult ghostty_royal_visibility_set(
+    GhosttyTerminal terminal, uint8_t value, uint8_t* output,
+    size_t capacity, size_t* written);
+
 GHOSTTY_API GhosttyResult ghostty_royal_mouse_state(
     GhosttyTerminal terminal, RoyalMouseState* output);
 

@@ -8,6 +8,47 @@ const RoyalMouseState = extern struct {
     shape: u32 = 8,
 };
 
+export fn ghostty_royal_visibility_get(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    output: ?*u8,
+) callconv(.c) c_int {
+    const result = output orelse return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    result.* = @intFromBool(t.flags.visible);
+    return 0;
+}
+
+// Host events must not enter the VT parser: its input may be mid-sequence.
+// Return the upstream-encoded response to the caller's ordered input writer.
+export fn ghostty_royal_visibility_set(
+    handle: @import("terminal/c/terminal.zig").Terminal,
+    value: u8,
+    output: ?[*]u8,
+    capacity: usize,
+    written: ?*usize,
+) callconv(.c) c_int {
+    const length = written orelse return -2;
+    if (value > 1) return -2;
+    const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
+    const visible = value == 1;
+    const report = t.flags.visible != visible and t.modes.get(.report_visibility);
+    const status = @import("terminal/device_status.zig");
+    if (report) {
+        if (capacity < status.max_visibility_report_encode_size) {
+            length.* = status.max_visibility_report_encode_size;
+            return -3;
+        }
+        const buffer = output orelse return -2;
+        var writer: std.Io.Writer = .fixed(buffer[0..capacity]);
+        status.encodeVisibilityReport(&writer, if (visible) .potentially_visible else .not_visible) catch return -5;
+        length.* = writer.end;
+    } else {
+        length.* = 0;
+    }
+    t.flags.visible = visible;
+    return 0;
+}
+
 export fn ghostty_royal_password_input_get(
     handle: @import("terminal/c/terminal.zig").Terminal,
     output: ?*u8,
