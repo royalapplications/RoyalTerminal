@@ -257,6 +257,14 @@ public sealed class TerminalFontFamilySettingsTests
                 input.Text = "First\nSecond";
                 await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
                 Assert.Equal(new[] { "First", "Second" }, state.FontFamiliesEditor.BuildSettings().Regular);
+                TextBox maps = Assert.Single(expander.GetVisualDescendants().OfType<TextBox>(), e => e.Name == "CodepointFontMapsEditor");
+                maps.Text = "U+2611=Family, With Comma";
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+                Assert.Equal(new[] { "U+2611=Family, With Comma" }, state.FontFamiliesEditor.BuildSettings().CodepointMaps);
+                maps.Text = "invalid mapping";
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+                Assert.True(state.FontFamiliesEditor.HasCodepointMapError);
+                Assert.False(state.ApplyCommand.CanExecute(null));
                 return;
             }
             Assert.Fail("Ordered font-family editor was not available in settings.");

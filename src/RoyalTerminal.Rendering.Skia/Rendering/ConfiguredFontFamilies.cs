@@ -63,6 +63,15 @@ internal sealed class ConfiguredFontFamilies : IDisposable
             AddStyle(settings.Italic, TerminalTypefaceStyle.Italic);
             AddStyle(settings.BoldItalic, TerminalTypefaceStyle.BoldItalic);
             owner.Collection = new(entries.ToArray());
+            if (!settings.CodepointMaps.IsDefaultOrEmpty)
+            {
+                if (!TerminalFontCodepointMap.TryParse(settings.CodepointMaps.AsSpan(), out var mappings, out string? error))
+                    throw new FormatException(error);
+                TerminalTypefaceCodepointMapping[] configured = new TerminalTypefaceCodepointMapping[mappings.Length];
+                for (int i = 0; i < configured.Length; i++)
+                    configured[i] = new(mappings[i].First, mappings[i].Last, mappings[i].FamilyName);
+                owner.Collection = owner.Collection.WithCodepointMappings(configured);
+            }
             return owner;
 
             void AddFamilies(ImmutableArray<string> names, TerminalTypefaceStyle style)

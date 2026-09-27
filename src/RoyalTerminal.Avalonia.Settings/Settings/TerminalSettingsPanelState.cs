@@ -634,6 +634,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         FontFamiliesEditor.PropertyChanged += (_, _) =>
         {
             if (!_suppressDirtyTracking) IsDirty = true;
+            UpdateCommandStates();
         };
         Profiles = [];
 
@@ -698,7 +699,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         DuplicateProfileCommand = new RelayCommand(DuplicateProfile, CanModifySelectedProfile);
         DeleteProfileCommand = new RelayCommand(DeleteSelectedProfile, CanDeleteSelectedProfile);
         SetDefaultProfileCommand = new RelayCommand(SetSelectedAsDefault, CanModifySelectedProfile);
-        ApplyCommand = new RelayCommand(Apply, CanModifySelectedProfile);
+        ApplyCommand = new RelayCommand(Apply, CanApplyDocument);
         SaveCommand = new RelayCommand(Save, CanSaveDocument);
         BrowseFontFileCommand = new RelayCommand(RequestBrowseFontFile);
         AddTextHighlightRuleCommand = new RelayCommand(AddTextHighlightRule);
@@ -1504,6 +1505,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private void Apply()
     {
+        if (FontFamiliesEditor.HasCodepointMapError) return;
         CaptureEditorIntoSelectedProfile();
         ApplyRequested?.Invoke(this, EventArgs.Empty);
         LastOperationStatus = "Applied settings to runtime.";
@@ -1512,6 +1514,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private void Save()
     {
+        if (FontFamiliesEditor.HasCodepointMapError) return;
         CaptureEditorIntoSelectedProfile();
         SaveRequested?.Invoke(this, EventArgs.Empty);
         UpdateCommandStates();
@@ -1556,7 +1559,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private bool CanDeleteSelectedProfile() => SelectedProfile is not null && _profiles.Count > 1;
 
-    private bool CanSaveDocument() => _profiles.Count > 0 && SelectedProfile is not null;
+    private bool CanApplyDocument() => SelectedProfile is not null && !FontFamiliesEditor.HasCodepointMapError;
+
+    private bool CanSaveDocument() => _profiles.Count > 0 && CanApplyDocument();
 
     private TerminalFontRenderingSettings BuildFontRenderingSettings()
     {

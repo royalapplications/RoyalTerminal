@@ -96,8 +96,35 @@ Profile JSON uses generated metadata for the new immutable family-list model.
 The existing profile reader is retained so omitted fields in older documents
 keep their property-initializer defaults.
 
-Per-codepoint overrides, named and disabled/synthetic style policy and exhaustive
-platform fallback enumeration are still distinct
+`FontFamilies.CodepointMaps` adds repeatable `U+XXXX[-U+YYYY][,...]=family`
+overrides, shared by both engines. Mappings preserve order, with the last matching
+range winning even if its family is unavailable. The resolver lazily requests
+the exact regular family and caches both found and missing descriptors; a
+missing glyph falls through to normal selection. Successfully loaded mapping
+faces join the regular collection in discovery order with configured-face
+presentation rules. No font is loaded simply because a mapping was configured.
+
+This follows Ghostty's
+[CodepointResolver](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/CodepointResolver.zig)
+and [last-range-wins map](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/CodepointMap.zig):
+an available scalar override precedes style/presentation and built-in symbol
+drawing. Whole-grapheme selection still verifies the base's explicit presentation
+and every substantive component, as Ghostty's run iterator does. Text, cursor,
+IME and coverage share the mapping policy without changing stored terminal text.
+Windows Terminal's DirectWrite mapping and xterm.js's canvas/custom-glyph switch
+do not define this explicit range-override policy.
+
+Mappings use the same profile, settings and split-pane propagation as family
+lists. Invalid editor syntax displays a line-specific error and blocks Apply and
+Save; the last valid mappings remain in the profile if the user switches profiles.
+Programmatic malformed mappings throw `FormatException` during normalization.
+Configuration accepts Ghostty's 21-bit range bounds, while non-Unicode-scalar
+values cannot match rendered text. Updating host configuration rebuilds the
+renderer and its caches immediately; unlike standalone Ghostty's new-terminal-only
+reload behavior, this preserves RoyalTerminal's live settings contract.
+
+Named and disabled/synthetic style policy and exhaustive platform fallback
+enumeration are still distinct
 remaining parity requirements. Skia's family/global matching is not claimed to
 enumerate Ghostty's complete platform discovery iterator. The font benchmark
 compares existing single-face discovery with loaded-collection reuse; isolated

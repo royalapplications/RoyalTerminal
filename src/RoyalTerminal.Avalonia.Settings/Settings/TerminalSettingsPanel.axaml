@@ -505,6 +505,13 @@
                     <TextBlock Text="Bold italic" />
                     <TextBox Name="BoldItalicFontFamiliesEditor" Text="{Binding BoldItalic, Mode=TwoWay}"
                              AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Codepoint font overrides" />
+                    <TextBlock Text="One mapping per line, e.g. U+2500-U+257F=My Font. Later ranges win; unavailable fonts or glyphs use normal fallback."
+                               TextWrapping="Wrap" />
+                    <TextBox Name="CodepointFontMapsEditor" Text="{Binding CodepointMaps, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="{Binding CodepointMapError}" IsVisible="{Binding HasCodepointMapError}"
+                               TextWrapping="Wrap" />
                   </StackPanel>
                 </Expander>
               </StackPanel>

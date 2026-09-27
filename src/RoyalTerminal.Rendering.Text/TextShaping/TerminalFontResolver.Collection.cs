@@ -82,12 +82,13 @@ public sealed partial class TerminalFontResolver
         CollectionCodepointKey key = new(style, codepoint, presentation, usedCulture.Name);
         if (!state.Results.TryGetValue(key, out SKTypeface? face))
         {
-            face = FindConfiguredFace(state, style, codepoint, presentation);
+            face = FindCodepointOverride(state, codepoint);
+            face ??= FindConfiguredFace(state, style, codepoint, presentation);
             if (face is null && style != TerminalTypefaceStyle.Regular)
                 face = FindConfiguredFace(state, TerminalTypefaceStyle.Regular, codepoint, presentation);
 
             bool requiredPresentation = presentation ?? new Codepoint((uint)codepoint).IsEmojiPresentation;
-            face ??= FindDiscoveredFace(state, codepoint, requiredPresentation);
+            face ??= FindLoadedFace(state, codepoint, presentation, requiredPresentation);
             if (face is null)
             {
                 // Ghostty discovers only regular faces, irrespective of the
@@ -97,16 +98,13 @@ public sealed partial class TerminalFontResolver
                 if (discovered.UsedFallback)
                 {
                     face = discovered.Typeface;
-                    bool loaded = false;
-                    foreach (SKTypeface existing in state.Discovered)
-                        if (existing.Handle == face.Handle) { loaded = true; break; }
-                    if (!loaded) state.Discovered.Add(face);
+                    AddLoadedFace(state, face, isFallback: true);
                 }
             }
             // ANY is restricted to already loaded regular faces. A rejected
             // wrong-presentation discovery candidate never enters this list.
             face ??= FindConfiguredFace(state, TerminalTypefaceStyle.Regular, codepoint, null);
-            face ??= FindDiscoveredFace(state, codepoint, null);
+            face ??= FindLoadedFace(state, codepoint, null, null);
             // SharedGrid caches misses as well as hits. Loading another face
             // must not silently change a previously resolved scalar's result.
             state.Results.Add(key, face);
@@ -125,17 +123,20 @@ public sealed partial class TerminalFontResolver
         return null;
     }
 
-    private SKTypeface? FindDiscoveredFace(CollectionState state, int codepoint, bool? presentation)
+    private SKTypeface? FindLoadedFace(CollectionState state, int codepoint, bool? presentation, bool? fallbackPresentation)
     {
-        foreach (SKTypeface face in state.Discovered)
-            if (ContainsGlyph(face, codepoint, presentation)) return face;
+        // Mapped and discovered faces retain insertion order, but only fallback
+        // discovery imposes UCD default presentation; mappings are configured faces.
+        foreach (LoadedCollectionFace face in state.Loaded)
+            if (ContainsGlyph(face.Typeface, codepoint, presentation ?? (face.IsFallback ? fallbackPresentation : null))) return face.Typeface;
         return null;
     }
 
     private sealed class CollectionState(TerminalTypefaceCollection configured)
     {
         public TerminalTypefaceCollection Configured { get; } = configured;
-        public List<SKTypeface> Discovered { get; } = new();
+        public List<LoadedCollectionFace> Loaded { get; } = new();
+        public Dictionary<string, SKTypeface?> Descriptors { get; } = new(StringComparer.Ordinal);
         public Dictionary<CollectionCodepointKey, SKTypeface?> Results { get; } = new();
     }
 

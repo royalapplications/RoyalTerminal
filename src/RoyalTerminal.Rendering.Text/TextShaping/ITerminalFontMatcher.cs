@@ -11,7 +11,7 @@ internal interface ITerminalFontMatcher
     SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint);
 }
 
-/// <summary>Looks up a known family without character-fallback discovery.</summary>
+/// <summary>Looks up an exact family without substituting another family on a miss.</summary>
 internal interface ITerminalFontFamilyMatcher
 {
     SKTypeface? MatchFamily(string familyName);
@@ -24,5 +24,9 @@ internal sealed class SkiaTerminalFontMatcher(SKFontManager manager) : ITerminal
     public SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint)
         => manager.MatchCharacter(familyName, style, languageTags, codepoint);
 
-    public SKTypeface? MatchFamily(string familyName) => manager.MatchFamily(familyName, SKFontStyle.Normal);
+    public SKTypeface? MatchFamily(string familyName)
+    {
+        using SKFontStyleSet styles = manager.GetFontStyles(familyName);
+        return styles.Count == 0 ? null : styles.CreateTypeface(SKFontStyle.Normal);
+    }
 }

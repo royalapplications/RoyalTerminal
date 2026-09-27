@@ -290,7 +290,7 @@ public sealed partial class TerminalFontResolver : IDisposable
 
             foreach (FontFallbackCacheEntry entry in _fallbackCache.Values)
             {
-                if (!entry.Owned || entry.FallbackTypeface is not { } fallbackTypeface)
+                if (!entry.Owned || entry.FallbackTypeface is not { } fallbackTypeface || _borrowedTypefaces.Contains(fallbackTypeface))
                 {
                     continue;
                 }
@@ -304,9 +304,13 @@ public sealed partial class TerminalFontResolver : IDisposable
             }
 
             _fallbackCache.Clear();
+            foreach (CollectionState collection in _collections.Values)
+                foreach (SKTypeface? face in collection.Descriptors.Values)
+                    if (face is not null && !_borrowedTypefaces.Contains(face) && disposedTypefaces.Add(face)) face.Dispose();
             _collections.Clear();
+            if (_ownsPreferredEmojiTypeface && _preferredEmojiTypeface is { } preferred &&
+                !_borrowedTypefaces.Contains(preferred) && disposedTypefaces.Add(preferred)) preferred.Dispose();
             _borrowedTypefaces.Clear();
-            if (_ownsPreferredEmojiTypeface && _preferredEmojiTypeface is { } preferred && disposedTypefaces.Add(preferred)) preferred.Dispose();
             _preferredEmojiTypeface = null;
         }
 
@@ -394,6 +398,9 @@ public sealed partial class TerminalFontResolver : IDisposable
         if (ReferenceEquals(fallbackTypeface, _preferredEmojiTypeface)) return;
         foreach (FontFallbackCacheEntry cached in _fallbackCache.Values)
             if (ReferenceEquals(cached.FallbackTypeface, fallbackTypeface)) return;
+        foreach (CollectionState collection in _collections.Values)
+            foreach (SKTypeface? mapped in collection.Descriptors.Values)
+                if (ReferenceEquals(mapped, fallbackTypeface)) return;
 
         // Remove the font holding a rejected candidate before releasing it;
         // native handles can be reused by the subsequent global match.

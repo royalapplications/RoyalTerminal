@@ -28,7 +28,7 @@ public readonly record struct TerminalTypefaceEntry(SKTypeface Typeface, Termina
 /// are borrowed: keep them alive until all renderers and resolvers using this
 /// collection have been disposed. At least one regular face is required.
 /// </summary>
-public sealed class TerminalTypefaceCollection
+public sealed partial class TerminalTypefaceCollection
 {
     private readonly SKTypeface[][] _faces;
 

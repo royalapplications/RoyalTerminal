@@ -25,18 +25,23 @@ public sealed record TerminalFontFamilySettings
     /// <summary>Bold-italic families in decreasing priority order.</summary>
     public ImmutableArray<string> BoldItalic { get; init; } = [];
 
+    /// <summary>Ghostty-style codepoint range mappings; later matching entries win.</summary>
+    public ImmutableArray<string> CodepointMaps { get; init; } = [];
+
     /// <summary>Whether all styles retain their default family selection.</summary>
     [JsonIgnore]
     public bool IsEmpty => Regular.IsDefaultOrEmpty && Bold.IsDefaultOrEmpty &&
-        Italic.IsDefaultOrEmpty && BoldItalic.IsDefaultOrEmpty;
+        Italic.IsDefaultOrEmpty && BoldItalic.IsDefaultOrEmpty && CodepointMaps.IsDefaultOrEmpty;
 
-    /// <summary>Trims names and removes empty entries without changing priority or duplicates.</summary>
+    /// <summary>Trims entries without changing priority, and validates codepoint-map syntax.</summary>
+    /// <exception cref="FormatException">A codepoint mapping is malformed.</exception>
     public TerminalFontFamilySettings Normalize()
     {
         ImmutableArray<string> regular = NormalizeNames(Regular), bold = NormalizeNames(Bold),
-            italic = NormalizeNames(Italic), boldItalic = NormalizeNames(BoldItalic);
-        if (regular == Regular && bold == Bold && italic == Italic && boldItalic == BoldItalic) return this;
-        return this with { Regular = regular, Bold = bold, Italic = italic, BoldItalic = boldItalic };
+            italic = NormalizeNames(Italic), boldItalic = NormalizeNames(BoldItalic), maps = NormalizeNames(CodepointMaps);
+        if (!TerminalFontCodepointMap.TryParse(maps.AsSpan(), out _, out string? error)) throw new FormatException(error);
+        if (regular == Regular && bold == Bold && italic == Italic && boldItalic == BoldItalic && maps == CodepointMaps) return this;
+        return this with { Regular = regular, Bold = bold, Italic = italic, BoldItalic = boldItalic, CodepointMaps = maps };
     }
 
     private static ImmutableArray<string> NormalizeNames(ImmutableArray<string> names)

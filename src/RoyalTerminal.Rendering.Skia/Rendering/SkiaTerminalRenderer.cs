@@ -475,6 +475,13 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         _fontResolver = fontResolver;
     }
 
+    internal SkiaTerminalRenderer(TerminalFontResolver fontResolver, TerminalTypefaceCollection typefaces, float fontSize = 14f)
+        : this(string.Empty, fontSize, TerminalFontSource.System, null, null, typefaces, null)
+    {
+        _fontResolver.Dispose();
+        _fontResolver = fontResolver;
+    }
+
     /// <summary>
     /// Updates the font size and recalculates cell dimensions.
     /// </summary>
@@ -2649,12 +2656,21 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         DrawCellPixelRect(canvas, x, y, 0, lineTop, cellWidthPx, lineTop + thickness, _spritePaint);
     }
 
-    private static bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
+    private bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
     {
         return TryGetSpriteCodepoint(in cell, out codepoint, out _);
     }
 
-    private static bool TryGetSpriteCodepoint(
+    private bool TryGetSpriteCodepoint(
+        ref readonly TerminalCell cell,
+        out int codepoint,
+        out SpriteCategory category)
+    {
+        if (!TryGetBuiltinSpriteCodepoint(in cell, out codepoint, out category)) return false;
+        return !_fontResolver.TryGetCodepointOverride(_glyphCache.TypefaceCollection, codepoint, out _);
+    }
+
+    private static bool TryGetBuiltinSpriteCodepoint(
         ref readonly TerminalCell cell,
         out int codepoint,
         out SpriteCategory category)
@@ -3417,7 +3433,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             cell.Codepoint <= 0 ||
             cell.Codepoint > char.MaxValue ||
             char.IsSurrogate((char)cell.Codepoint) ||
-            TryGetSpriteCodepoint(in cell, out _))
+            TryGetBuiltinSpriteCodepoint(in cell, out _, out _))
         {
             return false;
         }
@@ -3627,7 +3643,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         return cell.Width == 1 &&
                cell.Codepoint is >= char.MinValue and <= char.MaxValue &&
                string.IsNullOrEmpty(cell.Grapheme) &&
-               !TryGetSpriteCodepoint(in cell, out _) &&
+               !TryGetBuiltinSpriteCodepoint(in cell, out _, out _) &&
                !IsSymbolGlyphClipCandidate(in cell);
     }
 
