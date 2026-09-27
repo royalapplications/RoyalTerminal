@@ -83,10 +83,12 @@ public partial class TerminalControl
 
     private void CancelPendingHyperlinkRequest()
     {
-        CancellationTokenSource? cancellation = Interlocked.Exchange(ref _hyperlinkRequestCancellation, null);
+        CancellationTokenSource? cancellation = Volatile.Read(ref _hyperlinkRequestCancellation);
         try { cancellation?.Cancel(); }
         catch (AggregateException) { /* Host cancellation callbacks cannot break detachment. */ }
         catch (ObjectDisposedException) { /* The operation completed concurrently with session shutdown. */ }
-        // The owned asynchronous operation disposes its source after completion.
+        // Keep the slot until the owned operation actually finishes. A canceled
+        // filesystem/native-host call may still be running; replacement must not
+        // start an unbounded succession of abandoned background operations.
     }
 }

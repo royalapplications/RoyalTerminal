@@ -23,7 +23,7 @@ public sealed class DesktopTerminalHyperlinkHostTests
         bool opens, int promptCount)
     {
         Probe probe = new() { Accepted = accepted, Handler = handler };
-        DesktopTerminalHyperlinkHost host = new(probe, probe, probe);
+        DesktopTerminalHyperlinkHost host = new(probe, probe, probe, probe);
         await host.HandleAsync(TerminalHyperlinkSafety.Classify(target), CancellationToken.None);
         Assert.Equal(opens ? 1 : 0, probe.Opened.Count);
         Assert.Equal(promptCount, probe.PromptCount);
@@ -35,7 +35,7 @@ public sealed class DesktopTerminalHyperlinkHostTests
     public async Task ForgedClassificationCannotGrantPermissionOrSupplyDisplayText()
     {
         Probe probe = new() { Handler = "Editor", Accepted = false };
-        DesktopTerminalHyperlinkHost host = new(probe, probe, probe);
+        DesktopTerminalHyperlinkHost host = new(probe, probe, probe, probe);
         TerminalHyperlinkRequest forged = new("custom:execute", "harmless", new Uri("https://example.com"),
             TerminalHyperlinkDisposition.Allow, TerminalHyperlinkDenialReason.None);
         await host.HandleAsync(forged, CancellationToken.None);
@@ -53,7 +53,7 @@ public sealed class DesktopTerminalHyperlinkHostTests
         Probe probe = new() { Handler = "Editor", Accepted = true };
         if (duringResolve) probe.OnResolve = cancellation.Cancel;
         else probe.OnPrompt = cancellation.Cancel;
-        DesktopTerminalHyperlinkHost host = new(probe, probe, probe);
+        DesktopTerminalHyperlinkHost host = new(probe, probe, probe, probe);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.HandleAsync(
             TerminalHyperlinkSafety.Classify("custom:execute"), cancellation.Token).AsTask());
         Assert.Empty(probe.Opened);
@@ -69,7 +69,7 @@ public sealed class DesktopTerminalHyperlinkHostTests
         Action fail = () => throw new InvalidOperationException("Unavailable host");
         if (duringResolve) probe.OnResolve = fail;
         else probe.OnPrompt = fail;
-        DesktopTerminalHyperlinkHost host = new(probe, probe, probe);
+        DesktopTerminalHyperlinkHost host = new(probe, probe, probe, probe);
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.HandleAsync(
             TerminalHyperlinkSafety.Classify("custom:execute"), CancellationToken.None).AsTask());
         Assert.Empty(probe.Opened);
@@ -79,7 +79,7 @@ public sealed class DesktopTerminalHyperlinkHostTests
     public async Task PreCanceledRequestPerformsNoExternalWork()
     {
         Probe probe = new();
-        DesktopTerminalHyperlinkHost host = new(probe, probe, probe);
+        DesktopTerminalHyperlinkHost host = new(probe, probe, probe, probe);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.HandleAsync(
             TerminalHyperlinkSafety.Classify("https://example.com"), new CancellationToken(true)).AsTask());
         Assert.Empty(probe.Opened);
@@ -100,13 +100,56 @@ public sealed class DesktopTerminalHyperlinkHostTests
         => Assert.Null(await new DesktopHyperlinkHandlerResolver().ResolveAsync(
             "royalterminal-test-" + Guid.NewGuid().ToString("N"), CancellationToken.None));
 
-    private sealed class Probe : ITerminalHyperlinkPrompt, ITerminalHyperlinkHandlerResolver, ITerminalHyperlinkLauncher
+    [Fact]
+    public async Task InspectedFileDispatchesCanonicalUriWithoutConfirmation()
+    {
+        Uri canonical = new("file:///resolved/document.txt");
+        TerminalHyperlinkRequest request = TerminalHyperlinkSafety.Classify("file:///alias/document.txt");
+        Probe probe = new() { Inspection = request with { Disposition = TerminalHyperlinkDisposition.Allow, Uri = canonical } };
+        await new DesktopTerminalHyperlinkHost(probe, probe, probe, probe).HandleAsync(request, CancellationToken.None);
+        Assert.Equal(canonical, Assert.Single(probe.Opened));
+        Assert.Equal(0, probe.PromptCount);
+        Assert.Equal(0, probe.ResolveCount);
+    }
+
+    [Fact]
+    public async Task InspectionDenialCannotBeOverriddenByGenericConfirmation()
+    {
+        TerminalHyperlinkRequest request = TerminalHyperlinkSafety.Classify("file:///alias/document.txt");
+        Probe probe = new() { Accepted = true, Handler = "Editor", Inspection = request with
+        {
+            Disposition = TerminalHyperlinkDisposition.Deny, DenialReason = TerminalHyperlinkDenialReason.UnsafeFile,
+            DisplayText = "/resolved/payload.command", Uri = null,
+        } };
+        await new DesktopTerminalHyperlinkHost(probe, probe, probe, probe).HandleAsync(request, CancellationToken.None);
+        Assert.Empty(probe.Opened);
+        Assert.Equal("/resolved/payload.command", probe.LastRequest!.DisplayText);
+        Assert.Equal(request.Target, probe.LastRequest.Target);
+        Assert.Equal(0, probe.ResolveCount);
+    }
+
+    [Fact]
+    public async Task CancellationAfterNonCooperatingFileInspectionCannotDispatchOrPrompt()
+    {
+        using CancellationTokenSource cancellation = new();
+        TerminalHyperlinkRequest request = TerminalHyperlinkSafety.Classify("file:///tmp/document.txt");
+        Probe probe = new() { OnInspect = cancellation.Cancel,
+            Inspection = request with { Disposition = TerminalHyperlinkDisposition.Allow } };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new DesktopTerminalHyperlinkHost(probe, probe, probe, probe)
+            .HandleAsync(request, cancellation.Token).AsTask());
+        Assert.Empty(probe.Opened);
+        Assert.Equal(0, probe.PromptCount);
+    }
+
+    private sealed class Probe : ITerminalHyperlinkPrompt, ITerminalHyperlinkHandlerResolver, ITerminalHyperlinkLauncher, ITerminalHyperlinkFileInspector
     {
         internal bool Accepted;
         internal string? Handler;
         internal int PromptCount, ResolveCount;
         internal Action? OnResolve, OnPrompt;
         internal TerminalHyperlinkRequest? LastRequest;
+        internal TerminalHyperlinkRequest? Inspection;
+        internal Action? OnInspect;
         internal List<Uri> Opened { get; } = [];
         public ValueTask<bool> ShowAsync(TerminalHyperlinkRequest request, string? handler, CancellationToken token)
         {
@@ -126,6 +169,12 @@ public sealed class DesktopTerminalHyperlinkHostTests
             token.ThrowIfCancellationRequested();
             Opened.Add(uri);
             return ValueTask.CompletedTask;
+        }
+        public ValueTask<TerminalHyperlinkRequest> InspectAsync(TerminalHyperlinkRequest request, CancellationToken token)
+        {
+            OnInspect?.Invoke();
+            return ValueTask.FromResult(Inspection ?? request with { Disposition = TerminalHyperlinkDisposition.Deny,
+                DenialReason = TerminalHyperlinkDenialReason.FileInspectionUnavailable });
         }
     }
 }

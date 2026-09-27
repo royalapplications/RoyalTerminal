@@ -41,13 +41,47 @@ remain copyable only by an explicit user action; copying preserves the original
 target, not its escaped display spelling. Cancellation is checked again after
 association lookup and after confirmation, before launching.
 
-Local-file opening is **not yet complete**: the classifier produces an
-`InspectFile` request, and the current application host displays it as blocked.
-Canonical/symlink-resolved previews, regular-file/directory inspection,
-executable/content-type checks and safe-file dispatch still need their platform
-implementation. This is deliberately stricter than Ghostty's safe-file path,
-not a claim of complete #13634 parity. The other dialog and native association
-bindings are also awaiting the final cross-platform validation pass.
+Local-file requests now have a separate off-thread inspector. It standardizes
+the path, resolves aliases, inspects the effective object and publishes only a
+canonical file URI for safe regular files/directories. Reserved path characters
+are encoded once; original URL bytes remain the explicit-copy payload. Failed
+inspection cannot be overridden by confirming a custom-scheme dialog. Missing
+leaves use their longest accessible resolved parent for the blocked preview.
+Remote/device paths, reserved Windows device names, alternate data streams,
+ambiguous trailing-dot/space components and decoded NUL paths are
+rejected before file access, with canonical Windows paths checked again after
+junction/reparse resolution. Cancellation is checked after filesystem work and
+again before dispatch; no filesystem result is cached across activations.
+
+macOS uses realpath plus Core Foundation URL resource values and Launch Services
+UTI conformance for applications, executables and scripts, matching the pinned
+Swift policy's resource categories. Linux uses GIO's file kind, current-user
+execute permission and executable/desktop/script MIME families. It deliberately
+does not use GLib's broad
+[`g_content_type_can_be_executable`](https://github.com/GNOME/glib/blob/main/gio/gcontenttype-fdo.c),
+which includes ordinary plain text. Windows resolves an opened filesystem handle,
+rejects non-disk/device objects, and checks
+[`GetBinaryTypeW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getbinarytypew)
+plus executable/script/installer/shortcut extensions appropriate to that platform.
+All platforms reject Ghostty's unsafe container extensions, including application
+directories; ordinary directory execute permission does not prohibit opening.
+Missing platform inspection APIs fail closed. Native resources and handles are
+released within the inspection operation, before its result is published.
+
+These platform implementations, canonical blocked-target previews, safe-file
+dispatch and their authored native-filesystem/host/policy/cancellation cases are
+awaiting final execution. The reusable control's hover preview still performs
+only scalar escaping without filesystem resolution; it is not yet Ghostty's
+canonical file hover preview. Full #13634 parity and cross-platform sign-off are
+not claimed. As with the upstream path-based OS opener, same-user filesystem or
+association changes can race inspection and dispatch; this is not an atomic
+open-by-verified-handle security boundary.
+
+The control retains its occupied request slot until a canceled operation really
+finishes, including native calls that cannot be interrupted. Host replacement or
+OSC 8 toggling therefore cannot accumulate abandoned inspection workers. A
+non-cooperating custom host blocks further non-direct links on that control
+until it completes; allowed web/mail links retain their direct path.
 
 For comparison,
 [Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalApp/TerminalPage.cpp)

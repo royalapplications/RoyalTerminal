@@ -32,6 +32,12 @@ public enum TerminalHyperlinkDenialReason
     UnsafeCharacters,
     /// <summary>An HTTP or HTTPS target has no valid authority.</summary>
     InvalidWebHost,
+    /// <summary>The local target is inaccessible or is not a regular file or directory.</summary>
+    InaccessibleFile,
+    /// <summary>The local target is an executable, script or unsafe application container.</summary>
+    UnsafeFile,
+    /// <summary>The platform cannot currently inspect the local target safely.</summary>
+    FileInspectionUnavailable,
 }
 
 /// <summary>An immutable, untrusted launch request; classifying it never opens a URL or reads a file.</summary>

@@ -112,4 +112,30 @@ public sealed class HyperlinkPromptTests
             TerminalHyperlinkSafety.Classify("custom:execute"), "Editor", CancellationToken.None));
         Assert.Empty(owner.OwnedWindows);
     }
+
+    [Theory]
+    [InlineData(TerminalHyperlinkDenialReason.UnsafeFile, "execute code")]
+    [InlineData(TerminalHyperlinkDenialReason.InaccessibleFile, "does not exist")]
+    [InlineData(TerminalHyperlinkDenialReason.FileInspectionUnavailable, "could not inspect")]
+    public async Task InspectedFileDenialShowsResolvedPreviewButCopiesOriginal(TerminalHyperlinkDenialReason reason, string explanation)
+    {
+        const string original = "file:///alias/notes.txt";
+        TerminalHyperlinkRequest request = TerminalHyperlinkSafety.Classify(original) with
+        {
+            Disposition = TerminalHyperlinkDisposition.Deny, DenialReason = reason,
+            DisplayText = "/resolved/hidden\u202E.command", Uri = null,
+        };
+        using HyperlinkPromptViewModel model = new(request, "Editor");
+        Assert.False(model.CanOpen);
+        Assert.Equal("/resolved/hidden\\u{202E}.command", model.Target);
+        Assert.Contains(explanation, model.Message, StringComparison.Ordinal);
+        string? copied = null;
+        using IDisposable registration = model.CopyTargetInteraction.RegisterHandler(context =>
+        {
+            copied = context.Input;
+            context.SetOutput(Unit.Default);
+        });
+        await model.CopyCommand.Execute().ToTask();
+        Assert.Equal(original, copied);
+    }
 }

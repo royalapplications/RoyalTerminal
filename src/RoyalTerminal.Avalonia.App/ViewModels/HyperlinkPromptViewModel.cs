@@ -16,7 +16,14 @@ public sealed class HyperlinkPromptViewModel : ReactiveObject, IDisposable
     public HyperlinkPromptViewModel(TerminalHyperlinkRequest request, string? handler)
     {
         ArgumentNullException.ThrowIfNull(request);
-        request = TerminalHyperlinkSafety.Classify(request.Target);
+        TerminalHyperlinkRequest classified = TerminalHyperlinkSafety.Classify(request.Target);
+        // Inspection can add a canonical preview and a file-specific denial,
+        // never permission to confirm an unsafe file. Retain raw copy identity.
+        if (classified.Disposition == TerminalHyperlinkDisposition.InspectFile && request.Disposition == TerminalHyperlinkDisposition.Deny &&
+            request.DenialReason is TerminalHyperlinkDenialReason.InaccessibleFile or TerminalHyperlinkDenialReason.UnsafeFile or TerminalHyperlinkDenialReason.FileInspectionUnavailable)
+            classified = classified with { DisplayText = TerminalHyperlinkSafety.SanitizeDisplay(request.DisplayText),
+                Disposition = TerminalHyperlinkDisposition.Deny, DenialReason = request.DenialReason };
+        request = classified;
         Target = request.DisplayText;
         CanOpen = request.Disposition == TerminalHyperlinkDisposition.Confirm && !string.IsNullOrWhiteSpace(handler);
         Title = CanOpen ? "Open terminal link?" : "Terminal link blocked";
@@ -25,11 +32,14 @@ public sealed class HyperlinkPromptViewModel : ReactiveObject, IDisposable
         {
             TerminalHyperlinkDisposition.Confirm when CanOpen => "This terminal link will be sent to the application below. Only open it if you trust the target and application.",
             TerminalHyperlinkDisposition.Confirm => "The registered application could not be identified. This link will not be opened.",
-            TerminalHyperlinkDisposition.InspectFile => "Local file opening is unavailable until canonical-path and executable-file safety inspection is provided.",
+            TerminalHyperlinkDisposition.InspectFile => "This local target has not been inspected and cannot be opened.",
             _ => request.DenialReason switch
             {
                 TerminalHyperlinkDenialReason.UnsafeCharacters => "The target contains invisible, line-breaking or malformed Unicode characters.",
                 TerminalHyperlinkDenialReason.InvalidWebHost => "The web target does not contain a valid host.",
+                TerminalHyperlinkDenialReason.InaccessibleFile => "The local target does not exist, is inaccessible, or is not a regular file or directory.",
+                TerminalHyperlinkDenialReason.UnsafeFile => "Opening this local target could execute code.",
+                TerminalHyperlinkDenialReason.FileInspectionUnavailable => "The platform could not inspect this local target safely.",
                 _ => "The target cannot be opened safely.",
             },
         };

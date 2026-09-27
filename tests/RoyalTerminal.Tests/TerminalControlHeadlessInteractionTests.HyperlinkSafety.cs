@@ -111,6 +111,7 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             Assert.Single(first.Requests);
             control.HyperlinkHost = second;
             Assert.True(first.Token.IsCancellationRequested);
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
             RaiseModifiedLeftClick(control, window, point, KeyModifiers.Control);
             Assert.Single(second.Requests);
             window.Content = null;
@@ -138,6 +139,27 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
 
+    [AvaloniaFact]
+    public async Task Headless_CanceledNonCooperatingHostRetainsItsRequestSlotUntilCompletion()
+    {
+        await WithHyperlinkControl(VtProcessorPreference.Managed, async (control, window) =>
+        {
+            HyperlinkHostProbe first = new() { Wait = true, IgnoreCancellation = true }, second = new();
+            control.HyperlinkHost = first;
+            Point point = await PutOscLink(control, window, "custom:confirm");
+            RaiseModifiedLeftClick(control, window, point, KeyModifiers.Control);
+            control.HyperlinkHost = second;
+            Assert.True(first.Token.IsCancellationRequested);
+            RaiseModifiedLeftClick(control, window, point, KeyModifiers.Control);
+            Assert.Empty(second.Requests);
+            first.Complete();
+            await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+            RaiseModifiedLeftClick(control, window, point, KeyModifiers.Control);
+            Assert.Single(second.Requests);
+            Assert.Empty(control.ActivatedLinks);
+        });
+    }
+
     private async Task<Point> PutOscLink(TerminalControl control, Window window, string target)
     {
         control.WriteOutput(Encoding.UTF8.GetBytes($"\u001b]8;;{target}\u001b\\label\u001b]8;;\u001b\\"));
@@ -153,14 +175,16 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         internal List<TerminalHyperlinkRequest> Requests { get; } = [];
         internal bool Throw { get; init; }
         internal bool Wait { get; init; }
+        internal bool IgnoreCancellation { get; init; }
         internal CancellationToken Token { get; private set; }
+        internal void Complete() => _pending.TrySetResult();
 
         public ValueTask HandleAsync(TerminalHyperlinkRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
             Token = cancellationToken;
             if (Throw) throw new InvalidOperationException("Host failed before showing UI");
-            return Wait ? new(_pending.Task.WaitAsync(cancellationToken)) : ValueTask.CompletedTask;
+            return Wait ? new(IgnoreCancellation ? _pending.Task : _pending.Task.WaitAsync(cancellationToken)) : ValueTask.CompletedTask;
         }
     }
 }

@@ -2798,7 +2798,8 @@ internal sealed class MainWindowController
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
         standaloneControl.HyperlinkHost = new DesktopTerminalHyperlinkHost(
-            new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window));
+            new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window),
+            new DesktopHyperlinkFileInspector(new NativeHyperlinkFileProbe()));
         ApplyFontSettings(standaloneControl);
         standaloneControl.TextHighlightingMode = _viewModel.TextHighlightingMode;
         standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;

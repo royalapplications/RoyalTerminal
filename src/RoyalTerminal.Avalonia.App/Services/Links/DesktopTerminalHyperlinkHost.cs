@@ -25,7 +25,8 @@ internal interface ITerminalHyperlinkLauncher
 internal sealed class DesktopTerminalHyperlinkHost(
     ITerminalHyperlinkPrompt prompt,
     ITerminalHyperlinkHandlerResolver handlers,
-    ITerminalHyperlinkLauncher launcher) : ITerminalHyperlinkHost
+    ITerminalHyperlinkLauncher launcher,
+    ITerminalHyperlinkFileInspector files) : ITerminalHyperlinkHost
 {
     public async ValueTask HandleAsync(TerminalHyperlinkRequest request, CancellationToken cancellationToken)
     {
@@ -33,6 +34,9 @@ internal sealed class DesktopTerminalHyperlinkHost(
         // Treat even an externally constructed request as untrusted. Its flags
         // and display text cannot grant permission or bypass scalar validation.
         request = TerminalHyperlinkSafety.Classify(request.Target);
+        if (request.Disposition == TerminalHyperlinkDisposition.InspectFile)
+            request = await files.InspectAsync(request, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (request.Disposition == TerminalHyperlinkDisposition.Allow)
         {
             await launcher.LaunchAsync(request.Uri!, cancellationToken);
@@ -45,8 +49,7 @@ internal sealed class DesktopTerminalHyperlinkHost(
         cancellationToken.ThrowIfCancellationRequested();
         bool accepted = await prompt.ShowAsync(request, handler, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        // Local files require a separate canonical-target inspector, not a
-        // generic confirmation. Until it exists, InspectFile is always blocked.
+        // File permission comes only from inspection, never generic consent.
         if (accepted && request.Disposition == TerminalHyperlinkDisposition.Confirm && !string.IsNullOrWhiteSpace(handler))
             await launcher.LaunchAsync(request.Uri!, cancellationToken);
     }
