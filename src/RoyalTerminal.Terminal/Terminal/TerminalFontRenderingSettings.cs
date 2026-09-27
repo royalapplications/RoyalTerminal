@@ -110,15 +110,18 @@ public sealed record TerminalFontRenderingSettings
     public bool LinearMetrics { get; init; }
 
     /// <summary>
-    /// Returns a copy with unsupported enum values replaced by defaults.
+    /// Replaces unsupported enum values with defaults. Already-normalized settings
+    /// retain their immutable instance without allocating a copy.
     /// </summary>
     public TerminalFontRenderingSettings Normalize()
     {
-        TerminalFontRenderingSettings defaults = Default;
+        bool validEdging = (uint)Edging <= (uint)TerminalFontEdging.SubpixelAntialias;
+        bool validHinting = (uint)Hinting <= (uint)TerminalFontHinting.Full;
+        if (validEdging && validHinting) return this;
         return this with
         {
-            Edging = Enum.IsDefined(Edging) ? Edging : defaults.Edging,
-            Hinting = Enum.IsDefined(Hinting) ? Hinting : defaults.Hinting,
+            Edging = validEdging ? Edging : Default.Edging,
+            Hinting = validHinting ? Hinting : Default.Hinting,
         };
     }
 }

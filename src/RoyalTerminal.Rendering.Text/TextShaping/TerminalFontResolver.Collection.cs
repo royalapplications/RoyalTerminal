@@ -182,6 +182,4 @@ public sealed partial class TerminalFontResolver
     private readonly record struct CollectionFace(SKTypeface Typeface, TerminalFontSynthesis Synthesis);
     private readonly record struct AsciiFaceResult(CollectionFace? Face, bool Known);
 
-    private readonly record struct CollectionCodepointKey(TerminalTypefaceStyle Style,
-        int Codepoint, bool? Presentation, string CultureName);
 }

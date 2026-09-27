@@ -6754,7 +6754,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
     private sealed class TextRowFontCache
     {
-        private readonly Dictionary<TextRowFontCacheKey, SKFont> _cache = new();
+        private readonly Dictionary<RasterFontCacheKey, SKFont> _cache = new();
 
         public SKFont GetOrCreate(
             RenderFont typeface,
@@ -6762,17 +6762,10 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             TerminalFontRenderingSettings fontRenderingSettings)
         {
             TerminalFontRenderingSettings settings = NormalizeFontRenderingSettings(fontRenderingSettings);
-            TextRowFontCacheKey key = new(
+            RasterFontCacheKey key = new(
                 typeface.Handle,
                 BitConverter.SingleToInt32Bits(fontSize),
-                settings.SubpixelPositioning,
-                settings.Edging,
-                settings.Hinting,
-                settings.BaselineSnap,
-                settings.EmbeddedBitmaps,
-                settings.Embolden,
-                settings.ForceAutoHinting,
-                settings.LinearMetrics, typeface.Synthesis);
+                settings, typeface.Synthesis);
             if (_cache.TryGetValue(key, out SKFont? font))
             {
                 return font;
@@ -6793,19 +6786,6 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             _cache.Clear();
         }
     }
-
-    private readonly record struct TextRowFontCacheKey(
-        nint TypefaceHandle,
-        int FontSizeBits,
-        bool SubpixelPositioning,
-        TerminalFontEdging Edging,
-        TerminalFontHinting Hinting,
-        bool BaselineSnap,
-        bool EmbeddedBitmaps,
-        bool Embolden,
-        bool ForceAutoHinting,
-        bool LinearMetrics,
-        TerminalFontSynthesis Synthesis);
 
     private sealed class CellTextBlobCache
     {

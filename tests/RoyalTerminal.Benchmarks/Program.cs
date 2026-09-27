@@ -17,6 +17,12 @@ if (args.Contains("--font-candidates", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--font-cache-keys", StringComparer.Ordinal))
+{
+    FontCacheKeyBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--font-lookup", StringComparer.Ordinal))
 {
     FontLookupBenchmark.Run();
