@@ -63,5 +63,6 @@ public sealed class TerminalFontWarmupTests
     }
 
     [Fact]
-    public void NullQueryIsAProgrammingError() => Assert.Throws<ArgumentNullException>(() => TerminalFontWarmup.StartAsync(null!));
+    public void NullQueryIsAProgrammingError()
+        => Assert.Throws<ArgumentNullException>(() => { _ = TerminalFontWarmup.StartAsync(null!); });
 }
