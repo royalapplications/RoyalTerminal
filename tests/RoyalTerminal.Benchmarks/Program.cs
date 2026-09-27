@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--render-row-identity", StringComparer.Ordinal))
+{
+    RenderRowIdentityBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--selection-projection", StringComparer.Ordinal))
 {
     SelectionProjectionBenchmark.Run();

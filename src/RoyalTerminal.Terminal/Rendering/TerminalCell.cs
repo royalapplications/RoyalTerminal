@@ -276,6 +276,12 @@ public sealed class TerminalRow
     /// <summary>Read-only access to cells.</summary>
     public ReadOnlySpan<TerminalCell> ReadOnlyCells => _cells.AsSpan(0, _columns);
 
+    /// <summary>
+    /// Gets an opaque identity for the current cell storage, not a content revision.
+    /// Shared COW wrappers retain it until detachment; in-place mutation does not change it.
+    /// </summary>
+    public TerminalRenderRowId RenderId => new(_cells);
+
     /// <summary>Read-only access to all retained cells, including cells hidden by a narrower resize.</summary>
     public ReadOnlySpan<TerminalCell> ReadOnlyPreservedCells => _cells.AsSpan();
 

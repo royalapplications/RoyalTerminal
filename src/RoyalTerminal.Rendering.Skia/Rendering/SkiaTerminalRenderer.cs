@@ -115,7 +115,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private TerminalHighlightSpan[] _selectionSpans = Array.Empty<TerminalHighlightSpan>();
     private TerminalTextHighlightRule[] _textHighlightRules = Array.Empty<TerminalTextHighlightRule>();
     private CompiledTextHighlightRule[] _compiledTextHighlightRules = Array.Empty<CompiledTextHighlightRule>();
-    private readonly Dictionary<TerminalRow, TextHighlightRowCacheEntry> _textHighlightRowCache = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TerminalRenderRowId, TextHighlightRowCacheEntry> _textHighlightRowCache = new();
+    internal int TextHighlightRowCacheEntryCount => _textHighlightRowCache.Count;
     private char[] _textHighlightRowText = Array.Empty<char>();
     private int[] _textHighlightColumnMap = Array.Empty<int>();
     private int _textHighlightRuleRevision;
@@ -686,10 +687,24 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     /// Only re-renders rows marked as dirty unless forceFullRedraw is true.
     /// </summary>
     public void Render(SKCanvas canvas, TerminalScreen screen, bool forceFullRedraw = false)
+        => Render(canvas, screen, default, forceFullRedraw);
+
+    /// <summary>
+    /// Renders available overscan rows at signed viewport positions as well as
+    /// visible rows. The caller owns clipping/translation and must keep the screen
+    /// stable. Overscan affects cell rows; cursor and image-scene policy remain
+    /// viewport-based. Zero overscan preserves the ordinary rendering path.
+    /// </summary>
+    /// <param name="canvas">Destination canvas.</param>
+    /// <param name="screen">Screen whose rows and resources are rendered.</param>
+    /// <param name="overscan">Requested extra rows, limited to accessible screen history.</param>
+    /// <param name="forceFullRedraw">Whether to render clean rows too.</param>
+    public void Render(SKCanvas canvas, TerminalScreen screen, TerminalRenderOverscan overscan, bool forceFullRedraw = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(screen);
 
+        TerminalRenderViewport renderRows = screen.GetRenderViewport(overscan);
         PrepareRegisteredGlyphCache(screen);
         canvas.Save();
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
@@ -703,7 +718,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         long imageFrameId = unchecked(++_imageRenderFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         bool useFullRowBuffers = TryGetPooledRowBufferCellCount(
-            screen.ViewportRows,
+            renderRows.Count,
             overlayCapacity,
             out int rowBufferCellCount);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(rowBufferCellCount);
@@ -717,15 +732,17 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId);
 
             // Render backgrounds first (batched)
-            for (var row = 0; row < screen.ViewportRows; row++)
+            for (int index = 0; index < renderRows.Count; index++)
             {
-                var terminalRow = screen.GetViewportRow(row);
+                TerminalRenderRow renderRow = renderRows[index];
+                int row = renderRow.ViewportY;
+                TerminalRow terminalRow = renderRow.Row;
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
                 Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
                     overlayBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 rowOverlays.Clear();
@@ -737,7 +754,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     rowOverlays);
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
                     textHighlightBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 rowTextHighlights.Clear();
@@ -755,15 +772,17 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId);
 
             // Render text on top of the cell layer.
-            for (var row = 0; row < screen.ViewportRows; row++)
+            for (int index = 0; index < renderRows.Count; index++)
             {
-                var terminalRow = screen.GetViewportRow(row);
+                TerminalRenderRow renderRow = renderRows[index];
+                int row = renderRow.ViewportY;
+                TerminalRow terminalRow = renderRow.Row;
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
                 Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
                     overlayBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 if (!useFullRowBuffers)
@@ -779,7 +798,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
                     textHighlightBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 if (!useFullRowBuffers)
@@ -793,7 +812,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                if (TryGetPreeditRange(screen.Columns, row, out var preeditRange))
+                if ((uint)row < (uint)screen.ViewportRows &&
+                    TryGetPreeditRange(screen.Columns, row, out var preeditRange))
                 {
                     // Preserve cell backgrounds/images, but replace text in the
                     // composing range without changing terminal or snapshot state.
@@ -913,7 +933,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
+        bool splitRunsAroundCursor = CursorVisible && (uint)rowIndex < (uint)screen.ViewportRows && rowIndex == CursorRow;
         int cursorSplitColumn = CursorColumn;
         bool usePretextPipeline = CanUsePretextTextPipeline();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
@@ -5228,7 +5248,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         bool darkTheme,
         Span<CellTextHighlightOverride> rowTextHighlights)
     {
-        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry) ||
+        if (!_textHighlightRowCache.TryGetValue(row.RenderId, out TextHighlightRowCacheEntry? entry) ||
             entry.Columns != rowTextHighlights.Length ||
             entry.RuleRevision != _textHighlightRuleRevision ||
             entry.DarkTheme != darkTheme ||
@@ -5251,7 +5271,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         bool darkTheme,
         ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
     {
-        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry))
+        TerminalRenderRowId id = row.RenderId;
+        if (!_textHighlightRowCache.TryGetValue(id, out TextHighlightRowCacheEntry? entry))
         {
             if (_textHighlightRowCache.Count >= MaxTextHighlightRowCacheEntries)
             {
@@ -5259,7 +5280,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             }
 
             entry = new TextHighlightRowCacheEntry();
-            _textHighlightRowCache.Add(row, entry);
+            _textHighlightRowCache.Add(id, entry);
         }
 
         if (!HasAnyTextHighlightOverride(rowTextHighlights))
