@@ -4,8 +4,18 @@ This package builds the pinned `external/ghostty` dependency without modifying
 its checkout. It retains Ghostty's build configuration, runtime module,
 allocator, generation counter, public C exports and platform linker handling.
 The build generates a copy of the upstream Zig root with the exports from
-`src/extensions.zig`, `src/drag_drop.zig` and `src/notifications.zig` appended.
+`src/extensions.zig`, `src/drag_drop.zig`, `src/notifications.zig` and
+`src/window_resize.zig` appended.
 Both shared and static libraries include them.
+
+The window-resize extension forwards the upstream parser's validated CSI 8 t
+action through a separately registered callback. It changes no upstream public
+options/enums and never resizes the terminal grid itself. Zero/omitted dimensions
+preserve the corresponding window dimension; host permission, minimum cell sizes
+and unsuitable-window/layout rejection belong to the shared embedding policy.
+Its generated handler/C-wrapper overlays retain the same full-source hash and
+exact-fragment-count checks as the other extensions. Rebuild before using this
+new callback export; final native validation and ABI regeneration are pending.
 
 Windows x64 compatibility builds use the release CPU baseline and disable
 Ghostty's SIMD bundle. For Windows x64 targets without AVX, the wrapper also

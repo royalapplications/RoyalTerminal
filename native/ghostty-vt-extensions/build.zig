@@ -174,7 +174,15 @@ pub fn build(b: *std.Build) !void {
     try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "49dbd67f02e2af36bcd17235b7552bae33fe37e36014fe87221f0d539a277360", &.{
         .{
             .before = "    pub const Effects = struct {\n",
-            .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
+            .after = "    pub const Effects = struct {\n        royal_window_resize: ?*const fn (*Handler, u16, u16) void = null,\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
+        },
+        .{
+            .before = "            .resize_window,\n",
+            .after = "",
+        },
+        .{
+            .before = "            // Have no terminal-modifying effect\n",
+            .after = "            .resize_window => {\n                if (self.effects.royal_window_resize) |callback| callback(self, value.rows, value.columns);\n            },\n\n            // Have no terminal-modifying effect\n",
         },
         .{
             // Anchor to the Handler indentation. Test handlers declare the same
@@ -189,13 +197,13 @@ pub fn build(b: *std.Build) !void {
     });
     try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "9b06653cb34f7407b510f25111cb45c83014a3adfc9c031c48ecc537c6f67136", &.{ .{
         .before = "const Effects = struct {\n",
-        .after = "const Effects = struct {\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
+        .after = "const Effects = struct {\n    royal_window_resize: ?*const fn (Terminal, ?*anyopaque, u16, u16) callconv(.c) void = null,\n    royal_window_resize_userdata: ?*anyopaque = null,\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
     }, .{
         .before = "    fn desktopNotificationTrampoline(\n",
-        .after = @embedFile("src/notification_effect.zig.inc") ++ "    fn desktopNotificationTrampoline(\n",
+        .after = @embedFile("src/window_resize_effect.zig.inc") ++ @embedFile("src/notification_effect.zig.inc") ++ "    fn desktopNotificationTrampoline(\n",
     }, .{
         .before = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n",
-        .after = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n        .royal_notification = &Effects.royalNotificationTrampoline,\n",
+        .after = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n        .royal_window_resize = &Effects.royalWindowResizeTrampoline,\n        .royal_notification = &Effects.royalNotificationTrampoline,\n",
     } });
     const upstream = try std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
@@ -205,7 +213,7 @@ pub fn build(b: *std.Build) !void {
     );
     module.root_source_file = sources.add(
         "src/lib_vt_royal.zig",
-        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig") }),
+        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig"), "\n", @embedFile("src/window_resize.zig") }),
     );
 
     // Retain Ghostty's platform linking, symbol visibility, static archive

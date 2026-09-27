@@ -5,6 +5,9 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    /// <inheritdoc />
+    public Action<TerminalWindowResizeRequest>? WindowResizeCallback { get; set; }
+
     private int _unknownSequenceMaxBytes = 4096;
     // Stream-effect state, not screen/snapshot state. Track it even without a
     // callback, like Ghostty Handler.progress_active. The C reset API does not

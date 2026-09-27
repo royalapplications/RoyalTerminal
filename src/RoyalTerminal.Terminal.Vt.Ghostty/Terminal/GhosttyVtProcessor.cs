@@ -46,6 +46,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
+    ITerminalWindowResizeSource,
     ITerminalUnknownSequencePolicy,
     ITerminalNotificationSource,
     ITerminalDragDropTarget,
@@ -1360,6 +1361,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
+        _terminal.SetWindowResizeCallback(OnNativeWindowResize);
         _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;
         _bellDelegate ??= OnNativeBell;

@@ -120,6 +120,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
     private bool _reflowOnResize = true;
+    private bool _allowVtWindowResize;
     private bool _preserveScrollbackOnRestart = true;
     private bool _sixelGraphicsEnabled = true;
     private bool _enableLigatures = true;
@@ -1455,6 +1456,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _reflowOnResize;
         set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
+    }
+
+    /// <summary>Explicit permission for single-terminal CSI 8 t window resizing.</summary>
+    public bool AllowVtWindowResize
+    {
+        get => _allowVtWindowResize;
+        set => this.RaiseAndSetIfChanged(ref _allowVtWindowResize, value);
     }
 
     public bool PreserveScrollbackOnRestart

@@ -622,6 +622,7 @@ internal sealed class MainWindowController
                 model => model.SelectedPasteSafetyPolicy,
                 model => model.EnableTextShaping,
                 model => model.ReflowOnResize,
+                model => model.AllowVtWindowResize,
                 model => model.PreserveScrollbackOnRestart,
                 model => model.SixelGraphicsEnabled,
                 model => model.EnableLigatures)
@@ -1853,6 +1854,7 @@ internal sealed class MainWindowController
             BackspaceSendsControlH = _viewModel.BackspaceSendsControlH,
             EnableTextShaping = _viewModel.EnableTextShaping,
             ReflowOnResize = _viewModel.ReflowOnResize,
+            AllowVtWindowResize = _viewModel.AllowVtWindowResize,
             SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled,
             EnableLigatures = _viewModel.EnableLigatures,
             PasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy.ToString(),
@@ -3143,6 +3145,8 @@ internal sealed class MainWindowController
             hostKeyValidator,
             transportFactory);
         DesktopHyperlinkPathPreviewSource pathPreviews = new(new NativeHyperlinkFileProbe());
+        control.WindowResizeHost = new DesktopTerminalWindowResizeHost(_window, control, () =>
+            _tabs.Count == 1 && _tabs[0].LeafControls.Count == 1 && ReferenceEquals(_tabs[0].LeafControls[0], control));
         control.HyperlinkPathPreviewSource = pathPreviews;
         control.HyperlinkHost = new DesktopTerminalHyperlinkHost(
             new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window),
@@ -5624,6 +5628,7 @@ internal sealed class MainWindowController
             current.BackspaceSendsControlH = _viewModel.BackspaceSendsControlH;
             current.EnableTextShaping = _viewModel.EnableTextShaping;
             current.ReflowOnResize = _viewModel.ReflowOnResize;
+            current.AllowVtWindowResize = _viewModel.AllowVtWindowResize;
             current.SixelGraphicsEnabled = _viewModel.SixelGraphicsEnabled;
             current.EnableLigatures = _viewModel.EnableLigatures;
             current.SelectedPasteSafetyPolicy = _viewModel.SelectedPasteSafetyPolicy;
@@ -5785,6 +5790,7 @@ internal sealed class MainWindowController
         _viewModel.BackspaceSendsControlH = state.BackspaceSendsControlH;
         _viewModel.EnableTextShaping = state.EnableTextShaping;
         _viewModel.ReflowOnResize = state.ReflowOnResize;
+        _viewModel.AllowVtWindowResize = state.AllowVtWindowResize;
         _viewModel.SixelGraphicsEnabled = state.SixelGraphicsEnabled;
         _viewModel.EnableLigatures = state.EnableLigatures;
         _viewModel.SelectedPasteSafetyPolicy = state.SelectedPasteSafetyPolicy;
@@ -6410,6 +6416,7 @@ internal sealed class MainWindowController
     {
         control.PasteSafetyPolicy = ParsePasteSafetyPolicy(behavior.PasteSafetyPolicy);
         control.ReflowOnResize = behavior.ReflowOnResize;
+        control.AllowVtWindowResize = behavior.AllowVtWindowResize;
         control.PreserveScrollbackOnSessionStart = _viewModel.PreserveScrollbackOnRestart;
         control.SixelGraphicsEnabled = behavior.SixelGraphicsEnabled;
         SkiaTerminalRenderer? renderer = control.Renderer;

@@ -525,6 +525,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(ReflowOnResize), true);
 
+    /// <summary>Explicit opt-in to VT window resizing; not a styled preference.</summary>
+    public static readonly DirectProperty<TerminalSettingsPanelState, bool> AllowVtWindowResizeProperty =
+        AvaloniaProperty.RegisterDirect<TerminalSettingsPanelState, bool>(nameof(AllowVtWindowResize),
+            state => state.AllowVtWindowResize, (state, value) => state.AllowVtWindowResize = value);
+    private bool _allowVtWindowResize;
+
     public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(SixelGraphicsEnabled), true);
 
@@ -1085,6 +1091,13 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     {
         get => GetValue(ReflowOnResizeProperty);
         set => SetValue(ReflowOnResizeProperty, value);
+    }
+
+    /// <summary>Whether a permitted terminal program may request a host window resize.</summary>
+    public bool AllowVtWindowResize
+    {
+        get => _allowVtWindowResize;
+        set => SetAndRaise(AllowVtWindowResizeProperty, ref _allowVtWindowResize, value);
     }
 
     public bool SixelGraphicsEnabled
@@ -1666,6 +1679,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                 BackspaceSendsControlH = BackspaceSendsControlH,
                 EnableTextShaping = EnableTextShaping,
                 ReflowOnResize = ReflowOnResize,
+                AllowVtWindowResize = AllowVtWindowResize,
                 SixelGraphicsEnabled = SixelGraphicsEnabled,
                 EnableLigatures = EnableLigatures,
                 PasteSafetyPolicy = SelectedPasteSafetyPolicy.ToString(),
@@ -1825,6 +1839,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             BackspaceSendsControlH = profile.Behavior.BackspaceSendsControlH;
             EnableTextShaping = profile.Behavior.EnableTextShaping;
             ReflowOnResize = profile.Behavior.ReflowOnResize;
+            AllowVtWindowResize = profile.Behavior.AllowVtWindowResize;
             SixelGraphicsEnabled = profile.Behavior.SixelGraphicsEnabled;
             EnableLigatures = profile.Behavior.EnableLigatures;
             SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(profile.Behavior.PasteSafetyPolicy);

@@ -366,6 +366,10 @@
                 <CheckBox Content="Reflow on Resize"
                           Margin="0,2,10,0"
                           IsChecked="{Binding ReflowOnResize}" />
+                <CheckBox Content="Allow programs to resize this window"
+                          Margin="0,2,10,0"
+                          ToolTip.Tip="CSI 8 t requests apply only to a single terminal in a normal resizable window. Disabled by default."
+                          IsChecked="{Binding AllowVtWindowResize}" />
                 <CheckBox Content="Enable Sixel Graphics"
                           Margin="0,2,10,0"
                           IsChecked="{Binding SixelGraphicsEnabled}" />

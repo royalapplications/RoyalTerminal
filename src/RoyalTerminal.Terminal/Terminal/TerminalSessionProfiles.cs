@@ -331,6 +331,9 @@ public sealed record TerminalSessionBehaviorSettings
     /// </summary>
     public bool ReflowOnResize { get; init; } = true;
 
+    /// <summary>Allows CSI 8 t window resizing for a single terminal in a normal resizable window. Disabled by default.</summary>
+    public bool AllowVtWindowResize { get; init; }
+
     /// <summary>
     /// Whether managed VT sixel graphics decoding is enabled.
     /// </summary>

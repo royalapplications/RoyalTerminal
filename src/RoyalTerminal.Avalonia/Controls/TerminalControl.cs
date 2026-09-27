@@ -1771,6 +1771,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         IVtProcessor processor = VtProcessorFactory.Create(_screen, VtProcessorPreference);
         ApplyHostVisibility(processor, _hostVisibility.IsVisible);
         BindNotificationHost(processor, _notificationHost);
+        BindWindowResizeHost(processor);
         ApplyGlyphCoverageSource(processor);
         ApplySixelGraphicsSettingToProcessor(processor);
         ApplyEraseDisplayOptionsToProcessor(processor, _activeTransportId);
@@ -2273,6 +2274,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _hostVisibility.Attach();
         _notificationHostDetached = false;
         BindNotificationHost(_vtProcessor, _notificationHost);
+        _windowResizeDetached = false;
+        BindWindowResizeHost(_vtProcessor);
         _searchPaused = false;
         AttachSecureInputWindow();
         _terminalMouseCursorAttached = true;
@@ -2297,6 +2300,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _hostVisibility.Dispose();
         _notificationHostDetached = true;
         BindNotificationHost(_vtProcessor, null);
+        _windowResizeDetached = true;
+        BindWindowResizeHost(_vtProcessor);
         _dragDropBehavior.Cancel();
         base.OnDetachedFromVisualTree(e);
         _searchPaused = true;
@@ -5841,6 +5846,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            _windowResizeQueue?.Reset();
             throw;
         }
 
@@ -6069,6 +6075,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             if (ReferenceEquals(_activeTransportExitHandler, exitHandler)) _activeTransportExitHandler = null;
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            _windowResizeQueue?.Reset();
             ResetPendingTransportOutputQueue();
             ResetKeyboardInputState();
             _activeTransportId = null;
@@ -6465,6 +6472,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 DisposeOutputWorker();
                 ResetNotificationHostSession();
+                _windowResizeQueue?.Reset();
                 _activeTransportId = null;
                 StopPasswordInputMonitoring();
             }

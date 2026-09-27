@@ -54,6 +54,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
     ITerminalEffectSource,
+    ITerminalWindowResizeSource,
     ITerminalUnknownSequencePolicy,
     ITerminalNotificationSource,
     ITerminalDragDropTarget,
@@ -3417,8 +3418,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     TabForward();
                 break;
 
-            case 't': // XTWINOPS reports
-                HandleWindowReport(Math.Max(0, p0));
+            case 't': // XTWINOPS host requests and reports
+                if (p0 == 8)
+                {
+                    // Ghostty #14375 accepts up to three parameters. Zero and
+                    // omitted dimensions preserve their current host dimension;
+                    // unlike a terminal resize API, this is a policy-gated effect.
+                    if (_params.Count <= 3)
+                        WindowResizeCallback?.Invoke(new(
+                            (ushort)(_params.Count > 2 ? _params[2] : 0), (ushort)p1));
+                }
+                else HandleWindowReport(Math.Max(0, p0));
                 break;
         }
     }

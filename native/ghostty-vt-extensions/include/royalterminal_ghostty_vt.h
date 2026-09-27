@@ -7,6 +7,15 @@
 extern "C" {
 #endif
 
+/** CSI 8 t host request in cell counts. Zero preserves the current dimension.
+ * This does not resize native terminal state. The host must explicitly permit
+ * window changes. Never throw/re-enter from the callback; serialize registration
+ * and terminal access and keep the callback alive until removal or disposal. */
+typedef void (*RoyalWindowResizeCallback)(GhosttyTerminal terminal, void* userdata,
+    uint16_t rows, uint16_t columns);
+GHOSTTY_API GhosttyResult ghostty_royal_window_resize_callback(
+    GhosttyTerminal terminal, void* userdata, RoyalWindowResizeCallback callback);
+
 /** Host-provided drop representation. Pointers are borrowed only for the call;
  * the upstream state copies data at drop time. MIME is a printable ASCII token
  * (1-1024 bytes, no spaces). At most 16 items and 64 MiB total data are accepted. */
