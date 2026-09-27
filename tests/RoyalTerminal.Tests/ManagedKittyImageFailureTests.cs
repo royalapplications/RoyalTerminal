@@ -4,6 +4,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Compression;
 using System.Text;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using Xunit;
 
