@@ -81,9 +81,44 @@ internal sealed class TerminalHyperlinkRegistry
         int hash = Hash(uri, id, implicitId);
         _buckets.TryGetValue(hash, out Entry? previous);
         TerminalHyperlink value = new(uri, id, id.IsEmpty ? implicitId : 0);
-        _buckets[hash] = new(token, value, previous);
+        Entry entry = new(token, value, previous);
+        // Finish fallible preparation before publishing either index.
+        _buckets.EnsureCapacity(_buckets.Count + 1);
+        _values.EnsureCapacity(_values.Count + 1);
         _values.Add(token, value);
+        _buckets[hash] = entry;
         return value;
+    }
+
+    // Only pending, newly registered protocol identities may be discarded.
+    // Existing/public registrations remain stable. CopyFrom shares immutable
+    // chains, so removing an interior collision must rebuild its prefix.
+    internal bool RemovePending(int token)
+    {
+        if (!_values.TryGetValue(token, out TerminalHyperlink? value)) return false;
+        int hash = Hash(value.UriBytes, value.ExplicitId, value.ImplicitId);
+        Entry? replacement = RemoveEntry(_buckets[hash], token);
+        if (replacement is null) _buckets.Remove(hash);
+        else _buckets[hash] = replacement;
+        _values.Remove(token);
+        return true;
+    }
+
+    internal static Entry? RemoveEntry(Entry head, int token)
+    {
+        if (head.Token == token) return head.Next;
+        List<Entry> prefix = [];
+        Entry? current = head;
+        while (current is not null && current.Token != token)
+        {
+            prefix.Add(current);
+            current = current.Next;
+        }
+        if (current is null) throw new InvalidOperationException("Hyperlink registry indices disagree.");
+        Entry? replacement = current.Next;
+        for (int i = prefix.Count - 1; i >= 0; i--)
+            replacement = new(prefix[i].Token, prefix[i].Value, replacement);
+        return replacement;
     }
 
     internal bool TryGet(int token, out TerminalHyperlink? value) => _values.TryGetValue(token, out value);
@@ -105,5 +140,5 @@ internal sealed class TerminalHyperlinkRegistry
         return hash.ToHashCode();
     }
 
-    private sealed record Entry(int Token, TerminalHyperlink Value, Entry? Next);
+    internal sealed record Entry(int Token, TerminalHyperlink Value, Entry? Next);
 }

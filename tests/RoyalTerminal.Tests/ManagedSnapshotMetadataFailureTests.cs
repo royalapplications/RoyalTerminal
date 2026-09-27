@@ -15,7 +15,7 @@ namespace RoyalTerminal.Tests;
 // PAGE limit. Use representable near-four-GiB logical capacity hints to refuse
 // growth deterministically, without allocating huge CLR/native pages or relying
 // on actual process OOM. Existing native continuation tests cover successful growth.
-public sealed class ManagedSnapshotMetadataFailureTests
+public sealed partial class ManagedSnapshotMetadataFailureTests
 {
     [Theory]
     [InlineData(4096, 0, false)]

@@ -1132,7 +1132,11 @@ public sealed partial class TerminalScreen
     /// Re-registering an existing identity is allocation-free.
     /// </summary>
     public int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId)
+        => RegisterHyperlink(uri, explicitId, implicitId, out _);
+
+    internal int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId, out bool created)
     {
+        created = false;
         if (uri.IsEmpty) throw new ArgumentException("A hyperlink URI cannot be empty.", nameof(uri));
         if (_hyperlinkIdentities.TryFind(uri, explicitId, implicitId, out int token)) return token;
         token = _nextHyperlinkId;
@@ -1141,10 +1145,23 @@ public sealed partial class TerminalScreen
             token = 1;
             while (_hyperlinksById.ContainsKey(token)) token++;
         }
+        _hyperlinksById.EnsureCapacity(_hyperlinksById.Count + 1);
         TerminalHyperlink value = _hyperlinkIdentities.Add(token, uri, explicitId, implicitId);
         _hyperlinksById.Add(token, value.Uri);
         _nextHyperlinkId = token + 1;
+        created = true;
         return token;
+    }
+
+    internal void DiscardPendingHyperlink(int token)
+    {
+        try
+        {
+            if (!_hyperlinkIdentities.RemovePending(token)) return;
+            _hyperlinksById.Remove(token);
+            if (_nextHyperlinkId == token + 1) _nextHyperlinkId = token;
+        }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
     }
 
     /// <summary>Gets the owned protocol identity, when registered with its original bytes.</summary>

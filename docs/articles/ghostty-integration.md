@@ -898,7 +898,25 @@ moves remain committed if the final append fails. Copied prefixes preserve a
 remapped inline base and supplementary scalars. A refused hyperlink cell-map
 insertion omits that cell's link but leaves a surviving OSC 8 cursor active.
 Failed cursor starts/migrations publish the dropped link without consuming an
-implicit ID. None of these refusals marks an otherwise representable page as
+implicit ID. A newly registered pending protocol identity is now also removed
+from both managed lookup indices on refusal or thrown preparation, including
+implicit page migration and resize restarts. Existing/public registrations and
+cell-owned source identities are never discarded by that rollback. Collision
+chains remain immutable for COW readers; head removal needs no new allocation,
+and only a colliding prefix is rebuilt before publication. The token watermark
+rewinds only if no later registration exists. Registry insertion prepares both
+indices before publishing either. This follows `Screen.startHyperlinkOnce`'s
+pending-value cleanup, preventing repeated refused OSC 8 values from accumulating
+URI/identity objects for the screen's lifetime. It does not introduce general
+pruning of successful public registrations. New refusal/retry, migration,
+resize, held-output, exception, collision/COW and weak-lifetime cases are authored
+but unrun; allocation and throughput profiling remain deferred.
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
+prunes unreachable hyperlink IDs as rows retire, while
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/common/services/OscLinkService.ts)
+uses line-marker lifetimes. Neither defines the native PAGE refusal contract;
+Ghostty defines that boundary here, with stable public registrations preserved.
+None of these refusals marks an otherwise representable page as
 overflowed. Focused near-four-GiB logical-capacity, COW and recovery cases are
 authored but unrun; fixtures do not allocate huge native pages. These boundaries
 follow Ghostty `Screen.appendGrapheme`, `startHyperlink`, `cursorSetHyperlink` and

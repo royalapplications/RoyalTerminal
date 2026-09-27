@@ -112,6 +112,25 @@ public sealed partial class TerminalScreen
     internal int SnapshotCursorHyperlinkToken(int key, int fallback)
         => TracksSnapshotMetadata ? _snapshotPageTracker?.CursorHyperlinkToken(key, fallback) ?? fallback : fallback;
 
+    internal int StartSnapshotHyperlink(int key, int cursorRow, GhosttySnapshotStyle pen,
+        ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, ref uint counter)
+    {
+        int candidate = RegisterHyperlink(uri, explicitId, counter, out bool created);
+        int accepted = 0;
+        try
+        {
+            accepted = SnapshotHyperlinkChanged(key, cursorRow, pen, candidate, ref counter, restart: true);
+            if (explicitId.IsEmpty && accepted != 0) counter = unchecked(counter + 1);
+            return accepted;
+        }
+        finally
+        {
+            // Like Screen.startHyperlinkOnce's errdefer, a refused pending
+            // identity owns no cursor/cell and must not become a registry leak.
+            if (created && accepted == 0) DiscardPendingHyperlink(candidate);
+        }
+    }
+
     internal GhosttySnapshotPageTracker.CursorResizeLease? BeginSnapshotCursorResize(int key, int cursorRow,
         GhosttySnapshotStyle pen, ref int hyperlinkToken, ref uint counter)
     {
@@ -131,12 +150,8 @@ public sealed partial class TerminalScreen
         TerminalHyperlink? link = null;
         bool implicitId = token != 0 && TryGetHyperlink(token, out link) && link is { IsExplicit: false };
         if (implicitId)
-        {
-            token = RegisterHyperlink(link!.UriBytes, default, counter);
-        }
-        token = SnapshotHyperlinkChanged(key, cursorRow, pen, token, ref counter, restart: true);
-        if (implicitId && token != 0) counter = unchecked(counter + 1);
-        return token;
+            return StartSnapshotHyperlink(key, cursorRow, pen, link!.UriBytes, default, ref counter);
+        return SnapshotHyperlinkChanged(key, cursorRow, pen, token, ref counter, restart: true);
     }
 
     private GhosttySnapshotAllocation SnapshotPageLayout()

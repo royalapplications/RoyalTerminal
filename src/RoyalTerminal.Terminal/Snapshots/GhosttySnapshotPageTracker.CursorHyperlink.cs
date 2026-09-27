@@ -34,33 +34,48 @@ internal sealed partial class GhosttySnapshotPageTracker
         TerminalHyperlink? identity = null;
         bool reissue = !restart && departing is not null && token != 0 &&
             screen.TryGetHyperlink(token, out identity) && identity is { IsExplicit: false };
+        bool created = false;
         if (reissue)
         {
-            token = screen.RegisterHyperlink(identity!.UriBytes, default, counter);
+            token = screen.RegisterHyperlink(identity!.UriBytes, default, counter, out created);
         }
-        using PageRowsLease lease = RentGroup(rows, page);
-        List<TerminalRow> group = lease.Rows;
-        State state = Writable(page, group);
-        if (!Synchronize(ref page, state, group, layout, screen)) return token;
-        byte[]? encoded = screen.SnapshotHyperlinkEncoding(token);
-        if (encoded is not null)
+        int candidate = token;
+        bool accepted = false;
+        try
         {
-            while (true)
+            using PageRowsLease lease = RentGroup(rows, page);
+            List<TerminalRow> group = lease.Rows;
+            State state = Writable(page, group);
+            if (!Synchronize(ref page, state, group, layout, screen))
             {
-                GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.StartCursor(encoded, encoded);
-                if (result == GhosttySnapshotHyperlinkAddResult.Success) break;
-                if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result),
-                    layout, preserveOnFailure: true))
+                accepted = token != 0; // Host-owned overflow retains its logical token.
+                return token;
+            }
+            byte[]? encoded = screen.SnapshotHyperlinkEncoding(token);
+            if (encoded is not null)
+            {
+                while (true)
                 {
-                    token = 0;
-                    break;
+                    GhosttySnapshotHyperlinkAddResult result = state.Storage.Hyperlinks.StartCursor(encoded, encoded);
+                    if (result == GhosttySnapshotHyperlinkAddResult.Success) break;
+                    if (!GrowMetadata(ref page, state, group, GhosttySnapshotHyperlinkStorage.GrowthDimension(result),
+                        layout, preserveOnFailure: true))
+                    {
+                        token = 0;
+                        break;
+                    }
                 }
             }
+            else token = 0;
+            if (reissue && token != 0) counter = unchecked(counter + 1);
+            if (key == 0) { _primaryLinkPage = page; _primaryLinkToken = token; }
+            else { _alternateLinkPage = page; _alternateLinkToken = token; }
+            accepted = token != 0;
+            return token;
         }
-        else token = 0;
-        if (reissue && token != 0) counter = unchecked(counter + 1);
-        if (key == 0) { _primaryLinkPage = page; _primaryLinkToken = token; }
-        else { _alternateLinkPage = page; _alternateLinkToken = token; }
-        return token;
+        finally
+        {
+            if (created && !accepted) screen.DiscardPendingHyperlink(candidate);
+        }
     }
 }

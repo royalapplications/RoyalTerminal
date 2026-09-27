@@ -2591,10 +2591,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
         ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
-        _currentHyperlinkId = _screen.RegisterHyperlink(uri, id, counter);
-        _currentHyperlinkId = _screen.SnapshotHyperlinkChanged(_inAltScreen ? 1 : 0, _cursorRow,
-            CaptureSnapshotPen(), _currentHyperlinkId, ref counter, restart: true);
-        if (id.IsEmpty && _currentHyperlinkId != 0) counter = unchecked(counter + 1);
+        _currentHyperlinkId = _screen.StartSnapshotHyperlink(_inAltScreen ? 1 : 0, _cursorRow,
+            CaptureSnapshotPen(), uri, id, ref counter);
     }
 
     private void ProcessDcsString(byte b)
