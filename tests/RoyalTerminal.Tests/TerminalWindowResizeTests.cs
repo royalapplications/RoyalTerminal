@@ -121,6 +121,35 @@ public sealed class TerminalWindowResizeTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void NativeAdapterCallbackCanBeEnabledDisabledAndRetainedAcrossReset()
+    {
+        if (!GhosttyVtProcessor.IsAvailable())
+        {
+            output.WriteLine("Native resize callback lifecycle unavailable; not counted as native validation.");
+            return;
+        }
+        using GhosttyVtProcessor native = new(new TerminalScreen(12, 5, 0));
+        Assert.Null(native.WindowResizeCallback);
+        native.Process("\u001b[8;40;120t"u8);
+        int requests = 0;
+        Action<TerminalWindowResizeRequest> callback = _ => requests++;
+        native.WindowResizeCallback = callback;
+        native.WindowResizeCallback = callback;
+        native.Process("\u001b[8;40;120t"u8);
+        native.Reset();
+        native.Process("\u001b[8;40;120t"u8);
+        Assert.Equal(2, requests);
+        native.WindowResizeCallback = null;
+        native.Process("\u001b[8;40;120t"u8);
+        Assert.Equal(2, requests);
+        native.WindowResizeCallback = callback;
+        native.Process("\u001b[8;40;120t"u8);
+        Assert.Equal(3, requests);
+        native.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => native.WindowResizeCallback = callback);
+    }
+
+    [Fact]
     public void RawC1CsiIsAcceptedButUtf8EncodedC1IsNotAControl()
     {
         using BasicVtProcessor processor = new(new TerminalScreen(12, 5, 0));

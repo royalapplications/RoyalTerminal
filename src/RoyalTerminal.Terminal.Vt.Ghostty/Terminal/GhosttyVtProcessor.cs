@@ -1361,7 +1361,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
-        _terminal.SetWindowResizeCallback(OnNativeWindowResize);
+        if (_windowResizeCallback is not null) _terminal.SetWindowResizeCallback(OnNativeWindowResize);
         _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;
         _bellDelegate ??= OnNativeBell;
