@@ -152,8 +152,6 @@ public sealed class TerminalFontPresentationTests
             Assert.True(tables.Font.TryGetNominalGlyph(0x1F600, out uint tableGlyph));
             Assert.True(stream.Font.TryGetNominalGlyph(0x1F600, out uint streamGlyph));
             Assert.Equal(tableGlyph, streamGlyph);
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
             Assert.Equal(1u, HarfBuzzColorApi.GetLayerCount(tables.Face.Handle, tableGlyph, 0, 0, 0));
             Assert.Equal(1u, HarfBuzzColorApi.GetLayerCount(stream.Face.Handle, streamGlyph, 0, 0, 0));
         }
@@ -175,6 +173,34 @@ public sealed class TerminalFontPresentationTests
         nint blob = HarfBuzzColorApi.ReferencePng(font.Handle, glyph);
         try { Assert.True(HarfBuzzColorApi.BlobLength(blob) > 0); }
         finally { HarfBuzzColorApi.DestroyBlob(blob); }
+    }
+
+    [Fact]
+    public void ColrVersionOneUsesPaintCoverageWithoutVersionZeroLayers()
+    {
+        using SKTypeface face = Load("ColorEmojiV1.ttf");
+        using HarfBuzzTypefaceEntry entry = new(face, preferMemoryStream: true);
+        ushort glyph = face.GetGlyph(0x1F600);
+        Assert.NotEqual((ushort)0, glyph);
+        Assert.Equal(0u, HarfBuzzColorApi.GetLayerCount(entry.Face.Handle, glyph, 0, 0, 0));
+        Assert.NotEqual(0, HarfBuzzColorApi.HasPaint(entry.Face.Handle, glyph));
+        using TerminalGlyphPresentation presentation = new(face);
+        Assert.True(presentation.IsColorGlyph(glyph));
+        Assert.False(presentation.IsColorGlyph(face.GetGlyph(' ')));
+    }
+
+    [Fact]
+    public void SvgChecksIndividualGlyphCoverageAndIsDisabledOutsideCoreText()
+    {
+        using SKTypeface face = Load("SvgEmoji.ttf");
+        using HarfBuzzTypefaceEntry entry = new(face, preferMemoryStream: true);
+        ushort glyph = face.GetGlyph(0x1F600);
+        nint blob = HarfBuzzColorApi.ReferenceSvg(entry.Face.Handle, glyph);
+        try { Assert.True(HarfBuzzColorApi.BlobLength(blob) > 0); }
+        finally { HarfBuzzColorApi.DestroyBlob(blob); }
+        using TerminalGlyphPresentation presentation = new(face);
+        Assert.Equal(OperatingSystem.IsMacOS(), presentation.IsColorGlyph(glyph));
+        Assert.False(presentation.IsColorGlyph(face.GetGlyph('#')));
     }
 
     private sealed class Matcher(bool returnColor = true) : ITerminalFontMatcher

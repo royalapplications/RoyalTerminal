@@ -18,7 +18,7 @@ internal static class FontPresentationTestFonts
 {
     internal static SKTypeface Load(string name)
     {
-        if (name != "NotoColorEmoji.ttf")
+        if (name is not ("NotoColorEmoji.ttf" or "ColorEmojiV1.ttf" or "SvgEmoji.ttf"))
             return SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", name))
                    ?? throw new InvalidOperationException(name);
 
@@ -52,6 +52,37 @@ internal static class FontPresentationTestFonts
         Put32(cpal, 8, 14);
         cpal[14] = 0x40; cpal[15] = 0x70; cpal[16] = 0xF0; cpal[17] = 0xFF;
         tables[0x4350414C] = cpal;
+        if (name == "ColorEmojiV1.ttf")
+        {
+            byte[] v1 = new byte[38 + glyphs.Count * 17];
+            Put16(v1, 0, 1);
+            Put32(v1, 14, 34); // BaseGlyphList follows the v1 header.
+            Put32(v1, 34, (uint)glyphs.Count);
+            for (int i = 0; i < glyphs.Count; i++)
+            {
+                int record = 38 + i * 6, paint = 38 + glyphs.Count * 6 + i * 11;
+                Put16(v1, record, glyphs[i]);
+                Put32(v1, record + 2, (uint)(paint - 34));
+                v1[paint] = 10; // PaintGlyph -> PaintSolid, six bytes ahead.
+                v1[paint + 3] = 6;
+                Put16(v1, paint + 4, glyphs[i]);
+                v1[paint + 6] = 2;
+                Put16(v1, paint + 9, 0x4000); // F2DOT14 alpha = 1.
+            }
+            tables[0x434F4C52] = v1;
+        }
+        else if (name == "SvgEmoji.ttf")
+        {
+            ushort glyph = source.GetGlyph(0x1F600);
+            byte[] document = Encoding.UTF8.GetBytes($"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1000 1000\"><g id=\"glyph{glyph}\"><rect width=\"800\" height=\"800\" fill=\"red\"/></g></svg>");
+            byte[] svg = new byte[24 + document.Length];
+            Put32(svg, 2, 10); // SVGDocumentList follows the ten-byte header.
+            Put16(svg, 10, 1); Put16(svg, 12, glyph); Put16(svg, 14, glyph);
+            Put32(svg, 16, 14); Put32(svg, 20, (uint)document.Length);
+            document.CopyTo(svg, 24);
+            tables.Remove(0x434F4C52);
+            tables[0x53564720] = svg;
+        }
         tables[0x6E616D65] = Rename(tables[0x6E616D65]);
         Put32(tables[0x68656164], 8, 0);
 
