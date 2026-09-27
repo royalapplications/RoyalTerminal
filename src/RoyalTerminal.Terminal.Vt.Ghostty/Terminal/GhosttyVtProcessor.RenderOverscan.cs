@@ -138,4 +138,19 @@ public sealed partial class GhosttyVtProcessor
         _renderMirrorAbove = 0;
         _renderMirrorAlternate = false;
     }
+
+    internal static bool IsKittyRenderInfoVisible(
+        in GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo info,
+        int columns, int rows, TerminalRenderOverscan overscan)
+    {
+        if (info.ViewportVisible) return true;
+        if (overscan == default || info.GridColumns == 0 || info.GridRows == 0) return false;
+        long row = info.ViewportRow;
+        // computeViewportPos returns (0,0,false) for unresolved/garbage pins,
+        // as well as a false flag for genuinely off-viewport geometry. Only
+        // the latter can become visible by extending vertical capture bounds.
+        if (row >= 0 && row < rows) return false;
+        return row > -(long)overscan.Above - info.GridRows && row < (long)rows + overscan.Below &&
+            info.ViewportColumn > -(long)info.GridColumns && info.ViewportColumn < columns;
+    }
 }

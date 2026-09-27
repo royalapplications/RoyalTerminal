@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--kitty-overscan-projection", StringComparer.Ordinal))
+{
+    KittyOverscanProjectionBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--native-render-overscan", StringComparer.Ordinal))
 {
     NativeRenderOverscanBenchmark.Run();

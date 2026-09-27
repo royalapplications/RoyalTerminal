@@ -692,8 +692,9 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     /// <summary>
     /// Renders available overscan rows at signed viewport positions as well as
     /// visible rows. The caller owns clipping/translation and must keep the screen
-    /// stable. Overscan affects cell rows; cursor and image-scene policy remain
-    /// viewport-based. Zero overscan preserves the ordinary rendering path.
+    /// stable. Cell rows, image clipping, and Kitty placeholder projection use
+    /// the same captured range; cursor/preedit remain viewport-based. Zero
+    /// overscan preserves the ordinary rendering path.
     /// </summary>
     /// <param name="canvas">Destination canvas.</param>
     /// <param name="screen">Screen whose rows and resources are rendered.</param>
@@ -713,8 +714,10 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalTextHighlightingMode textHighlightingMode = _textHighlightingMode;
         bool textHighlightingEnabled = textHighlightingMode != TerminalTextHighlightingMode.Disabled &&
             !textHighlightRules.IsEmpty;
-        ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
+        ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements(overscan);
         ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
+        SKRect imageClip = new(0, -renderRows.CapturedOverscan.Above * _cellHeight,
+            screen.Columns * _cellWidth, (screen.ViewportRows + renderRows.CapturedOverscan.Below) * _cellHeight);
         long imageFrameId = unchecked(++_imageRenderFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         bool useFullRowBuffers = TryGetPooledRowBufferCellCount(
@@ -728,8 +731,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         try
         {
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId);
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId, imageClip);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId, imageClip);
 
             // Render backgrounds first (batched)
             for (int index = 0; index < renderRows.Count; index++)
@@ -768,8 +771,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 RenderRowBackground(canvas, terminalRow, y, rowOverlays, rowTextHighlights);
             }
 
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId);
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId, imageClip);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId, imageClip);
 
             // Render text on top of the cell layer.
             for (int index = 0; index < renderRows.Count; index++)
@@ -844,8 +847,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             }
         }
 
-        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId);
-        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId);
+        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId, imageClip);
+        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId, imageClip);
         TrimBitmapCache(_kittyBitmapCache, ref _kittyBitmapCacheBytes, imageFrameId);
         TrimBitmapCache(_rasterBitmapCache, ref _rasterBitmapCacheBytes, imageFrameId);
 
@@ -6144,19 +6147,18 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalScreen screen,
         ReadOnlySpan<TerminalRasterImagePlacement> placements,
         TerminalRasterImageLayer layer,
-        long imageFrameId)
+        long imageFrameId,
+        SKRect imageClip)
     {
         if (placements.IsEmpty)
         {
             return;
         }
 
-        float viewportWidth = screen.Columns * _cellWidth;
-        float viewportHeight = screen.ViewportRows * _cellHeight;
         int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
 
         canvas.Save();
-        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+        canvas.ClipRect(imageClip);
 
         try
         {
@@ -6179,7 +6181,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     destTop,
                     destLeft + (placement.WidthPx * xScale),
                     destTop + (placement.HeightPx * yScale));
-                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
@@ -6228,18 +6230,16 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalScreen screen,
         ReadOnlySpan<TerminalKittyImagePlacement> placements,
         TerminalKittyImageLayer layer,
-        long imageFrameId)
+        long imageFrameId,
+        SKRect imageClip)
     {
         if (placements.IsEmpty)
         {
             return;
         }
 
-        float viewportWidth = screen.Columns * _cellWidth;
-        float viewportHeight = screen.ViewportRows * _cellHeight;
-
         canvas.Save();
-        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+        canvas.ClipRect(imageClip);
 
         try
         {
@@ -6260,7 +6260,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     destTop,
                     destLeft + (placement.WidthPx * xScale),
                     destTop + (placement.HeightPx * yScale));
-                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
@@ -6316,12 +6316,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         return (scale, scale);
     }
 
-    private static bool IntersectsViewport(SKRect rect, float viewportWidth, float viewportHeight)
+    private static bool IntersectsViewport(SKRect rect, SKRect viewport)
     {
-        return rect.Right > 0f &&
-            rect.Bottom > 0f &&
-            rect.Left < viewportWidth &&
-            rect.Top < viewportHeight;
+        return rect.Right > viewport.Left &&
+            rect.Bottom > viewport.Top &&
+            rect.Left < viewport.Right &&
+            rect.Top < viewport.Bottom;
     }
 
     private static bool IsRenderableImageRect(SKRect sourceRect, SKRect destRect)

@@ -19,6 +19,7 @@ public sealed partial class TerminalScreen
 {
     private TerminalKittyAnchoredPlacement[]? _kittyAnchoredPlacements;
     private KittyProjectionState? _kittyProjectionState;
+    private KittyOverscanProjection? _kittyOverscanProjection;
 
     /// <summary>
     /// Retains tracked placement recipes, including images outside the viewport.
@@ -57,6 +58,7 @@ public sealed partial class TerminalScreen
         _kittyPlaceholderScene = scene;
         _kittyPlaceholderRuns = null;
         _kittyProjectionState = null;
+        _kittyOverscanProjection = null;
         InvalidateViewportCore();
     }
 
@@ -87,41 +89,62 @@ public sealed partial class TerminalScreen
         return true;
     }
 
-    private void RefreshKittyProjection()
+    private TerminalKittyImagePlacement[] RefreshKittyProjection(TerminalRenderOverscan overscan)
     {
-        if (_kittyAnchoredPlacements is not { Length: > 0 } && _kittyPlaceholderScene is null) return;
+        if (_kittyAnchoredPlacements is not { Length: > 0 } && _kittyPlaceholderScene is null) return _kittyPlacements;
+        TerminalRenderViewport renderRows = GetRenderViewport(overscan);
+        TerminalRenderOverscan captured = renderRows.CapturedOverscan;
+        bool extended = captured != default;
+        TerminalKittyLocatedPlaceholder[]? oldRuns = extended ? _kittyOverscanProjection?.Runs : _kittyPlaceholderRuns;
+        KittyProjectionState? oldState = extended ? _kittyOverscanProjection?.State : _kittyProjectionState;
         KittyProjectionState state = new(_anchorRevision, ViewportTopAbsoluteRow,
-            Columns, ViewportRows, _alternateBufferActive);
+            Columns, ViewportRows, _alternateBufferActive, captured);
         TerminalKittyLocatedPlaceholder[]? runs = _kittyPlaceholderScene is not null
-            ? PreparePlaceholderRuns() : _kittyPlaceholderRuns;
-        bool runsChanged = !ReferenceEquals(runs, _kittyPlaceholderRuns);
-        if (_kittyProjectionState == state && !runsChanged) return;
+            ? PreparePlaceholderRuns(renderRows, oldRuns) : oldRuns;
+        bool runsChanged = !ReferenceEquals(runs, oldRuns);
+        if (oldState == state && !runsChanged)
+            return extended ? _kittyOverscanProjection!.Placements : _kittyPlacements;
 
         List<TerminalKittyImagePlacement> visible = new(_kittyAnchoredPlacements?.Length ?? 0);
         if (_kittyPlaceholderScene is { } scene) visible.AddRange(scene.Fixed);
         foreach (TerminalKittyAnchoredPlacement placement in _kittyAnchoredPlacements ?? [])
         {
             if (!TryResolveAnchor(placement.Anchor, out TerminalGridPosition origin)) continue;
-            long column = origin.Column + placement.ColumnOffset;
-            long row = origin.Row + placement.RowOffset - state.ViewportTop;
-            AppendKittyProjection(visible, column, row, placement.Columns, placement.Rows, placement.Geometry);
+            long column = OffsetKittyCoordinate(origin.Column, placement.ColumnOffset);
+            long row = OffsetKittyCoordinate(origin.Row, placement.RowOffset, state.ViewportTop);
+            AppendKittyProjection(visible, column, row, placement.Columns, placement.Rows, placement.Geometry, captured);
         }
-        if (_kittyPlaceholderScene is { } placeholders) AppendPlaceholderProjection(visible, placeholders, runs);
+        if (_kittyPlaceholderScene is { } placeholders) AppendPlaceholderProjection(visible, placeholders, runs, captured);
         visible.Sort(TerminalKittyImagePlacement.ComparePaintOrder);
 
         // Replace the immutable projection instead of changing an array retained
         // by a previous frame or a copy-on-write screen.
         TerminalKittyImagePlacement[] prepared = visible.ToArray();
         MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.KittyProjectionPrepared);
-        _kittyPlacements = prepared;
-        _kittyPlaceholderRuns = runs;
-        _kittyProjectionState = state;
+        if (extended)
+        {
+            // Keep one bounded extra-range cache separate from ordinary viewport
+            // queries (including HasKittyGraphics), so alternating consumers don't
+            // allocate/rebuild the same projection on every frame. COW copies may
+            // share this immutable cache until their own rows/anchors change.
+            _kittyOverscanProjection = new(state, runs, prepared);
+        }
+        else
+        {
+            _kittyPlacements = prepared;
+            _kittyPlaceholderRuns = runs;
+            _kittyProjectionState = state;
+        }
+        return prepared;
     }
 
     private void AppendKittyProjection(List<TerminalKittyImagePlacement> visible, long column, long row,
-        uint columns, uint rows, TerminalKittyImagePlacement geometry)
+        uint columns, uint rows, TerminalKittyImagePlacement geometry, TerminalRenderOverscan overscan)
     {
-        if (row + rows <= 0 || row >= ViewportRows || column + columns <= 0 || column >= Columns) return;
+        // Subtract the bounded extent instead of adding it to a possibly extreme
+        // relative coordinate. This also rejects empty geometry without overflow.
+        if (rows == 0 || columns == 0 || row <= -(long)overscan.Above - rows ||
+            row >= (long)ViewportRows + overscan.Below || column <= -(long)columns || column >= Columns) return;
         visible.Add(new(geometry.ImageId, geometry.Layer,
             (int)Math.Clamp(column, int.MinValue, int.MaxValue), (int)Math.Clamp(row, int.MinValue, int.MaxValue),
             geometry.XOffsetPx, geometry.YOffsetPx, geometry.WidthPx, geometry.HeightPx,
@@ -130,5 +153,11 @@ public sealed partial class TerminalScreen
     }
 
     private readonly record struct KittyProjectionState(
-        long AnchorRevision, int ViewportTop, int Columns, int Rows, bool Alternate);
+        long AnchorRevision, int ViewportTop, int Columns, int Rows, bool Alternate, TerminalRenderOverscan Overscan);
+
+    private sealed record KittyOverscanProjection(KittyProjectionState State,
+        TerminalKittyLocatedPlaceholder[]? Runs, TerminalKittyImagePlacement[] Placements);
+
+    private static long OffsetKittyCoordinate(int coordinate, long offset, int viewportOrigin = 0)
+        => (long)Int128.Clamp((Int128)coordinate + offset - viewportOrigin, long.MinValue, long.MaxValue);
 }

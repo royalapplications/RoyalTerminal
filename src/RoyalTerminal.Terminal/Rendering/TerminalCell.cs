@@ -1177,10 +1177,17 @@ public sealed partial class TerminalScreen
 
     /// <summary>Gets the current Kitty image placement snapshot.</summary>
     public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements()
-    {
-        RefreshKittyProjection();
-        return _kittyPlacements;
-    }
+        => GetKittyPlacements(default);
+
+    /// <summary>Projects Kitty anchors and placeholders across the available render-row range.</summary>
+    /// <param name="overscan">Requested extra rows, limited to accessible or adapter-captured rows.</param>
+    /// <returns>
+    /// Immutable placement geometry with signed viewport coordinates. Fixed adapter
+    /// placements may extend beyond the requested range; the renderer clips them.
+    /// The caller must serialize projection with screen mutation.
+    /// </returns>
+    public ReadOnlySpan<TerminalKittyImagePlacement> GetKittyPlacements(TerminalRenderOverscan overscan)
+        => RefreshKittyProjection(overscan);
 
     /// <summary>Attempts to resolve a Kitty image payload by image id.</summary>
     public bool TryGetKittyImageSource(int imageId, out TerminalKittyImageSource? source)
@@ -1210,6 +1217,7 @@ public sealed partial class TerminalScreen
         _kittyPlaceholderScene = null;
         _kittyPlaceholderRuns = null;
         _kittyProjectionState = null;
+        _kittyOverscanProjection = null;
         if (_kittyImagesById.Count == 0 && _kittyPlacements.Length == 0)
         {
             return;

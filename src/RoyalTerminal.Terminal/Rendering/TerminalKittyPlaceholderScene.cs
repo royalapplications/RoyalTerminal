@@ -101,17 +101,19 @@ public sealed partial class TerminalScreen
 
     // Scan each frame like Ghostty, but retain the immutable run array when unchanged.
     // Exact run comparison avoids a hash collision making stale placements permanent.
-    private TerminalKittyLocatedPlaceholder[] PreparePlaceholderRuns()
+    private static TerminalKittyLocatedPlaceholder[] PreparePlaceholderRuns(
+        TerminalRenderViewport renderRows, TerminalKittyLocatedPlaceholder[]? previous)
     {
-        TerminalKittyLocatedPlaceholder[] old = _kittyPlaceholderRuns ?? [];
+        TerminalKittyLocatedPlaceholder[] old = previous ?? [];
         List<TerminalKittyLocatedPlaceholder>? changed = null;
         int count = 0;
-        for (int row = 0; row < ViewportRows; row++)
+        for (int index = 0; index < renderRows.Count; index++)
         {
-            TerminalKittyPlaceholderScanner scanner = new(GetViewportRow(row).ReadOnlyCells);
+            TerminalRenderRow row = renderRows[index];
+            TerminalKittyPlaceholderScanner scanner = new(row.Row.ReadOnlyCells);
             while (scanner.TryReadNext(out TerminalKittyPlaceholderRun run))
             {
-                TerminalKittyLocatedPlaceholder located = new(row, run);
+                TerminalKittyLocatedPlaceholder located = new(row.ViewportY, run);
                 if (changed is null && (count >= old.Length || old[count] != located))
                 {
                     changed = new(Math.Max(old.Length, count + 1));
@@ -126,7 +128,7 @@ public sealed partial class TerminalScreen
     }
 
     private void AppendPlaceholderProjection(List<TerminalKittyImagePlacement> visible, TerminalKittyPlaceholderScene scene,
-        ReadOnlySpan<TerminalKittyLocatedPlaceholder> runs)
+        ReadOnlySpan<TerminalKittyLocatedPlaceholder> runs, TerminalRenderOverscan overscan)
     {
         Dictionary<TerminalKittyPlacementKey, TerminalGridPosition>? origins = scene.Relatives.Length > 0 ? [] : null;
         foreach (TerminalKittyLocatedPlaceholder located in runs)
@@ -154,8 +156,9 @@ public sealed partial class TerminalScreen
         foreach (TerminalKittyRelativePlacement relative in scene.Relatives)
         {
             if (!origins.TryGetValue(relative.Root, out TerminalGridPosition origin)) continue;
-            AppendKittyProjection(visible, origin.Column + relative.ColumnOffset, origin.Row + relative.RowOffset,
-                relative.Columns, relative.Rows, relative.Geometry);
+            AppendKittyProjection(visible, OffsetKittyCoordinate(origin.Column, relative.ColumnOffset),
+                OffsetKittyCoordinate(origin.Row, relative.RowOffset),
+                relative.Columns, relative.Rows, relative.Geometry, overscan);
         }
     }
 

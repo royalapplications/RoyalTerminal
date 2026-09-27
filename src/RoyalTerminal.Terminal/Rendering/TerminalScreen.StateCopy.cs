@@ -32,6 +32,7 @@ public sealed partial class TerminalScreen
         copy._kittyPlaceholderScene = _kittyPlaceholderScene;
         copy._kittyPlaceholderRuns = _kittyPlaceholderRuns;
         copy._kittyProjectionState = _kittyProjectionState;
+        copy._kittyOverscanProjection = _kittyOverscanProjection;
         copy._trackedAnchors = new(_trackedAnchors);
         copy._snapshotPageTracker = _snapshotPageTracker?.Copy();
         return copy;
@@ -83,6 +84,7 @@ public sealed partial class TerminalScreen
         _kittyPlaceholderScene = source._kittyPlaceholderScene;
         _kittyPlaceholderRuns = source._kittyPlaceholderRuns;
         _kittyProjectionState = source._kittyProjectionState;
+        _kittyOverscanProjection = source._kittyOverscanProjection;
         _trackedAnchors = source._trackedAnchors;
         _snapshotPageTracker = source._snapshotPageTracker;
         InvalidateAllCore();

@@ -2175,6 +2175,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _kittyVirtualRelatives.Clear();
         bool hasVirtual = false;
         bool imagesChanged = false;
+        TerminalRenderOverscan capturedOverscan = _screen.GetRenderViewport(_renderOverscan).CapturedOverscan;
 
         _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
         graphics.Populate(_kittyPlacementIterator);
@@ -2208,7 +2209,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                     image,
                     _terminal,
                     out GhosttyVtNative.GhosttyKittyGraphicsPlacementRenderInfo renderInfo) ||
-                !renderInfo.ViewportVisible && !virtualRoot)
+                !virtualRoot && !IsKittyRenderInfoVisible(renderInfo, _screen.Columns, _screen.ViewportRows, capturedOverscan))
             {
                 continue;
             }

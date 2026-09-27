@@ -65,6 +65,7 @@ public sealed partial class TerminalScreen
         _kittyPlaceholderScene = scene;
         _kittyPlaceholderRuns = null;
         _kittyProjectionState = null;
+        _kittyOverscanProjection = null;
         InvalidateViewportCore();
     }
 }
