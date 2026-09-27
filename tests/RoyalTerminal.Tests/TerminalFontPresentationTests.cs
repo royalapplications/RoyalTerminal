@@ -13,6 +13,8 @@ public sealed class TerminalFontPresentationTests
     [Theory]
     [InlineData("\U0001F600")]
     [InlineData("\U0001F600\uFE0E")]
+    [InlineData("\U0001F1E8")]
+    [InlineData("\U0001F1E8\uFE0E")]
     public void ConfiguredMonochromeEmojiFaceTakesPrecedenceWithoutExplicitColor(string text)
     {
         using SKTypeface primary = Load("NotoEmoji-Regular.ttf");
@@ -59,6 +61,7 @@ public sealed class TerminalFontPresentationTests
     [Theory]
     [InlineData(0x231A, true)] // Watch: outside the previous supplementary-block heuristic.
     [InlineData(0x1F321, false)] // Thermometer: inside that block, but defaults to text.
+    [InlineData(0x1F1E8, true)] // Regional indicator: an emoji-family name is not color coverage.
     public void MissingBaseUsesExactUnicodeDefault(int codepoint, bool emoji)
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
@@ -69,6 +72,29 @@ public sealed class TerminalFontPresentationTests
         Assert.True(result.UsedFallback);
         Assert.Single(matcher.Requests);
         Assert.Equal(emoji, matcher.Requests[0].Emoji);
+    }
+
+    [Theory]
+    [InlineData(0x1F600)]
+    [InlineData(0x1F1E8)]
+    public void EmojiLanguageHintDoesNotAcceptDiscoveredMonochromeGlyph(int codepoint)
+    {
+        using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
+        using SKTypeface monochrome = Load("NotoEmoji-Regular.ttf");
+        Assert.False(primary.ContainsGlyph(codepoint));
+        Assert.True(monochrome.ContainsGlyph(codepoint));
+        Matcher matcher = new(returnColor: false);
+        using TerminalFontResolver resolver = new(matcher);
+
+        for (int i = 0; i < 2; i++)
+        {
+            TerminalFontResolution result = resolver.ResolveTypeface(primary, codepoint, CultureInfo.InvariantCulture);
+            Assert.Same(primary, result.Typeface);
+            Assert.False(result.UsedFallback);
+        }
+
+        Assert.Equal(new[] { (codepoint, true) }, matcher.Requests);
+        Assert.Equal(1, resolver.CachedFallbackCount);
     }
 
     [Fact]

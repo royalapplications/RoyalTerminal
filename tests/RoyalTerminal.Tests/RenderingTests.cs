@@ -213,24 +213,41 @@ public class RenderingTests
             regionalIndicatorCodepoint,
             CultureInfo.InvariantCulture);
 
+        if (baseTypeface.ContainsGlyph(regionalIndicatorCodepoint))
+        {
+            Assert.Same(baseTypeface, resolution.Typeface);
+            Assert.False(resolution.UsedFallback);
+            return;
+        }
+
         using var expectedEmojiTypeface = manager.MatchCharacter(
             null,
             baseTypeface.FontStyle,
             ["und-Zsye"],
             regionalIndicatorCodepoint);
 
-        if (expectedEmojiTypeface is not null && expectedEmojiTypeface.Handle != baseTypeface.Handle)
+        // Ghostty's CodepointResolver validates presentation after discovery.
+        // The language hint alone does not guarantee color glyph coverage:
+        // Windows can return a monochrome regional indicator from an emoji font.
+        using TerminalGlyphPresentation? expectedPresentation = expectedEmojiTypeface is null
+            ? null
+            : new(expectedEmojiTypeface);
+        if (expectedEmojiTypeface is not null &&
+            expectedEmojiTypeface.Handle != baseTypeface.Handle &&
+            expectedPresentation!.IsColorGlyph(expectedEmojiTypeface.GetGlyph(regionalIndicatorCodepoint)))
         {
             Assert.True(resolution.UsedFallback);
-            Assert.True(resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint));
+        }
+
+        if (resolution.UsedFallback)
+        {
+            using TerminalGlyphPresentation presentation = new(resolution.Typeface);
+            Assert.True(presentation.IsColorGlyph(resolution.Typeface.GetGlyph(regionalIndicatorCodepoint)));
             Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
             return;
         }
 
-        Assert.True(
-            resolution.Typeface.Handle == baseTypeface.Handle ||
-            resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint),
-            "Resolution should keep base typeface or return a typeface containing the regional indicator glyph.");
+        Assert.Same(baseTypeface, resolution.Typeface);
     }
 
     [Fact]
