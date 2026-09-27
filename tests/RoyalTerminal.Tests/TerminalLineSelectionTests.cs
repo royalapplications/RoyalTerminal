@@ -14,7 +14,7 @@ namespace RoyalTerminal.Tests;
 /// rows too, but extend to physical row edges. The shared host now follows
 /// Ghostty's trimmed/semantic behavior, with its existing blank-line fallback.
 /// </summary>
-public sealed class TerminalLineSelectionTests
+public sealed class TerminalLineSelectionTests(ITestOutputHelper output)
 {
     public static TheoryData<string, int, int, int, int, int, int, string> Cases => new()
     {
@@ -185,8 +185,10 @@ public sealed class TerminalLineSelectionTests
         Assert.Equal(new TerminalLineExtent(new(0, 0), new(5, 3)), extent);
     }
 
-    [Fact]
-    public void SeededSemanticHistoryMatrixMatchesNative()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SeededSemanticHistoryMatrixMatchesNative(bool fragmented)
     {
         if (!GhosttyVtProcessor.IsAvailable()) Assert.Skip("Native unavailable; rebuild required before final validation.");
         Random random = new(14391);
@@ -200,8 +202,19 @@ public sealed class TerminalLineSelectionTests
             StringBuilder input = new();
             for (int i = 0; i < 100; i++) input.Append(tokens[random.Next(tokens.Length)]);
             byte[] bytes = Encoding.UTF8.GetBytes(input.ToString());
-            managed.Process(bytes);
-            native.Process(bytes);
+            if (fragmented)
+            {
+                for (int offset = 0; offset < bytes.Length; offset++)
+                {
+                    managed.Process(bytes.AsSpan(offset, 1));
+                    native.Process(bytes.AsSpan(offset, 1));
+                }
+            }
+            else
+            {
+                managed.Process(bytes);
+                native.Process(bytes);
+            }
             Assert.Equal((ulong)screen.TotalRows, native.ViewportScrollState.TotalRows);
             foreach (bool semantic in new[] { false, true })
             {
@@ -213,6 +226,10 @@ public sealed class TerminalLineSelectionTests
                         bool actualFound = managed.TryGetLineExtent(new(column, row), trim, semantic, out var actual);
                         bool nativeFound = native.TryGetLineExtent(new(column, row), trim, semantic, out var expected);
                         Assert.True(actualFound == nativeFound, $"sample={sample}, cell={column},{row}, semantic={semantic}");
+                        if (actual != expected)
+                        {
+                            output.WriteLine($"sample={sample}, cell={column},{row}, semantic={semantic}, utf8={Convert.ToHexString(bytes)}");
+                        }
                         Assert.Equal(expected, actual);
                     }
                 }

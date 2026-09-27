@@ -930,29 +930,52 @@ public class GhosttyVtProcessorTests
         Assert.NotEqual("GHIJKL", ReadAsciiPrefix(screen, 1, 6));
     }
 
-    [Fact]
-    public void GhosttyVtProcessor_Resize_TrimsTrailingStyledSpaces_WhenAvailable()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GhosttyVtProcessor_Resize_PreservesExplicitStyledSpaces(bool fragmented)
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         if (!GhosttyVtProcessor.IsAvailable())
         {
-            return;
+            Assert.Skip("Native unavailable; rebuild required before final validation.");
         }
 
-        TerminalScreen screen = new(columns: 12, viewportRows: 3, scrollbackLimit: 0);
+        // These are explicit printed spaces, not erased cells. SGR resets and
+        // CR/LF do not erase them. Keep enough rows to inspect their full reflow.
+        TerminalScreen screen = new(columns: 12, viewportRows: 6, scrollbackLimit: 0);
         using GhosttyVtProcessor processor = new(screen);
-        processor.NotifyResize(columns: 12, rows: 3, widthPx: 120, heightPx: 48);
+        processor.NotifyResize(columns: 12, rows: 6, widthPx: 120, heightPx: 96);
 
-        processor.Process(Encoding.UTF8.GetBytes("\x1b[44;1mDIR         \x1b[0m\r\nNEXT"));
-        processor.NotifyResize(columns: 4, rows: 3, widthPx: 40, heightPx: 48);
+        byte[] input = "\u001b[44;1mDIR         \u001b[0m\r\nNEXT"u8.ToArray();
+        if (fragmented)
+        {
+            for (int i = 0; i < input.Length; i++) processor.Process(input.AsSpan(i, 1));
+        }
+        else processor.Process(input);
 
-        Assert.False(screen.GetViewportRow(0).WrapsToNext);
+        Assert.Equal("DIR         ", ReadAsciiPrefix(screen, 0, 12));
+        for (int column = 3; column < 12; column++)
+        {
+            Assert.Equal((int)' ', screen.GetViewportRow(0)[column].Codepoint);
+            Assert.Equal(screen.GetViewportRow(0)[0].Background, screen.GetViewportRow(0)[column].Background);
+        }
+        processor.NotifyResize(columns: 4, rows: 6, widthPx: 40, heightPx: 96);
+
+        Assert.True(screen.GetViewportRow(0).WrapsToNext);
+        Assert.True(screen.GetViewportRow(1).WrapsToNext);
+        Assert.False(screen.GetViewportRow(2).WrapsToNext);
         Assert.Equal("DIR ", ReadAsciiPrefix(screen, 0, 4));
-        Assert.Equal("NEXT", ReadAsciiPrefix(screen, 1, 4));
+        Assert.Equal("    ", ReadAsciiPrefix(screen, 1, 4));
+        Assert.Equal("    ", ReadAsciiPrefix(screen, 2, 4));
+        Assert.Equal("NEXT", ReadAsciiPrefix(screen, 3, 4));
+        for (int row = 1; row < 3; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                Assert.Equal((int)' ', screen.GetViewportRow(row)[column].Codepoint);
+                Assert.Equal(screen.GetViewportRow(0)[0].Background, screen.GetViewportRow(row)[column].Background);
+            }
+        }
     }
 
     [Fact]

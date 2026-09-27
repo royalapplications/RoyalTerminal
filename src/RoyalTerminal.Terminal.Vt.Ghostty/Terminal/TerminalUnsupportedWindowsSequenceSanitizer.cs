@@ -8,7 +8,8 @@ namespace RoyalTerminal.Terminal;
 
 /// <summary>
 /// Strips Windows-specific sequences that are not supported by this Ghostty integration path
-/// and normalizes styled ConPTY line padding before native Ghostty owns resize reflow.
+/// without changing printable data or SGR sequences. Spaces before SGR/CR/LF
+/// are terminal content, not distinguishable ConPTY padding.
 /// Maintains chunk boundary state so split unsupported sequences are stripped reliably.
 /// </summary>
 internal sealed class TerminalUnsupportedWindowsSequenceSanitizer
@@ -45,7 +46,7 @@ internal sealed class TerminalUnsupportedWindowsSequenceSanitizer
             return false;
         }
 
-        if (!hadCarry && !RequiresSanitization(data))
+        if (!hadCarry && !ContainsUnsupportedSequenceOrPendingPrefix(data))
         {
             sanitizedBuffer = null;
             sanitizedLength = data.Length;
@@ -92,9 +93,8 @@ internal sealed class TerminalUnsupportedWindowsSequenceSanitizer
 
         ArrayPool<byte>.Shared.Return(combined);
 
-        bool trimmedAny = TrimTrailingSpacesBeforeLineBreaks(output, writeIndex, out writeIndex);
         bool hasPendingCarry = _carry.Length > 0;
-        if (!hadCarry && !removedAny && !trimmedAny && !hasPendingCarry)
+        if (!hadCarry && !removedAny && !hasPendingCarry)
         {
             ArrayPool<byte>.Shared.Return(output);
             sanitizedBuffer = null;
@@ -121,12 +121,6 @@ internal sealed class TerminalUnsupportedWindowsSequenceSanitizer
         return 0;
     }
 
-    private static bool RequiresSanitization(ReadOnlySpan<byte> data)
-    {
-        return ContainsUnsupportedSequenceOrPendingPrefix(data) ||
-            ContainsStyledTrailingSpacesBeforeLineBreak(data);
-    }
-
     private static bool ContainsUnsupportedSequenceOrPendingPrefix(ReadOnlySpan<byte> data)
     {
         int searchOffset = 0;
@@ -150,139 +144,6 @@ internal sealed class TerminalUnsupportedWindowsSequenceSanitizer
         }
 
         return false;
-    }
-
-    private static bool ContainsStyledTrailingSpacesBeforeLineBreak(ReadOnlySpan<byte> data)
-    {
-        int lineStart = 0;
-        for (int i = 0; i < data.Length; i++)
-        {
-            byte value = data[i];
-            if (value != (byte)'\r' && value != (byte)'\n')
-            {
-                continue;
-            }
-
-            if (LineEndsWithStyledTrailingSpaces(data[lineStart..i]))
-            {
-                return true;
-            }
-
-            lineStart = i + 1;
-        }
-
-        return false;
-    }
-
-    private static bool LineEndsWithStyledTrailingSpaces(ReadOnlySpan<byte> line)
-    {
-        int sgrSuffixStart = FindTrailingSgrSuffixStart(line);
-        if (sgrSuffixStart == line.Length)
-        {
-            return false;
-        }
-
-        int spaceStart = sgrSuffixStart;
-        while (spaceStart > 0 && line[spaceStart - 1] == (byte)' ')
-        {
-            spaceStart--;
-        }
-
-        return spaceStart < sgrSuffixStart;
-    }
-
-    private static bool TrimTrailingSpacesBeforeLineBreaks(byte[] buffer, int inputLength, out int outputLength)
-    {
-        int writeIndex = 0;
-        bool trimmedAny = false;
-
-        for (int readIndex = 0; readIndex < inputLength; readIndex++)
-        {
-            byte value = buffer[readIndex];
-            if (value is (byte)'\r' or (byte)'\n')
-            {
-                trimmedAny |= TrimCurrentLineEnd(buffer, ref writeIndex);
-                buffer[writeIndex++] = value;
-                continue;
-            }
-
-            buffer[writeIndex++] = value;
-        }
-
-        outputLength = writeIndex;
-        return trimmedAny;
-    }
-
-    private static bool TrimCurrentLineEnd(byte[] buffer, ref int writeIndex)
-    {
-        int sgrSuffixStart = FindTrailingSgrSuffixStart(buffer.AsSpan(0, writeIndex));
-        if (sgrSuffixStart == writeIndex)
-        {
-            return false;
-        }
-
-        int spaceStart = sgrSuffixStart;
-        while (spaceStart > 0 && buffer[spaceStart - 1] == (byte)' ')
-        {
-            spaceStart--;
-        }
-
-        if (spaceStart == sgrSuffixStart)
-        {
-            return false;
-        }
-
-        int suffixLength = writeIndex - sgrSuffixStart;
-        if (suffixLength > 0)
-        {
-            Buffer.BlockCopy(buffer, sgrSuffixStart, buffer, spaceStart, suffixLength);
-        }
-
-        writeIndex = spaceStart + suffixLength;
-        return true;
-    }
-
-    private static int FindTrailingSgrSuffixStart(ReadOnlySpan<byte> line)
-    {
-        int suffixStart = line.Length;
-        while (suffixStart > 0)
-        {
-            int escapeIndex = line[..suffixStart].LastIndexOf((byte)0x1B);
-            if (escapeIndex < 0 || !IsCsiSgrSequence(line[escapeIndex..suffixStart]))
-            {
-                return suffixStart;
-            }
-
-            suffixStart = escapeIndex;
-        }
-
-        return suffixStart;
-    }
-
-    private static bool IsCsiSgrSequence(ReadOnlySpan<byte> sequence)
-    {
-        if (sequence.Length < 3 ||
-            sequence[0] != 0x1B ||
-            sequence[1] != (byte)'[' ||
-            sequence[^1] != (byte)'m')
-        {
-            return false;
-        }
-
-        for (int i = 2; i < sequence.Length - 1; i++)
-        {
-            byte value = sequence[i];
-            bool parameterByte =
-                (value >= (byte)'0' && value <= (byte)'9') ||
-                value == (byte)';' ||
-                value == (byte)':';
-            if (!parameterByte)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static bool IsIncompleteUnsupportedPrefixAtBufferEnd(ReadOnlySpan<byte> remaining)

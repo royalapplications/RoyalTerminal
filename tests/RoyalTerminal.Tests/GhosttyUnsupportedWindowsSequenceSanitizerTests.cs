@@ -9,6 +9,14 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+/// <summary>
+/// Ghostty Terminal.print/setAttribute, Windows Terminal AdaptDispatch.PrintString/
+/// CarriageReturn and xterm.js InputHandler.charAttributes preserve printed spaces.
+/// PowerShell StringDecorated.ToString(Ansi) also preserves the original text;
+/// ConsoleLineOutput delegates line wrapping, not terminal-side whitespace removal.
+/// SGR followed by CR/LF cannot identify ConPTY padding: preserve bytes regardless
+/// of chunk boundaries and let Ghostty own reflow of the resulting cells.
+/// </summary>
 public sealed class GhosttyUnsupportedWindowsSequenceSanitizerTests
 {
     [Fact]
@@ -90,7 +98,7 @@ public sealed class GhosttyUnsupportedWindowsSequenceSanitizerTests
     }
 
     [Fact]
-    public void TrySanitize_TrailingStyledSpacesBeforeSgrResetAndLineBreak_TrimsSpaces()
+    public void TrySanitize_TrailingStyledSpacesBeforeSgrResetAndLineBreak_PreservesSpaces()
     {
         TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
 
@@ -99,10 +107,39 @@ public sealed class GhosttyUnsupportedWindowsSequenceSanitizerTests
             out byte[]? sanitized,
             out int length);
 
-        Assert.True(changed);
-        Assert.NotNull(sanitized);
-        Assert.Equal("\x1b[44;1mDIR\x1b[0m\r\nNEXT", Encoding.ASCII.GetString(sanitized!, 0, length));
-        Return(sanitized);
+        Assert.False(changed);
+        Assert.Null(sanitized);
+        Assert.Equal("\x1b[44;1mDIR   \x1b[0m\r\nNEXT".Length, length);
+    }
+
+    [Theory]
+    [InlineData(" \u001b[44m\r\n", " \u001b[44m\r\n")]
+    [InlineData("\u001b[44;1mDIR   \u001b[0m\r\nNEXT", "\u001b[44;1mDIR   \u001b[0m\r\nNEXT")]
+    [InlineData("A  \u001b[0m\u001b[44m\rB  \u001b[31m\n", "A  \u001b[0m\u001b[44m\rB  \u001b[31m\n")]
+    [InlineData("\u001b[?9001hA  \u001b[44m\r\n\u001b[201~", "A  \u001b[44m\r\n")]
+    public void TrySanitize_StyledSpacesArePreservedAtEverySplit(string input, string expected)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(input);
+        byte[] expectedBytes = Encoding.UTF8.GetBytes(expected);
+        for (int split = 0; split <= bytes.Length; split++)
+        {
+            TerminalUnsupportedWindowsSequenceSanitizer sanitizer = new();
+            List<byte> actual = new();
+            Append(bytes.AsSpan(0, split));
+            Append(bytes.AsSpan(split));
+            Assert.Equal(expectedBytes, actual.ToArray());
+
+            void Append(ReadOnlySpan<byte> chunk)
+            {
+                bool changed = sanitizer.TrySanitize(chunk, out byte[]? sanitized, out int length);
+                try
+                {
+                    ReadOnlySpan<byte> result = changed ? sanitized.AsSpan(0, length) : chunk;
+                    foreach (byte value in result) actual.Add(value);
+                }
+                finally { Return(sanitized); }
+            }
+        }
     }
 
     [Fact]
