@@ -119,7 +119,9 @@ public sealed partial class TerminalFontResolver
         int codepoint, bool? presentation)
     {
         foreach (SKTypeface face in state.Configured.GetFaces(style))
-            if (!TerminalFontCoverage.IsLastResort(face) && ContainsGlyph(face, codepoint, presentation)) return face;
+            // Avoid querying/marshalling the family name for every scalar the
+            // configured face cannot cover (the common discovery path).
+            if (ContainsGlyph(face, codepoint, presentation) && !TerminalFontCoverage.IsLastResort(face)) return face;
         return null;
     }
 
