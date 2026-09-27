@@ -152,7 +152,8 @@ public sealed class GlyphCache : IDisposable
         if (families.IsEmpty) return new(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings);
         using SKFontManager manager = SKFontManager.CreateDefault();
         ConfiguredFontFamilies loaded = ConfiguredFontFamilies.Load(families, new SkiaConfiguredFontFamilyMatcher(manager),
-            () => new GlyphCache(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings));
+            () => new GlyphCache(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings),
+            fontSource == TerminalFontSource.System ? (string.IsNullOrWhiteSpace(fontFamily) ? "Consolas" : fontFamily.Trim()) : null);
         try { return new(loaded.Collection, maxEntries, fontRenderingSettings, loaded); }
         catch { loaded.Dispose(); throw; }
     }

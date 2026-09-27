@@ -265,6 +265,10 @@ public sealed class TerminalFontFamilySettingsTests
                 await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
                 Assert.True(state.FontFamiliesEditor.HasCodepointMapError);
                 Assert.False(state.ApplyCommand.CanExecute(null));
+                TextBox style = Assert.Single(expander.GetVisualDescendants().OfType<TextBox>(), e => e.Name == "BoldFontStyleEditor");
+                style.Text = "false";
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+                Assert.Equal("false", state.FontFamiliesEditor.BuildSettings().BoldStyle);
                 return;
             }
             Assert.Fail("Ordered font-family editor was not available in settings.");
@@ -276,7 +280,7 @@ public sealed class TerminalFontFamilySettingsTests
     private sealed class Matcher(Func<string, TerminalTypefaceStyle, SKTypeface?> match) : IConfiguredFontFamilyMatcher
     {
         internal List<(string, TerminalTypefaceStyle)> Requests { get; } = [];
-        public SKTypeface? Match(string family, TerminalTypefaceStyle style) { Requests.Add((family, style)); return match(family, style); }
+        public SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null) { Requests.Add((family, style)); return match(family, style); }
     }
     private sealed class NoDiscovery : ITerminalFontMatcher
     {

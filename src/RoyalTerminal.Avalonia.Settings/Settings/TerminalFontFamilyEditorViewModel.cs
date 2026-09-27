@@ -16,6 +16,7 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
     private string _codepointMaps = string.Empty;
     private string? _codepointMapError;
     private ImmutableArray<string> _validCodepointMaps = [];
+    private string _regularStyle = string.Empty, _boldStyle = string.Empty, _italicStyle = string.Empty, _boldItalicStyle = string.Empty;
 
     /// <summary>Regular families, highest priority first; empty restores the primary family/file.</summary>
     public string Regular { get => _regular; set => this.RaiseAndSetIfChanged(ref _regular, value ?? string.Empty); }
@@ -26,6 +27,15 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
     /// <summary>Bold-italic families, highest priority first; empty inherits regular-family variants.</summary>
     public string BoldItalic { get => _boldItalic; set => this.RaiseAndSetIfChanged(ref _boldItalic, value ?? string.Empty); }
 
+    /// <summary>Advertised regular face name; empty/default selects automatically.</summary>
+    public string RegularStyle { get => _regularStyle; set => this.RaiseAndSetIfChanged(ref _regularStyle, value ?? string.Empty); }
+    /// <summary>Advertised bold face name, or false to use regular text.</summary>
+    public string BoldStyle { get => _boldStyle; set => this.RaiseAndSetIfChanged(ref _boldStyle, value ?? string.Empty); }
+    /// <summary>Advertised italic face name, or false to use regular text.</summary>
+    public string ItalicStyle { get => _italicStyle; set => this.RaiseAndSetIfChanged(ref _italicStyle, value ?? string.Empty); }
+    /// <summary>Advertised bold-italic face name, or false to use regular text.</summary>
+    public string BoldItalicStyle { get => _boldItalicStyle; set => this.RaiseAndSetIfChanged(ref _boldItalicStyle, value ?? string.Empty); }
+
     /// <summary>One U+XXXX[-U+YYYY][,...]=family mapping per line; later ranges win.</summary>
     public string CodepointMaps
     {
@@ -35,7 +45,7 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
             value ??= string.Empty;
             if (_codepointMaps == value) return;
             string[] lines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
-            bool valid = TerminalFontCodepointMap.TryParse(lines, out _, out string? error);
+            bool valid = TerminalFontCodepointMap.TryValidate(lines, out string? error);
             if (valid) _validCodepointMaps = Parse(value);
             this.RaiseAndSetIfChanged(ref _codepointMapError, error, nameof(CodepointMapError));
             this.RaisePropertyChanged(nameof(HasCodepointMapError));
@@ -56,6 +66,7 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
     {
         Regular = Parse(Regular), Bold = Parse(Bold), Italic = Parse(Italic), BoldItalic = Parse(BoldItalic),
         CodepointMaps = _validCodepointMaps,
+        RegularStyle = RegularStyle, BoldStyle = BoldStyle, ItalicStyle = ItalicStyle, BoldItalicStyle = BoldItalicStyle,
     };
 
     /// <summary>Loads a configuration; null restores empty family lists.</summary>
@@ -67,6 +78,10 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
         Italic = string.Join(Environment.NewLine, settings.Italic);
         BoldItalic = string.Join(Environment.NewLine, settings.BoldItalic);
         CodepointMaps = string.Join(Environment.NewLine, settings.CodepointMaps);
+        RegularStyle = settings.RegularStyle;
+        BoldStyle = settings.BoldStyle;
+        ItalicStyle = settings.ItalicStyle;
+        BoldItalicStyle = settings.BoldItalicStyle;
     }
 
     private static ImmutableArray<string> Parse(string text)

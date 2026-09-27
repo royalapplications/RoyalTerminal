@@ -2873,7 +2873,7 @@ public sealed class MainWindowControllerModeStartupTests
                     Appearance = new TerminalSessionAppearanceSettings
                     {
                         FontFamilyName = "Profile A Mono",
-                        FontFamilies = new() { Regular = ["Profile A first", "Profile A second"], Bold = ["Profile A bold"], CodepointMaps = ["U+2611=Profile A symbol"] },
+                        FontFamilies = new() { Regular = ["Profile A first", "Profile A second"], Bold = ["Profile A bold"], CodepointMaps = ["U+2611=Profile A symbol"], BoldStyle = "false", ItalicStyle = "Book Oblique" },
                         FontSize = 19.0,
                         FontRendering = new TerminalFontRenderingSettings
                         {
@@ -2977,6 +2977,8 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.Equal(new[] { "Profile A first", "Profile A second" }, splitControl.FontFamilies.Regular);
             Assert.Equal(new[] { "Profile A bold" }, splitControl.FontFamilies.Bold);
             Assert.Equal(new[] { "U+2611=Profile A symbol" }, splitControl.FontFamilies.CodepointMaps);
+            Assert.Equal("false", splitControl.FontFamilies.BoldStyle);
+            Assert.Equal("Book Oblique", splitControl.FontFamilies.ItalicStyle);
             Assert.Equal(TerminalFontSource.System, splitControl.FontSource);
             Assert.False(splitControl.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Alias, splitControl.FontEdging);

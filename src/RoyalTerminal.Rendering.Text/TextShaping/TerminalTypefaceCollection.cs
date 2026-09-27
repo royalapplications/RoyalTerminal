@@ -31,6 +31,7 @@ public readonly record struct TerminalTypefaceEntry(SKTypeface Typeface, Termina
 public sealed partial class TerminalTypefaceCollection
 {
     private readonly SKTypeface[][] _faces;
+    private readonly byte _disabledStyles;
 
     /// <summary>Copies configured entries, preserving their order within each style.</summary>
     public TerminalTypefaceCollection(params TerminalTypefaceEntry[] entries)
@@ -49,15 +50,34 @@ public sealed partial class TerminalTypefaceCollection
         _faces = [styles[0].ToArray(), styles[1].ToArray(), styles[2].ToArray(), styles[3].ToArray()];
     }
 
-    /// <summary>Returns the first configured face for a style, or the first regular face if that style is empty.</summary>
+    /// <summary>Returns the first configured face for a style, or the first regular face if that style is disabled or empty.</summary>
     public SKTypeface GetPrimaryTypeface(TerminalTypefaceStyle style = TerminalTypefaceStyle.Regular)
     {
-        ValidateStyle(style);
+        style = GetEffectiveStyle(style);
         SKTypeface[] faces = _faces[(int)style];
         return faces.Length == 0 ? _faces[0][0] : faces[0];
     }
 
     internal ReadOnlySpan<SKTypeface> GetFaces(TerminalTypefaceStyle style) => _faces[(int)style];
+
+    /// <summary>Returns regular for a disabled style; bold italic is independent of bold and italic.</summary>
+    public TerminalTypefaceStyle GetEffectiveStyle(TerminalTypefaceStyle style)
+    {
+        ValidateStyle(style);
+        return (_disabledStyles & (1 << (int)style)) == 0 ? style : TerminalTypefaceStyle.Regular;
+    }
+
+    /// <summary>Copies this borrowed collection with replacement disabled-style flags, preserving codepoint mappings.</summary>
+    public TerminalTypefaceCollection WithDisabledStyles(bool bold = false, bool italic = false, bool boldItalic = false)
+        => new(this, (byte)((bold ? 2 : 0) | (italic ? 4 : 0) | (boldItalic ? 8 : 0)));
+
+    private TerminalTypefaceCollection(TerminalTypefaceCollection source, byte disabledStyles)
+    {
+        _faces = source._faces;
+        _codepointRanges = source._codepointRanges;
+        _codepointFamilies = source._codepointFamilies;
+        _disabledStyles = disabledStyles;
+    }
 
     internal static void ValidateStyle(TerminalTypefaceStyle style)
     {

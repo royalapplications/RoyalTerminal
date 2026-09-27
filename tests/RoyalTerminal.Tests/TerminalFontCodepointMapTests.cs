@@ -307,6 +307,6 @@ public sealed class TerminalFontCodepointMapTests
     }
     private sealed class NeverLoadConfiguredFamily : IConfiguredFontFamilyMatcher
     {
-        public SKTypeface? Match(string family, TerminalTypefaceStyle style) => throw new InvalidOperationException("Mapped families must load lazily.");
+        public SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null) => throw new InvalidOperationException("Mapped families must load lazily.");
     }
 }

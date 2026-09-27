@@ -28,10 +28,21 @@ public sealed record TerminalFontFamilySettings
     /// <summary>Ghostty-style codepoint range mappings; later matching entries win.</summary>
     public ImmutableArray<string> CodepointMaps { get; init; } = [];
 
-    /// <summary>Whether all styles retain their default family selection.</summary>
+    /// <summary>Advertised regular face name; empty/default uses automatic selection. False has no effect on regular text.</summary>
+    public string RegularStyle { get; init; } = string.Empty;
+    /// <summary>Advertised bold face name; false routes bold requests to regular, independently of bold italic.</summary>
+    public string BoldStyle { get; init; } = string.Empty;
+    /// <summary>Advertised italic face name; false routes italic requests to regular, independently of bold italic.</summary>
+    public string ItalicStyle { get; init; } = string.Empty;
+    /// <summary>Advertised bold-italic face name; false routes combined requests to regular.</summary>
+    public string BoldItalicStyle { get; init; } = string.Empty;
+
+    /// <summary>Whether no family, named/disabled style or codepoint override has been configured.</summary>
     [JsonIgnore]
     public bool IsEmpty => Regular.IsDefaultOrEmpty && Bold.IsDefaultOrEmpty &&
-        Italic.IsDefaultOrEmpty && BoldItalic.IsDefaultOrEmpty && CodepointMaps.IsDefaultOrEmpty;
+        Italic.IsDefaultOrEmpty && BoldItalic.IsDefaultOrEmpty && CodepointMaps.IsDefaultOrEmpty &&
+        string.IsNullOrEmpty(RegularStyle) && string.IsNullOrEmpty(BoldStyle) &&
+        string.IsNullOrEmpty(ItalicStyle) && string.IsNullOrEmpty(BoldItalicStyle);
 
     /// <summary>Trims entries without changing priority, and validates codepoint-map syntax.</summary>
     /// <exception cref="FormatException">A codepoint mapping is malformed.</exception>
@@ -39,9 +50,22 @@ public sealed record TerminalFontFamilySettings
     {
         ImmutableArray<string> regular = NormalizeNames(Regular), bold = NormalizeNames(Bold),
             italic = NormalizeNames(Italic), boldItalic = NormalizeNames(BoldItalic), maps = NormalizeNames(CodepointMaps);
-        if (!TerminalFontCodepointMap.TryParse(maps.AsSpan(), out _, out string? error)) throw new FormatException(error);
-        if (regular == Regular && bold == Bold && italic == Italic && boldItalic == BoldItalic && maps == CodepointMaps) return this;
-        return this with { Regular = regular, Bold = bold, Italic = italic, BoldItalic = boldItalic, CodepointMaps = maps };
+        string regularStyle = NormalizeStyle(RegularStyle), boldStyle = NormalizeStyle(BoldStyle),
+            italicStyle = NormalizeStyle(ItalicStyle), boldItalicStyle = NormalizeStyle(BoldItalicStyle);
+        if (!TerminalFontCodepointMap.TryValidate(maps.AsSpan(), out string? error)) throw new FormatException(error);
+        if (regular == Regular && bold == Bold && italic == Italic && boldItalic == BoldItalic && maps == CodepointMaps &&
+            regularStyle == RegularStyle && boldStyle == BoldStyle && italicStyle == ItalicStyle && boldItalicStyle == BoldItalicStyle) return this;
+        return this with
+        {
+            Regular = regular, Bold = bold, Italic = italic, BoldItalic = boldItalic, CodepointMaps = maps,
+            RegularStyle = regularStyle, BoldStyle = boldStyle, ItalicStyle = italicStyle, BoldItalicStyle = boldItalicStyle,
+        };
+    }
+
+    private static string NormalizeStyle(string? value)
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        return normalized == "default" ? string.Empty : normalized;
     }
 
     private static ImmutableArray<string> NormalizeNames(ImmutableArray<string> names)

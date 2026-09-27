@@ -23,7 +23,7 @@ public sealed partial class TerminalFontResolver
         TerminalTypefaceStyle style, int codepoint, CultureInfo? culture = null)
     {
         ArgumentNullException.ThrowIfNull(collection);
-        TerminalTypefaceCollection.ValidateStyle(style);
+        style = collection.GetEffectiveStyle(style);
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -45,7 +45,7 @@ public sealed partial class TerminalFontResolver
         TerminalTypefaceStyle style, ReadOnlySpan<char> text, CultureInfo? culture = null)
     {
         ArgumentNullException.ThrowIfNull(collection);
-        TerminalTypefaceCollection.ValidateStyle(style);
+        style = collection.GetEffectiveStyle(style);
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -79,8 +79,28 @@ public sealed partial class TerminalFontResolver
         out TerminalFontResolution resolution)
     {
         CultureInfo usedCulture = culture ?? CultureInfo.CurrentUICulture;
+        AsciiFaceResult[]? ascii = null;
+        int asciiIndex = codepoint - 0x20;
+        if (presentation is null && (uint)asciiIndex < 95)
+        {
+            // Keep the first culture's ordinary ASCII in a compact direct table.
+            // Other cultures/selectors use the general cache, never an assumed
+            // culture-independent result from a previous discovery request.
+            state.AsciiCultureName ??= usedCulture.Name;
+            if (state.AsciiCultureName == usedCulture.Name)
+            {
+                ascii = state.GetAscii(style);
+                AsciiFaceResult cached = ascii[asciiIndex];
+                if (cached.Known)
+                {
+                    resolution = new(cached.Face ?? primary, cached.Face is not null && cached.Face.Handle != primary.Handle);
+                    return cached.Face is not null;
+                }
+            }
+        }
         CollectionCodepointKey key = new(style, codepoint, presentation, usedCulture.Name);
-        if (!state.Results.TryGetValue(key, out SKTypeface? face))
+        SKTypeface? face = null;
+        if (ascii is not null || !state.Results.TryGetValue(key, out face))
         {
             face = FindCodepointOverride(state, codepoint);
             face ??= FindConfiguredFace(state, style, codepoint, presentation);
@@ -107,7 +127,8 @@ public sealed partial class TerminalFontResolver
             face ??= FindLoadedFace(state, codepoint, null, null);
             // SharedGrid caches misses as well as hits. Loading another face
             // must not silently change a previously resolved scalar's result.
-            state.Results.Add(key, face);
+            if (ascii is not null) ascii[asciiIndex] = new(face, true);
+            else state.Results.Add(key, face);
         }
         resolution = new(face ?? primary, face is not null && face.Handle != primary.Handle);
         return face is not null;
@@ -137,8 +158,21 @@ public sealed partial class TerminalFontResolver
         public TerminalTypefaceCollection Configured { get; } = configured;
         public List<LoadedCollectionFace> Loaded { get; } = new();
         public Dictionary<string, SKTypeface?> Descriptors { get; } = new(StringComparer.Ordinal);
+        public Dictionary<int, SKTypeface?>? SpriteOverrides { get; set; }
         public Dictionary<CollectionCodepointKey, SKTypeface?> Results { get; } = new();
+        public string? AsciiCultureName { get; set; }
+        private AsciiFaceResult[]? _regularAscii, _boldAscii, _italicAscii, _boldItalicAscii;
+
+        public AsciiFaceResult[] GetAscii(TerminalTypefaceStyle style) => style switch
+        {
+            TerminalTypefaceStyle.Bold => _boldAscii ??= new AsciiFaceResult[95],
+            TerminalTypefaceStyle.Italic => _italicAscii ??= new AsciiFaceResult[95],
+            TerminalTypefaceStyle.BoldItalic => _boldItalicAscii ??= new AsciiFaceResult[95],
+            _ => _regularAscii ??= new AsciiFaceResult[95],
+        };
     }
+
+    private readonly record struct AsciiFaceResult(SKTypeface? Face, bool Known);
 
     private readonly record struct CollectionCodepointKey(TerminalTypefaceStyle Style,
         int Codepoint, bool? Presentation, string CultureName);

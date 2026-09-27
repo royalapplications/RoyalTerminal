@@ -123,9 +123,38 @@ values cannot match rendered text. Updating host configuration rebuilds the
 renderer and its caches immediately; unlike standalone Ghostty's new-terminal-only
 reload behavior, this preserves RoyalTerminal's live settings contract.
 
-Named and disabled/synthetic style policy and exhaustive platform fallback
-enumeration are still distinct
-remaining parity requirements. Skia's family/global matching is not claimed to
+`RegularStyle`, `BoldStyle`, `ItalicStyle` and `BoldItalicStyle` select advertised
+face names within configured system families. Empty/`default` uses automatic
+selection; `false` independently disables bold, italic or bold italic. Disabling
+one component does not disable the combined style. Regular cannot be disabled.
+Names apply to explicit families, their inherited regular-family variants and
+the existing primary-system-family setting, not a primary font file. Missing names continue normal
+family/regular fallback; they are not silently replaced by a nearest weight.
+The Skia adapter compares advertised names case-insensitively, retaining the
+caller spelling in profiles. The ReactiveUI editor, profile serialization,
+live settings and split panes carry these controls. Disabled styles route to
+regular before font discovery without changing SGR attributes, colors or stored
+text. Borrowed collections expose the same immutable policy and retain mappings
+when copied. This follows Ghostty's `Config.finalize` family inheritance,
+`SharedGridSet` named descriptors and `CodepointResolver` disabled-style rule;
+Windows Terminal and xterm.js instead delegate logical weight/slant selection
+to DirectWrite and canvas respectively.
+
+Ordinary printable ASCII uses lazy 95-entry tables per used style for the first
+lookup culture. Other cultures, explicit presentation selectors and Unicode
+retain the general result dictionary. Both hits and misses remain sticky;
+disabled styles share the regular table. This reduces common-path hashing and
+dictionary storage without loading fonts eagerly. Symbol override decisions
+also retain positive/negative scalar results rather than repeating native glyph
+coverage on every draw. Configuration validation no longer constructs parsed
+range arrays or family strings when callers only need validity. The
+`--font-lookup` benchmark compares warmed direct-table and general-cache queries
+with the same ASCII/style/face workload. **Execution and before/after performance
+validation are deferred until the implementation batch is complete; no measured
+speedup is claimed yet.**
+
+Synthetic style policy and exhaustive platform fallback enumeration remain
+parity requirements. Skia's family/global matching is not claimed to
 enumerate Ghostty's complete platform discovery iterator. The font benchmark
 compares existing single-face discovery with loaded-collection reuse; isolated
 font-query measurements are not an end-to-end rendering speedup claim.

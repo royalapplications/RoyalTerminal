@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--font-lookup", StringComparer.Ordinal))
+{
+    FontLookupBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--font-discovery", StringComparer.Ordinal))
 {
     FontDiscoveryBenchmark.Run(args.Contains("--warm-font-registry", StringComparer.Ordinal));

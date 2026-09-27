@@ -17,7 +17,13 @@ public sealed partial class TerminalFontResolver
         lock (_sync)
         {
             ThrowIfDisposed();
-            face = FindCodepointOverride(GetCollectionState(collection), codepoint);
+            CollectionState state = GetCollectionState(collection);
+            Dictionary<int, SKTypeface?> cache = state.SpriteOverrides ??= new();
+            if (!cache.TryGetValue(codepoint, out face))
+            {
+                face = FindCodepointOverride(state, codepoint);
+                cache.Add(codepoint, face);
+            }
             return face is not null;
         }
     }

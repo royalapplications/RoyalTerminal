@@ -22,9 +22,18 @@ public static class TerminalFontCodepointMap
     /// </summary>
     public static bool TryParse(ReadOnlySpan<string> entries,
         out ImmutableArray<TerminalCodepointFontMapping> mappings, out string? error)
+        => TryParseCore(entries, retainMappings: true, out mappings, out error);
+
+    /// <summary>Validates the complete mapping grammar without allocating parsed ranges or family strings.</summary>
+    public static bool TryValidate(ReadOnlySpan<string> entries, out string? error)
+        => TryParseCore(entries, retainMappings: false, out _, out error);
+
+    private static bool TryParseCore(ReadOnlySpan<string> entries, bool retainMappings,
+        out ImmutableArray<TerminalCodepointFontMapping> mappings, out string? error)
     {
         if (entries.IsEmpty) { mappings = []; error = null; return true; }
-        ImmutableArray<TerminalCodepointFontMapping>.Builder result = ImmutableArray.CreateBuilder<TerminalCodepointFontMapping>();
+        ImmutableArray<TerminalCodepointFontMapping>.Builder? result = retainMappings
+            ? ImmutableArray.CreateBuilder<TerminalCodepointFontMapping>() : null;
         for (int line = 0; line < entries.Length; line++)
         {
             ReadOnlySpan<char> entry = entries[line].AsSpan().Trim();
@@ -32,7 +41,7 @@ public static class TerminalFontCodepointMap
             int separator = entry.IndexOf('=');
             if (separator < 0) return Fail(line, out mappings, out error);
             ReadOnlySpan<char> ranges = entry[..separator].Trim();
-            string family = entry[(separator + 1)..].Trim().ToString();
+            string? family = retainMappings ? entry[(separator + 1)..].Trim().ToString() : null;
             while (!ranges.IsEmpty)
             {
                 int comma = ranges.IndexOf(',');
@@ -43,7 +52,7 @@ public static class TerminalFontCodepointMap
                 int last = first;
                 if (hyphen >= 0 && !TryCodepoint(range[(hyphen + 1)..].Trim(), out last)) return Fail(line, out mappings, out error);
                 if (last < first) return Fail(line, out mappings, out error);
-                result.Add(new(first, last, family));
+                result?.Add(new(first, last, family!));
                 if (comma < 0) break;
                 ranges = ranges[(comma + 1)..].Trim();
                 // Ghostty accepts a trailing comma after a range, but not
@@ -51,7 +60,7 @@ public static class TerminalFontCodepointMap
                 if (ranges.IsEmpty && hyphen < 0) return Fail(line, out mappings, out error);
             }
         }
-        mappings = result.ToImmutable();
+        mappings = result?.ToImmutable() ?? [];
         error = null;
         return true;
 
