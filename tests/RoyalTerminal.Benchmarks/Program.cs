@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--hyperlink-collection", StringComparer.Ordinal))
+{
+    HyperlinkCollectionBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--image-row-damage", StringComparer.Ordinal))
 {
     ImageRowDamageBenchmark.Run();

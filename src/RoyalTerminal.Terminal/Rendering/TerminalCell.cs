@@ -1113,9 +1113,11 @@ public sealed partial class TerminalScreen
             }
         }
 
-        _nextHyperlinkId = nextId + 1;
+        _hyperlinksById.EnsureCapacity(_hyperlinksById.Count + 1);
+        _hyperlinkIdsByUrl.EnsureCapacity(_hyperlinkIdsByUrl.Count + 1);
         _hyperlinksById[nextId] = url;
         _hyperlinkIdsByUrl[url] = nextId;
+        _nextHyperlinkId = nextId + 1;
         return nextId;
     }
 
@@ -1137,15 +1139,24 @@ public sealed partial class TerminalScreen
     /// Registers an owned OSC 8 identity without coalescing distinct IDs by URL.
     /// A nonempty explicit ID takes precedence over the numeric implicit ID.
     /// Re-registering an existing identity is allocation-free.
+    /// Public registration pins the token against protocol-registry pressure
+    /// cleanup, including when the identity was previously created by OSC 8.
     /// </summary>
     public int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId)
-        => RegisterHyperlink(uri, explicitId, implicitId, out _);
+        => RegisterHyperlinkCore(uri, explicitId, implicitId, collectible: false, out _);
 
     internal int RegisterHyperlink(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId, out bool created)
+        => RegisterHyperlinkCore(uri, explicitId, implicitId, collectible: true, out created);
+
+    private int RegisterHyperlinkCore(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, uint implicitId, bool collectible, out bool created)
     {
         created = false;
         if (uri.IsEmpty) throw new ArgumentException("A hyperlink URI cannot be empty.", nameof(uri));
-        if (_hyperlinkIdentities.TryFind(uri, explicitId, implicitId, out int token)) return token;
+        if (_hyperlinkIdentities.TryFind(uri, explicitId, implicitId, out int token))
+        {
+            if (!collectible) _hyperlinkIdentities.PreservePublicToken(token);
+            return token;
+        }
         token = _nextHyperlinkId;
         if (token == int.MaxValue)
         {
@@ -1153,7 +1164,7 @@ public sealed partial class TerminalScreen
             while (_hyperlinksById.ContainsKey(token)) token++;
         }
         _hyperlinksById.EnsureCapacity(_hyperlinksById.Count + 1);
-        TerminalHyperlink value = _hyperlinkIdentities.Add(token, uri, explicitId, implicitId);
+        TerminalHyperlink value = _hyperlinkIdentities.Add(token, uri, explicitId, implicitId, collectible);
         _hyperlinksById.Add(token, value.Uri);
         _nextHyperlinkId = token + 1;
         created = true;

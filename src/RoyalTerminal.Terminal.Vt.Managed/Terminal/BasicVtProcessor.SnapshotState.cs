@@ -119,7 +119,7 @@ public sealed partial class BasicVtProcessor
         InstallSnapshotCursorStyle(state);
         InstallSnapshotKittyKeyboard(state);
         int linkToken = state.TryGetHyperlink(out GhosttySnapshotHyperlink link)
-            ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId) : 0;
+            ? _screen.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId, out _) : 0;
         ref uint counter = ref (state.Key == 0 ? ref _primaryHyperlinkImplicitCounter : ref _alternateHyperlinkImplicitCounter);
         linkToken = _screen.SnapshotHyperlinkChanged(state.Key, row, restoredPen, linkToken, ref counter, restart: true);
         if (state.Key == 0)

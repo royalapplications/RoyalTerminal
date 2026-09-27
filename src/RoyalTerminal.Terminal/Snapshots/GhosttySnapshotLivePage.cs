@@ -78,7 +78,7 @@ internal static class GhosttySnapshotLivePage
                         // resolved by the retained allocator, not a second quota.
                         if (!page.TryGetLiveCellHyperlink(cellIndex, out GhosttySnapshotHyperlink link))
                             throw new InvalidDataException("Missing restored cell hyperlink.");
-                        token = hyperlinkOwner.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId);
+                        token = hyperlinkOwner.RegisterHyperlink(link.Uri, link.ExplicitId, link.ImplicitId, out _);
                         links.Add(linkId, token);
                     }
                     cell.HyperlinkId = token;

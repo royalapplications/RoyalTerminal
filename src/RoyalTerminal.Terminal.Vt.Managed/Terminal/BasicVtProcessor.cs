@@ -451,6 +451,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             // an intervening render tick can otherwise invalidate frame loads.
             if (!_screen.SnapshotMutationFailed && _inputBatchDepth == 0 && AdvanceKittyAnimations()) PublishKittyGraphics();
         }
+        if (_inputBatchDepth == 0) CollectUnusedHyperlinks();
         RaiseModeChangedIfNeeded(before);
     }
 
@@ -2596,6 +2597,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
         ref uint counter = ref (_inAltScreen ? ref _alternateHyperlinkImplicitCounter : ref _primaryHyperlinkImplicitCounter);
+        CollectUnusedHyperlinks();
         _currentHyperlinkId = _screen.StartSnapshotHyperlink(_inAltScreen ? 1 : 0, _cursorRow,
             CaptureSnapshotPen(), uri, id, ref counter);
     }

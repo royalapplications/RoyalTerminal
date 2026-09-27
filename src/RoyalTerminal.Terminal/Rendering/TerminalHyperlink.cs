@@ -57,9 +57,9 @@ public sealed class TerminalHyperlink
 // Immutable collision chains can be shared by synchronized-output snapshots.
 // Lookup accepts borrowed byte spans, so extracting every linked native cell
 // does not allocate another identity or decode another URL.
-internal sealed class TerminalHyperlinkRegistry
+internal sealed partial class TerminalHyperlinkRegistry
 {
-    private readonly Dictionary<int, Entry> _buckets = [];
+    private Dictionary<int, Entry> _buckets = [];
     private readonly Dictionary<int, TerminalHyperlink> _values = [];
 
     internal bool TryFind(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> id, uint implicitId, out int token)
@@ -76,7 +76,7 @@ internal sealed class TerminalHyperlinkRegistry
         return false;
     }
 
-    internal TerminalHyperlink Add(int token, ReadOnlySpan<byte> uri, ReadOnlySpan<byte> id, uint implicitId)
+    internal TerminalHyperlink Add(int token, ReadOnlySpan<byte> uri, ReadOnlySpan<byte> id, uint implicitId, bool collectible = false)
     {
         int hash = Hash(uri, id, implicitId);
         _buckets.TryGetValue(hash, out Entry? previous);
@@ -85,8 +85,10 @@ internal sealed class TerminalHyperlinkRegistry
         // Finish fallible preparation before publishing either index.
         _buckets.EnsureCapacity(_buckets.Count + 1);
         _values.EnsureCapacity(_values.Count + 1);
+        if (collectible) _collectibleTokens.EnsureCapacity(_collectibleTokens.Count + 1);
         _values.Add(token, value);
         _buckets[hash] = entry;
+        if (collectible) _collectibleTokens.Add(token);
         return value;
     }
 
@@ -101,6 +103,7 @@ internal sealed class TerminalHyperlinkRegistry
         if (replacement is null) _buckets.Remove(hash);
         else _buckets[hash] = replacement;
         _values.Remove(token);
+        _collectibleTokens.Remove(token);
         return true;
     }
 
@@ -122,12 +125,21 @@ internal sealed class TerminalHyperlinkRegistry
     }
 
     internal bool TryGet(int token, out TerminalHyperlink? value) => _values.TryGetValue(token, out value);
-    internal void Clear() { _values.Clear(); _buckets.Clear(); }
+    internal void Clear()
+    {
+        _values.Clear();
+        _buckets.Clear();
+        _collectibleTokens.Clear();
+        CancelCollection();
+        _nextCollectionThreshold = CollectionSlack;
+    }
     internal void CopyFrom(TerminalHyperlinkRegistry source)
     {
         Clear();
         foreach (var pair in source._buckets) _buckets.Add(pair.Key, pair.Value);
         foreach (var pair in source._values) _values.Add(pair.Key, pair.Value);
+        _collectibleTokens.UnionWith(source._collectibleTokens);
+        _nextCollectionThreshold = source._nextCollectionThreshold;
     }
 
     private static int Hash(ReadOnlySpan<byte> uri, ReadOnlySpan<byte> id, uint implicitId)

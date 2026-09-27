@@ -26,6 +26,7 @@ internal enum SnapshotMutationCheckpoint
     KittyScenePrepared,
     KittyProjectionPrepared,
     RasterPublicationPrepared,
+    HyperlinkCollectionPrepared,
 }
 
 public sealed partial class TerminalScreen
