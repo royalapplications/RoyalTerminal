@@ -238,6 +238,20 @@ public sealed class TerminalFontCandidateTests
     }
 
     [Fact]
+    public void CoreTextMissingScalarCompletesWithoutDownloadingFonts()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        // Ghostty discovers through CTFontCollection, not the descriptor API
+        // that can block on font downloads. Windows Terminal uses DirectWrite
+        // fallback and xterm.js uses browser canvas fonts; neither API applies
+        // to this macOS path. Keep missing-glyph queries local and return a miss.
+        List<NamedFontCandidate>? names = CoreTextFontCandidates.Find(SKFontStyle.Normal, 0x10FFFF);
+        Assert.NotNull(names);
+        Assert.Empty(names);
+        Assert.NotEmpty(CoreTextFontCandidates.Find(SKFontStyle.Normal, 'A')!);
+    }
+
+    [Fact]
     public void FontconfigNativeCandidatesRetainRealCollectionPathsAndCharacterCoverage()
     {
         if (!OperatingSystem.IsLinux()) return;

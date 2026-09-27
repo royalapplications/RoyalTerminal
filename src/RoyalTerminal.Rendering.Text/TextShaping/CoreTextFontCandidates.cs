@@ -25,7 +25,7 @@ internal static partial class CoreTextFontCandidates
     private static unsafe List<NamedFontCandidate>? FindCore(SKFontStyle style, int codepoint)
     {
         nint textLibrary = 0, foundationLibrary = 0;
-        nint charset = 0, attributes = 0, descriptor = 0, mandatory = 0, matches = 0, unrestricted = 0;
+        nint charset = 0, attributes = 0, descriptor = 0, descriptors = 0, collection = 0, matches = 0, unrestricted = 0;
         try
         {
             textLibrary = NativeLibrary.Load(CoreText);
@@ -39,15 +39,21 @@ internal static partial class CoreTextFontCandidates
             nint axisDefaultKey = Constant(textLibrary, "kCTFontVariationAxisDefaultValueKey");
             nint dictionaryKeys = NativeLibrary.GetExport(foundationLibrary, "kCFTypeDictionaryKeyCallBacks");
             nint dictionaryValues = NativeLibrary.GetExport(foundationLibrary, "kCFTypeDictionaryValueCallBacks");
-            nint setCallbacks = NativeLibrary.GetExport(foundationLibrary, "kCFTypeSetCallBacks");
+            nint arrayCallbacks = NativeLibrary.GetExport(foundationLibrary, "kCFTypeArrayCallBacks");
             charset = Native.CFCharacterSetCreateWithCharactersInRange(0, new(codepoint, 1));
             if (charset == 0) return null;
             attributes = Native.CFDictionaryCreate(0, &charsetKey, &charset, 1, dictionaryKeys, dictionaryValues);
             if (attributes == 0) return null;
             descriptor = Native.CTFontDescriptorCreateWithAttributes(attributes);
-            mandatory = Native.CFSetCreate(0, &charsetKey, 1, setCallbacks);
-            if (descriptor == 0 || mandatory == 0) return null;
-            matches = Native.CTFontDescriptorCreateMatchingFontDescriptors(descriptor, mandatory);
+            if (descriptor == 0) return null;
+            // Match Ghostty's CoreText.discover collection query. The descriptor
+            // matching API can synchronously request downloadable fonts when
+            // no installed face covers a scalar, blocking the rendering thread.
+            descriptors = Native.CFArrayCreate(0, &descriptor, 1, arrayCallbacks);
+            if (descriptors == 0) return null;
+            collection = Native.CTFontCollectionCreateWithFontDescriptors(descriptors, 0);
+            if (collection == 0) return null;
+            matches = Native.CTFontCollectionCreateMatchingFontDescriptors(collection);
             if (matches == 0) return [];
             // The query's character-set restriction must not leak into the
             // reusable font. Ghostty removes it before materializing a face.
@@ -101,7 +107,8 @@ internal static partial class CoreTextFontCandidates
         {
             if (unrestricted != 0) Native.CFRelease(unrestricted);
             if (matches != 0) Native.CFRelease(matches);
-            if (mandatory != 0) Native.CFRelease(mandatory);
+            if (collection != 0) Native.CFRelease(collection);
+            if (descriptors != 0) Native.CFRelease(descriptors);
             if (descriptor != 0) Native.CFRelease(descriptor);
             if (attributes != 0) Native.CFRelease(attributes);
             if (charset != 0) Native.CFRelease(charset);
@@ -241,7 +248,7 @@ internal static partial class CoreTextFontCandidates
         [LibraryImport(CoreFoundation)] internal static partial void CFRelease(nint value);
         [LibraryImport(CoreFoundation)] internal static partial nint CFCharacterSetCreateWithCharactersInRange(nint allocator, CfRange range);
         [LibraryImport(CoreFoundation)] internal static unsafe partial nint CFDictionaryCreate(nint allocator, nint* keys, nint* values, nint count, nint keyCallbacks, nint valueCallbacks);
-        [LibraryImport(CoreFoundation)] internal static unsafe partial nint CFSetCreate(nint allocator, nint* values, nint count, nint callbacks);
+        [LibraryImport(CoreFoundation)] internal static unsafe partial nint CFArrayCreate(nint allocator, nint* values, nint count, nint callbacks);
         [LibraryImport(CoreFoundation)] internal static partial nint CFArrayGetCount(nint array);
         [LibraryImport(CoreFoundation)] internal static partial nint CFArrayGetValueAtIndex(nint array, nint index);
         [LibraryImport(CoreFoundation)] internal static partial nint CFStringGetLength(nint value);
@@ -253,7 +260,8 @@ internal static partial class CoreTextFontCandidates
         [LibraryImport(CoreFoundation)] internal static unsafe partial void CFStringGetCharacters(nint value, CfRange range, char* output);
         [LibraryImport(CoreFoundation)] internal static partial nint CFURLCopyFileSystemPath(nint url, nint style);
         [LibraryImport(CoreText)] internal static partial nint CTFontDescriptorCreateWithAttributes(nint attributes);
-        [LibraryImport(CoreText)] internal static partial nint CTFontDescriptorCreateMatchingFontDescriptors(nint descriptor, nint mandatoryAttributes);
+        [LibraryImport(CoreText)] internal static partial nint CTFontCollectionCreateWithFontDescriptors(nint descriptors, nint options);
+        [LibraryImport(CoreText)] internal static partial nint CTFontCollectionCreateMatchingFontDescriptors(nint collection);
         [LibraryImport(CoreText)] internal static partial nint CTFontDescriptorCreateCopyWithAttributes(nint descriptor, nint attributes);
         [LibraryImport(CoreText)] internal static partial nint CTFontDescriptorCopyAttribute(nint descriptor, nint key);
         [LibraryImport(CoreText)] internal static partial nint CTFontCreateWithFontDescriptor(nint descriptor, double size, nint matrix);
