@@ -872,11 +872,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
         int cursorSplitColumn = CursorColumn;
+        bool usePretextPipeline = CanUsePretextTextPipeline();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-        bool usePretextPipeline = EnableTextShaping &&
-            !_enableLigatures &&
-            _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
-            PretextPipelineInitializer.TryEnsureInitialized();
         if (usePretextPipeline &&
             !_enableLigatures &&
             _textDirectionMode != TextDirectionMode.RightToLeft &&
@@ -1062,11 +1059,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             try
             {
                 DrawDisplayTextRun(canvas, _displayCells.Cells, col, runTypeface, runColor, y,
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
                     usePretextPipeline);
-#else
-                    usePretextPipeline: false);
-#endif
             }
             finally { _displayCells.Clear(); }
 
@@ -3070,6 +3063,17 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         return cell.Codepoint is >= char.MinValue and <= char.MaxValue &&
                IsProgrammingLigatureChar((char)cell.Codepoint);
+    }
+
+    private bool CanUsePretextTextPipeline()
+    {
+#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
+        return EnableTextShaping && !_enableLigatures &&
+            _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
+            PretextPipelineInitializer.TryEnsureInitialized();
+#else
+        return false;
+#endif
     }
 
     private bool TryDrawPretextTextRun(

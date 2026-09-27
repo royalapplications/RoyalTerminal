@@ -49,7 +49,7 @@ public sealed partial class SkiaTerminalRenderer
             canvas.ClipRect(new SKRect(column * _cellWidth, y,
                 (column + Math.Max(1, (int)cell.Width)) * _cellWidth, y + _cellHeight));
             DrawDisplayTextRun(canvas, _displayCells.Cells, column, font.Typeface, CursorTextColor, y,
-                usePretextPipeline: false);
+                CanUsePretextTextPipeline());
         }
         finally
         {

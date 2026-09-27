@@ -25,7 +25,11 @@ public sealed class TerminalDisplayRenderingTests
         using SkiaTerminalRenderer renderer = CreateRenderer();
         renderer.EnableTextShaping = pipeline != 0;
         if (pipeline == 2) renderer.SetCellSize(renderer.CellWidth * 4, renderer.CellHeight);
-        if (pipeline == 3) renderer.TextRenderPipeline = TerminalTextRenderPipeline.Pretext;
+        if (pipeline == 3)
+        {
+            renderer.TextRenderPipeline = TerminalTextRenderPipeline.Pretext;
+            renderer.EnableLigatures = false;
+        }
         renderer.CursorVisible = cursor;
         renderer.CursorColumn = 1;
         renderer.CursorStyle = CursorStyle.Block;
@@ -38,6 +42,13 @@ public sealed class TerminalDisplayRenderingTests
         Assert.Equal(expectedPixels.Bytes, actualPixels.Bytes);
         Assert.Equal(before, source.GetViewportRow(0).ReadOnlyCells.ToArray());
         Assert.Contains(actualPixels.Pixels, color => color != new SKColor(source.DefaultBackground));
+        if (pipeline == 3 && renderer.IsPretextTextRenderPipelineAvailable)
+        {
+            TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
+            Assert.True(diagnostics.PretextRuns > 0);
+            Assert.Equal(0, diagnostics.ShapedRuns);
+            Assert.Equal(0, diagnostics.PretextFallbackRuns);
+        }
     }
 
     [Theory]
