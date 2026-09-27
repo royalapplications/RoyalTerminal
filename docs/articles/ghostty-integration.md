@@ -562,15 +562,15 @@ benefits are no identifier heap storage, no small scratch regrowth and no idle
 large unknown buffer. Measurements, test execution and CI remain deferred;
 no measured throughput or allocation improvement is claimed.
 
-Managed OSC 9;4 now tracks active progress in the stream-effect layer, including
-when there is no callback. Protocol RIS sends a remove report only while active,
-then disarms the flag before callback delivery, following
+Managed OSC 9;4 progress reports are host effects, not snapshot state. Every
+protocol RIS sends a remove report, including repeated resets with no preceding
+progress report, following the pinned stream-handler implementation and
 [Ghostty #13901](https://github.com/ghostty-org/ghostty/pull/13901). Explicit remove
 commands still deliver their reports. Soft reset, screen changes and snapshots
-do not invent progress effects. Programmatic terminal reset retains the handler
-flag, matching native `ghostty_terminal_reset`, which resets the terminal rather
-than dispatching protocol RIS. A newly restored snapshot starts without host
-progress state.
+do not invent progress effects. Programmatic terminal reset emits no remove
+effect, matching native `ghostty_terminal_reset`, which resets the terminal
+rather than dispatching protocol RIS. A newly restored snapshot does not replay
+host progress state, but a subsequent RIS still sends remove.
 
 [Windows Terminal's dispatch](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
 was checked for unknown-sequence and ConEmu progress routing;
@@ -579,8 +579,9 @@ provides embedder APC/OSC registration. Neither defines Ghostty's bounded raw
 capture contract, so the pinned Ghostty parser/effect lifecycle is the reference.
 Fifty-six new cases cover both adapters, identifier boundaries, mid-command
 policy changes, quotas, array ownership, reset persistence and progress effects;
-the earlier unconditional-RIS-removal expectation is corrected. Test execution
-and platform/CI validation remain deferred.
+exact callback sequences are checked against the native processor, including
+unconditional repeated RIS removal. Platform/CI validation remains tracked in
+the pull request's validation table.
 
 ## Managed DCS reply formatting
 
