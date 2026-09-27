@@ -18,8 +18,11 @@ CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 ## Reviewed correctness overlays
 
 The generated source copy also applies twelve corrections to pinned upstream
-`622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
-previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
+`b40acce58dcf77df52231c3798ea58e924647c89`. The refresh from `622b4eec`
+changes terminal printing/cursor behavior, word selection and stream window-resize
+dispatch; the four affected overlay source hashes are updated without removing
+the separate correctness corrections. Native rebuild/overlay execution remains
+part of final validation. Each overlay checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
 fails the build until reviewed. The submodule checkout is never changed.
 

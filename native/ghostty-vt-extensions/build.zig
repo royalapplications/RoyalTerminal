@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) !void {
             b.pathJoin(&.{ "terminal", "c", "terminal.zig" }),
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "3305a832a49891b2e84d0efa4ace415d0d5e709d9c3c8f7e061228a3e1f18035", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "4ca194a422f9400f4337daccfea8d8ae98d475db47042626e647875a049dc2b5", &.{
         .{
             .before = "        try self.screens.active.appendGrapheme(prev, c);\n        return;",
             .after = "        self.screens.active.cursorMarkDirty();\n        try self.screens.active.appendGrapheme(prev, c);\n        return;",
@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) !void {
             .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3a74c3603c57db299f266c9df7f5650ae0d621c98fb57f3867b654ed9841a76b", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "09d759a005b392be35f3c6a42a2513ed586b2f32999b9ea9d76c05cfe6ec04b6", &.{
         .{
             // PageList pruning can remap the cursor before cursorReload gets
             // a chance to migrate its page-local style and hyperlink IDs.
@@ -164,14 +164,14 @@ pub fn build(b: *std.Build) !void {
     }});
     // Route the already-validated upstream OSC 99 command to our shared host.
     // Deliberately do not add an Action enum member: that would change upstream's C ABI.
-    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "fd45f42dfb66ee49e359671f7d254726273ce7dfee9078d30d51e6d376ae4e0c", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "7a32e3f1dbf516d2204a789b8f74cc4ffbcbb3e223ed0f2c66f7a2a953d360f9", &.{ .{
         .before = "                .kitty_desktop_notification,\n",
         .after = "",
     }, .{
         .before = "                .conemu_sleep,\n",
         .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
     } });
-    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "cdfcf97647ae756fd314e25d7a3bff9df57125ae2e111168b764a07bf2593288", &.{
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "49dbd67f02e2af36bcd17235b7552bae33fe37e36014fe87221f0d539a277360", &.{
         .{
             .before = "    pub const Effects = struct {\n",
             .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",

@@ -45,11 +45,17 @@ public static partial class GhosttyVtNative
         CursorViewportWideTail = 17,
         Cursor = 18,
         Colors = 19,
+        /// <summary>Actual captured overscan (GhosttyRenderStateOverscan).</summary>
+        Overscan = 20,
+        /// <summary>Requested overscan for the next update (GhosttyRenderStateOverscan).</summary>
+        OverscanRequest = 21,
     }
 
     public enum GhosttyRenderStateOption : int
     {
         Dirty = 0,
+        /// <summary>Persistent overscan request (GhosttyRenderStateOverscan).</summary>
+        Overscan = 1,
     }
 
     public enum GhosttyRenderStateRowData : int
@@ -60,6 +66,58 @@ public static partial class GhosttyVtNative
         Cells = 3,
         Selection = 4,
         CellsRaw = 5,
+        /// <summary>Signed position relative to the top of the viewport (int32).</summary>
+        ViewportY = 6,
+        /// <summary>Opaque row identity across updates (GhosttyRenderStateRowId).</summary>
+        Id = 7,
+    }
+
+    /// <summary>Requested or captured row counts outside the viewport.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyRenderStateOverscan
+    {
+        /// <summary>Rows above the viewport.</summary>
+        public ushort Above;
+        /// <summary>Rows below the viewport.</summary>
+        public ushort Below;
+    }
+
+    /// <summary>
+    /// Opaque native row identity. Compare both words for equality only; values
+    /// carry no ordering meaning and must not be persisted across native lifetimes.
+    /// An all-zero value never identifies a captured row.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct GhosttyRenderStateRowId : IEquatable<GhosttyRenderStateRowId>
+    {
+        /// <summary>Opaque native identity words; interpret only through equality.</summary>
+        public fixed ulong Bits[2];
+
+        /// <summary>Whether this is a nonzero identity.</summary>
+        public bool IsValid
+        {
+            get { fixed (ulong* bits = Bits) return (bits[0] | bits[1]) != 0; }
+        }
+
+        /// <summary>Compares both opaque identity words without allocation.</summary>
+        public bool Equals(GhosttyRenderStateRowId other)
+        {
+            fixed (ulong* bits = Bits) return bits[0] == other.Bits[0] && bits[1] == other.Bits[1];
+        }
+
+        /// <inheritdoc />
+        public override bool Equals(object? obj) => obj is GhosttyRenderStateRowId other && Equals(other);
+
+        /// <inheritdoc />
+        public override int GetHashCode()
+        {
+            fixed (ulong* bits = Bits) return HashCode.Combine(bits[0], bits[1]);
+        }
+
+        /// <summary>Compares two row identities.</summary>
+        public static bool operator ==(GhosttyRenderStateRowId left, GhosttyRenderStateRowId right) => left.Equals(right);
+        /// <summary>Compares two row identities for inequality.</summary>
+        public static bool operator !=(GhosttyRenderStateRowId left, GhosttyRenderStateRowId right) => !left.Equals(right);
     }
 
     public enum GhosttyRenderStateRowOption : int

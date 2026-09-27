@@ -13,6 +13,29 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+The current dependency target is `b40acce58dcf77df52231c3798ea58e924647c89`,
+refreshed from `622b4eec` after checking upstream HEAD. Ghostling remains the
+reference consumer at `63842bf8e5e481160f81d348da9ff6fd27986798`.
+The native refresh includes [word-selection hard-break fixes](https://github.com/ghostty-org/ghostty/pull/14354),
+[wide-character selection](https://github.com/ghostty-org/ghostty/pull/14391),
+[reverse-wrap correction](https://github.com/ghostty-org/ghostty/pull/14390),
+[charset batching](https://github.com/ghostty-org/ghostty/pull/14356),
+[packed glyph/codepoint cache keys](https://github.com/ghostty-org/ghostty/pull/14300),
+opt-in [window resize requests](https://github.com/ghostty-org/ghostty/pull/14375),
+and [render overscan](https://github.com/ghostty-org/ghostty/pull/14400).
+Source parity work for the newly added managed/host behaviors is still in progress.
+
+`GhosttyRenderState` exposes the [new overscan/row-identity ABI](https://github.com/ghostty-org/ghostty/pull/14404):
+`SetOverscan`, requested/captured counts, signed current-row viewport Y and an
+opaque two-word row ID. Changing the request preserves the last completed rows;
+the next update captures available neighbors and requests a full redraw. Viewport
+height excludes overscan. Dirty iterator indices start at the highest captured
+row, so callers requesting overscan must use signed viewport Y for placement.
+IDs support equality/hash lookup only; reusing a row cache also requires a clear
+dirty flag. Existing callers request zero overscan and retain their viewport-only
+iteration contract. Native rebuilding, ABI manifest regeneration and authored
+regression execution remain deferred to final validation.
+
 ## Untrusted hyperlink dispatch
 
 Both engines now route producer-supplied OSC 8 links through a shared safety
