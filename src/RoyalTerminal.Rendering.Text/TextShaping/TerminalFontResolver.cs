@@ -7,6 +7,7 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Threading;
+using RoyalTerminal.Unicode;
 using SkiaSharp;
 
 namespace RoyalTerminal.Avalonia.Rendering;
@@ -21,15 +22,8 @@ public readonly record struct TerminalFontResolution(SKTypeface Typeface, bool U
 /// </summary>
 public sealed class TerminalFontResolver : IDisposable
 {
-    private const int RegionalIndicatorStart = 0x1F1E6;
-    private const int RegionalIndicatorEnd = 0x1F1FF;
     private const int VariationSelector15 = 0xFE0E;
     private const int VariationSelector16 = 0xFE0F;
-    private const int KeycapEnclosingCodepoint = 0x20E3;
-    private const int EmojiModifierStart = 0x1F3FB;
-    private const int EmojiModifierEnd = 0x1F3FF;
-    private const int TagStart = 0xE0020;
-    private const int TagEnd = 0xE007F;
     private static readonly string[] s_emojiOnlyLanguageTags = ["und-Zsye"];
 
     private readonly SKFontManager? _fontManager;
@@ -40,6 +34,7 @@ public sealed class TerminalFontResolver : IDisposable
     private bool _preferredEmojiResolved;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
     private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
+    private readonly Dictionary<nint, TerminalGlyphPresentation> _presentationCache = new();
     private readonly object _sync = new();
     private int _disposeState;
 
@@ -89,10 +84,7 @@ public sealed class TerminalFontResolver : IDisposable
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
 
-        bool preferEmojiPresentation =
-            IsRegionalIndicator(codepoint) ||
-            IsDefaultEmojiPresentationCodepoint(codepoint);
-        return ResolveTypefaceCore(primaryTypeface, codepoint, culture, preferEmojiPresentation);
+        return ResolveTypefaceCore(primaryTypeface, codepoint, culture, explicitEmojiPresentation: null);
     }
 
     /// <summary>
@@ -112,12 +104,13 @@ public sealed class TerminalFontResolver : IDisposable
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
 
-        bool preferEmojiPresentation =
-            ShouldPreferEmojiPresentation(text, firstRune.Value);
+        // Ghostty only accepts a selector immediately after the base scalar.
+        // A later selector, keycap, modifier or tag cannot change that request.
+        bool? explicitEmojiPresentation = GetExplicitPresentation(text[charsConsumed..]);
 
         TerminalFontResolution primary = ResolveTypefaceCore(
-            primaryTypeface, firstRune.Value, culture, preferEmojiPresentation);
-        if (charsConsumed == text.Length || ContainsGrapheme(primary.Typeface, text))
+            primaryTypeface, firstRune.Value, culture, explicitEmojiPresentation);
+        if (charsConsumed == text.Length || ContainsGrapheme(primary.Typeface, text, explicitEmojiPresentation))
         {
             return primary;
         }
@@ -137,11 +130,13 @@ public sealed class TerminalFontResolver : IDisposable
                 continue;
             }
 
-            // Additional components do not inherit the base's presentation:
-            // emoji fonts may cover a component only in text presentation.
+            // Discover components with their own Unicode default, not the
+            // base's explicit presentation. Whole-cluster validation below
+            // permits either presentation for these additional components.
             TerminalFontResolution candidate = ResolveTypefaceCore(
-                primaryTypeface, component.Value, culture, preferEmojiPresentation: false);
-            if (candidate.Typeface.Handle != primary.Typeface.Handle && ContainsGrapheme(candidate.Typeface, text))
+                primaryTypeface, component.Value, culture, explicitEmojiPresentation: null);
+            if (candidate.Typeface.Handle != primary.Typeface.Handle &&
+                ContainsGrapheme(candidate.Typeface, text, explicitEmojiPresentation))
             {
                 return candidate;
             }
@@ -168,28 +163,17 @@ public sealed class TerminalFontResolver : IDisposable
         SKTypeface primaryTypeface,
         int codepoint,
         CultureInfo? culture,
-        bool preferEmojiPresentation)
+        bool? explicitEmojiPresentation)
     {
-        if (preferEmojiPresentation)
-        {
-            TerminalFontResolution emojiResolution = ResolveCachedFallback(
-                primaryTypeface,
-                codepoint,
-                culture,
-                preferEmojiPresentation: true);
-
-            if (emojiResolution.UsedFallback)
-            {
-                return emojiResolution;
-            }
-        }
-
-        if (ContainsGlyph(primaryTypeface, codepoint))
+        // A configured font is authoritative without an explicit selector,
+        // including a deliberately chosen monochrome emoji font.
+        if (ContainsGlyph(primaryTypeface, codepoint, explicitEmojiPresentation))
         {
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
 
-        return ResolveCachedFallback(primaryTypeface, codepoint, culture, preferEmojiPresentation: false);
+        bool preferEmojiPresentation = explicitEmojiPresentation ?? new Codepoint((uint)codepoint).IsEmojiPresentation;
+        return ResolveCachedFallback(primaryTypeface, codepoint, culture, preferEmojiPresentation);
     }
 
     private TerminalFontResolution ResolveCachedFallback(
@@ -258,6 +242,9 @@ public sealed class TerminalFontResolver : IDisposable
 
             _containsGlyphFontCache.Clear();
 
+            foreach (TerminalGlyphPresentation presentation in _presentationCache.Values) presentation.Dispose();
+            _presentationCache.Clear();
+
             foreach (FontFallbackCacheEntry entry in _fallbackCache.Values)
             {
                 if (entry.FallbackTypeface is not { } fallbackTypeface)
@@ -306,7 +293,7 @@ public sealed class TerminalFontResolver : IDisposable
                     // or dispose it as an owned fallback; the per-primary
                     // result cache still avoids repeating this query.
                     if (string.Equals(primaryTypeface.FamilyName, _preferredEmojiFamily, StringComparison.Ordinal) &&
-                        ContainsGlyph(primaryTypeface, codepoint)) return FontFallbackCacheEntry.NoFallback;
+                        ContainsGlyph(primaryTypeface, codepoint, preferEmojiPresentation)) return FontFallbackCacheEntry.NoFallback;
                     _preferredEmojiResolved = true;
                 }
                 else
@@ -318,7 +305,7 @@ public sealed class TerminalFontResolver : IDisposable
                 }
             }
 
-            if (_preferredEmojiTypeface is { } preferred && ContainsGlyph(preferred, codepoint))
+            if (_preferredEmojiTypeface is { } preferred && ContainsGlyph(preferred, codepoint, preferEmojiPresentation))
                 return preferred.Handle == primaryTypeface.Handle ? FontFallbackCacheEntry.NoFallback : new(preferred);
         }
 
@@ -339,26 +326,44 @@ public sealed class TerminalFontResolver : IDisposable
                 family, primaryTypeface.FontStyle, languageTags, codepoint);
             if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
                 return FontFallbackCacheEntry.NoFallback;
-            if (fallbackTypeface.Handle != primaryTypeface.Handle && ContainsGlyph(fallbackTypeface, codepoint))
+            if (fallbackTypeface.Handle != primaryTypeface.Handle && ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
                 return new FontFallbackCacheEntry(fallbackTypeface);
+
+            // System matchers can return an object already retained for a
+            // different presentation/codepoint. Reject this request, not the
+            // lifetime of the earlier successful cache entry.
+            if (ReferenceEquals(fallbackTypeface, _preferredEmojiTypeface)) return FontFallbackCacheEntry.NoFallback;
+            foreach (FontFallbackCacheEntry cached in _fallbackCache.Values)
+                if (ReferenceEquals(cached.FallbackTypeface, fallbackTypeface)) return FontFallbackCacheEntry.NoFallback;
 
             // Remove the font holding a rejected candidate before releasing it;
             // native handles can be reused by the subsequent global match.
             if (_containsGlyphFontCache.Remove(fallbackTypeface.Handle, out SKFont? font)) font.Dispose();
+            if (_presentationCache.Remove(fallbackTypeface.Handle, out TerminalGlyphPresentation? presentation)) presentation.Dispose();
             fallbackTypeface.Dispose();
             return FontFallbackCacheEntry.NoFallback;
         }
     }
 
-    private bool ContainsGlyph(SKTypeface typeface, int codepoint)
+    private bool ContainsGlyph(SKTypeface typeface, int codepoint, bool? emojiPresentation = null)
     {
-        SKFont font = GetContainsGlyphFont(typeface);
-        return font.ContainsGlyph(codepoint);
+        lock (_sync)
+        {
+            ushort glyph = GetContainsGlyphFont(typeface).GetGlyph(codepoint);
+            if (glyph == 0) return false;
+            if (emojiPresentation is null) return true;
+            if (!_presentationCache.TryGetValue(typeface.Handle, out TerminalGlyphPresentation? presentation))
+            {
+                presentation = new TerminalGlyphPresentation(typeface);
+                _presentationCache.Add(typeface.Handle, presentation);
+            }
+            return presentation.IsColorGlyph(glyph) == emojiPresentation.Value;
+        }
     }
 
-    private bool ContainsGrapheme(SKTypeface typeface, ReadOnlySpan<char> text)
+    private bool ContainsGrapheme(SKTypeface typeface, ReadOnlySpan<char> text, bool? explicitEmojiPresentation)
     {
-        SKFont font = GetContainsGlyphFont(typeface);
+        bool first = true;
         while (!text.IsEmpty)
         {
             if (Rune.DecodeFromUtf16(text, out Rune rune, out int consumed) != OperationStatus.Done)
@@ -366,12 +371,14 @@ public sealed class TerminalFontResolver : IDisposable
                 return false;
             }
 
-            if (!IsGraphemePresentationControl(rune.Value) && !font.ContainsGlyph(rune.Value))
+            if (!IsGraphemePresentationControl(rune.Value) &&
+                !ContainsGlyph(typeface, rune.Value, first ? explicitEmojiPresentation : null))
             {
                 return false;
             }
 
             text = text[consumed..];
+            first = false;
         }
 
         return true;
@@ -421,75 +428,13 @@ public sealed class TerminalFontResolver : IDisposable
         return [culture.Name];
     }
 
-    private static bool IsRegionalIndicator(int codepoint)
-    {
-        return codepoint >= RegionalIndicatorStart && codepoint <= RegionalIndicatorEnd;
-    }
-
-    private static bool ShouldPreferEmojiPresentation(ReadOnlySpan<char> text, int firstCodepoint)
-    {
-        if (text.IsEmpty)
+    private static bool? GetExplicitPresentation(ReadOnlySpan<char> suffix)
+        => suffix.IsEmpty ? null : suffix[0] switch
         {
-            return false;
-        }
-
-        bool hasTextPresentationSelector = false;
-        bool hasEmojiPresentationSelector = false;
-        ReadOnlySpan<char> remaining = text;
-        while (!remaining.IsEmpty &&
-               Rune.DecodeFromUtf16(remaining, out Rune rune, out int charsConsumed) == OperationStatus.Done)
-        {
-            int codepoint = rune.Value;
-
-            if (codepoint == VariationSelector15)
-            {
-                hasTextPresentationSelector = true;
-            }
-
-            if (codepoint == VariationSelector16)
-            {
-                hasEmojiPresentationSelector = true;
-            }
-
-            if (codepoint == KeycapEnclosingCodepoint ||
-                IsEmojiModifier(codepoint) ||
-                IsTagCodepoint(codepoint))
-            {
-                return true;
-            }
-
-            remaining = remaining[charsConsumed..];
-        }
-
-        if (hasEmojiPresentationSelector)
-        {
-            return true;
-        }
-
-        if (hasTextPresentationSelector)
-        {
-            return false;
-        }
-
-        return IsRegionalIndicator(firstCodepoint) || IsDefaultEmojiPresentationCodepoint(firstCodepoint);
-    }
-
-    private static bool IsDefaultEmojiPresentationCodepoint(int codepoint)
-    {
-        // Most modern emoji are in these blocks; this keeps plain text codepoints
-        // on the regular fallback path unless emoji-specific markers are present.
-        return codepoint >= 0x1F300 && codepoint <= 0x1FAFF;
-    }
-
-    private static bool IsEmojiModifier(int codepoint)
-    {
-        return codepoint >= EmojiModifierStart && codepoint <= EmojiModifierEnd;
-    }
-
-    private static bool IsTagCodepoint(int codepoint)
-    {
-        return codepoint >= TagStart && codepoint <= TagEnd;
-    }
+            (char)VariationSelector15 => false,
+            (char)VariationSelector16 => true,
+            _ => null,
+        };
 
     private void ThrowIfDisposed()
     {

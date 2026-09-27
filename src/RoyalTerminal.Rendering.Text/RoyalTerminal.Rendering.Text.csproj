@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Unicode\RoyalTerminal.Unicode.csproj" />
     <PackageReference Include="HarfBuzzSharp" />
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>

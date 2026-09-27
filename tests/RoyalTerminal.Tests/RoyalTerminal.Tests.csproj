@@ -57,6 +57,7 @@
     <None Include="..\..\external\ghostty\src\terminal\snapshot\testdata\*.hex" Link="Fixtures\GhosttySnapshot\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\font\res\JetBrainsMonoNoNF-Regular.ttf" Link="Fixtures\Fonts\JetBrainsMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\font\res\NotoEmoji-Regular.ttf" Link="Fixtures\Fonts\NotoEmoji-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\ghostty\src\font\res\NotoColorEmoji.ttf" Link="Fixtures\Fonts\NotoColorEmoji.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\font\res\KawkabMono-Regular.ttf" Link="Fixtures\Fonts\KawkabMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

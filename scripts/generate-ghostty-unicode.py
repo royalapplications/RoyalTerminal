@@ -85,6 +85,7 @@ def main():
     emoji_text = read("emoji/emoji-data.txt")
     modifier = array.array("B", [0]) * COUNT
     modifier_base = array.array("B", [0]) * COUNT
+    emoji_presentation = array.array("B", [0]) * COUNT
     for start, end, fields in records(emoji_text):
         if fields[0] == "Extended_Pictographic":
             assign(gcb, start, end, GCB["Extended_Pictographic"])
@@ -92,6 +93,8 @@ def main():
             assign(modifier, start, end, 1)
         elif fields[0] == "Emoji_Modifier_Base":
             assign(modifier_base, start, end, 1)
+        elif fields[0] == "Emoji_Presentation":
+            assign(emoji_presentation, start, end, 1)
     emoji_vs_text = read("emoji/emoji-variation-sequences.txt")
     emoji_vs = {int(line.split()[0], 16) for line in emoji_vs_text.splitlines()
                 if line and not line.startswith("#") and ";" in line}
@@ -127,11 +130,20 @@ def main():
             data.extend(block)
         indexes.append(blocks[block])
 
-    def table(name, entries):
+    # Keep the hot packed width/grapheme table at 16 bits. Presentation is only
+    # needed during font selection and occupies a small separate range table.
+    presentation_ranges = []
+    for cp in range(COUNT):
+        if emoji_presentation[cp] and (cp == 0 or not emoji_presentation[cp - 1]):
+            presentation_ranges.append(cp)
+        if emoji_presentation[cp] and (cp == COUNT - 1 or not emoji_presentation[cp + 1]):
+            presentation_ranges.append(cp)
+
+    def table(name, entries, element_type="ushort"):
         # ReadOnlySpan literal helpers allocate RuntimeFieldHandle wrappers on
         # every lookup in .NET Debug builds. Private generated arrays are built
         # once, never mutated or exposed, and retain allocation-free lookups.
-        lines = [f"    private static readonly ushort[] {name} =", "    ["]
+        lines = [f"    private static readonly {element_type}[] {name} =", "    ["]
         for offset in range(0, len(entries), 16):
             lines.append("        " + ", ".join(f"0x{value:04X}" for value in entries[offset:offset + 16]) + ",")
         return "\n".join(lines + ["    ];"])
@@ -145,6 +157,14 @@ def main():
         "namespace RoyalTerminal.Unicode;", "", "internal static class Unicode18Data", "{",
         "    internal static ushort Get(uint codepoint) => codepoint <= 0x10FFFF",
         "        ? Values[(Blocks[(int)(codepoint >> 8)] << 8) | (int)(codepoint & 255)] : (ushort)0;", "",
+        "    internal static bool IsEmojiPresentation(uint codepoint)", "    {",
+        "        int low = 0, high = EmojiPresentationRanges.Length / 2 - 1;",
+        "        while (low <= high)", "        {",
+        "            int mid = low + ((high - low) >> 1);",
+        "            if (codepoint < EmojiPresentationRanges[mid * 2]) high = mid - 1;",
+        "            else if (codepoint > EmojiPresentationRanges[mid * 2 + 1]) low = mid + 1;",
+        "            else return true;", "        }", "        return false;", "    }", "",
+        table("EmojiPresentationRanges", presentation_ranges, "uint"), "",
         table("Blocks", indexes), "", table("Values", data), "}", "",
     ])
     outputs = {ROOT / "src/RoyalTerminal.Unicode/Unicode/Unicode18Data.Generated.cs": generated}
@@ -165,7 +185,8 @@ def main():
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(contents)
-    print(f"Unicode18: {len(blocks)} unique blocks, {len(indexes) * 2 + len(data) * 2} lookup bytes")
+    print(f"Unicode18: {len(blocks)} unique blocks, {len(indexes) * 2 + len(data) * 2} lookup bytes; "
+          f"{len(presentation_ranges) * 4} emoji-presentation range bytes")
 
 
 if __name__ == "__main__":

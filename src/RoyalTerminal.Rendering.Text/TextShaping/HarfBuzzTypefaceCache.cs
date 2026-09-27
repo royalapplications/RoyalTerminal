@@ -71,15 +71,38 @@ public sealed class HarfBuzzTypefaceEntry : IDisposable
     private readonly SKTypeface _typeface;
     private int _disposeState;
 
-    internal HarfBuzzTypefaceEntry(SKTypeface typeface)
+    internal HarfBuzzTypefaceEntry(SKTypeface typeface, bool preferMemoryStream = false)
     {
         _typeface = typeface;
         UnitsPerEm = Math.Max(1, typeface.UnitsPerEm);
 
-        Face = new Face(GetTable) { UnitsPerEm = UnitsPerEm };
+        Face = (preferMemoryStream ? TryCreateMemoryFace(typeface) : null) ?? new Face(GetTable);
+        Face.UnitsPerEm = UnitsPerEm;
         Font = new Font(Face);
         Font.SetFunctionsOpenType();
         Font.SetScale(UnitsPerEm, UnitsPerEm);
+    }
+
+    private static Face? TryCreateMemoryFace(SKTypeface typeface)
+    {
+        SKStreamAsset? stream = typeface.OpenStream(out int index);
+        if (stream is null) return null;
+        bool transferred = false;
+        try
+        {
+            nint data = stream.GetMemoryBase();
+            if (data == 0 || stream.Length <= 0 || index < 0) return null;
+            // HarfBuzz retains the blob; its release callback owns the stream,
+            // never the caller's typeface. Color bitmap tables can be many MB:
+            // borrowing Skia's mapped stream avoids copying them into CLR arrays.
+            using Blob blob = new(data, stream.Length, MemoryMode.ReadOnly, stream.Dispose);
+            transferred = true;
+            return new Face(blob, (uint)index);
+        }
+        finally
+        {
+            if (!transferred) stream.Dispose();
+        }
     }
 
     /// <summary>

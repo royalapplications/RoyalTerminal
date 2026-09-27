@@ -15,7 +15,7 @@ public sealed class TerminalPreferredEmojiFontTests
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
         using SKTypeface otherPrimary = Load("JetBrainsMono-Regular.ttf");
-        SKTypeface emoji = Load("NotoEmoji-Regular.ttf");
+        SKTypeface emoji = Load("NotoColorEmoji.ttf");
         string family = emoji.FamilyName;
         Matcher matcher = new(() => emoji);
         TerminalFontResolver resolver = new(matcher, family);
@@ -40,10 +40,10 @@ public sealed class TerminalPreferredEmojiFontTests
     public void MissingOrSubstitutedFamilyUsesGeneralDiscoveryAndCachesTheMiss(bool substitute)
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        using SKTypeface familyProbe = Load("NotoEmoji-Regular.ttf");
+        using SKTypeface familyProbe = Load("NotoColorEmoji.ttf");
         SKTypeface? rejected = null;
         Matcher matcher = new(() => substitute ? rejected = Load("JetBrainsMono-Regular.ttf") : null,
-            () => Load("NotoEmoji-Regular.ttf"));
+            () => Load("NotoColorEmoji.ttf"));
         using TerminalFontResolver resolver = new(matcher, familyProbe.FamilyName);
         Assert.True(resolver.ResolveTypeface(primary, "#\uFE0F").UsedFallback);
         Assert.True(resolver.ResolveTypeface(primary, "1\uFE0F").UsedFallback);
@@ -58,7 +58,7 @@ public sealed class TerminalPreferredEmojiFontTests
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
         SKTypeface preferred = Load("JetBrainsMono-Regular.ttf");
         Assert.False(preferred.ContainsGlyph(0x1F600));
-        Matcher matcher = new(() => preferred, () => Load("NotoEmoji-Regular.ttf"));
+        Matcher matcher = new(() => preferred, () => Load("NotoColorEmoji.ttf"));
         TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
         TerminalFontResolution result = resolver.ResolveTypeface(primary, 0x1F600);
         Assert.True(result.UsedFallback);
@@ -67,6 +67,38 @@ public sealed class TerminalPreferredEmojiFontTests
         resolver.Dispose();
         Assert.Equal(nint.Zero, preferred.Handle); // Owned even though never a successful fallback.
         Assert.Equal(nint.Zero, result.Typeface.Handle);
+    }
+
+    [Fact]
+    public void ExactFamilyWithOnlyMonochromeGlyphsDoesNotSatisfyExplicitEmoji()
+    {
+        using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
+        SKTypeface preferred = Load("NotoEmoji-Regular.ttf");
+        Matcher matcher = new(() => preferred, () => Load("NotoColorEmoji.ttf"));
+        using (TerminalFontResolver resolver = new(matcher, preferred.FamilyName))
+        {
+            TerminalFontResolution result = resolver.ResolveTypeface(primary, "\U0001F600\uFE0F");
+            Assert.True(result.UsedFallback);
+            Assert.NotSame(preferred, result.Typeface);
+            Assert.Equal(1, matcher.CharacterRequests);
+        }
+        Assert.Equal(nint.Zero, preferred.Handle);
+    }
+
+    [Fact]
+    public void RejectingCachedColorFaceForTextDoesNotDisposeItsEarlierEmojiEntry()
+    {
+        using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
+        SKTypeface color = Load("NotoColorEmoji.ttf");
+        Matcher matcher = new(() => null, () => color);
+        TerminalFontResolver resolver = new(matcher);
+        Assert.Same(color, resolver.ResolveTypeface(primary, "\U0001F600\uFE0F").Typeface);
+        _ = resolver.ResolveTypeface(primary, "\U0001F600\uFE0E");
+        Assert.NotEqual(nint.Zero, color.Handle);
+        Assert.Same(color, resolver.ResolveTypeface(primary, "\U0001F600\uFE0F").Typeface);
+        Assert.True(color.ContainsGlyph(0x1F600));
+        resolver.Dispose();
+        Assert.Equal(nint.Zero, color.Handle);
     }
 
     [Theory]
@@ -87,7 +119,7 @@ public sealed class TerminalPreferredEmojiFontTests
     public void NoPlatformPreferenceRetainsGenericFontMatching()
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        Matcher matcher = new(() => throw new InvalidOperationException("disabled"), () => Load("NotoEmoji-Regular.ttf"));
+        Matcher matcher = new(() => throw new InvalidOperationException("disabled"), () => Load("NotoColorEmoji.ttf"));
         using TerminalFontResolver resolver = new(matcher);
         Assert.True(resolver.ResolveTypeface(primary, "#\uFE0F").UsedFallback);
         Assert.Empty(matcher.Families);
@@ -103,16 +135,16 @@ public sealed class TerminalPreferredEmojiFontTests
     }
 
     [Fact]
-    public void CallerOwnedPrimaryReturnedByMatcherIsNeverRetainedOrDisposedAsFallback()
+    public void ConfiguredColorPrimaryIsNeverQueriedOrDisposedAsFallback()
     {
-        using SKTypeface primary = Load("NotoEmoji-Regular.ttf");
+        using SKTypeface primary = Load("NotoColorEmoji.ttf");
         Matcher matcher = new(() => primary);
         TerminalFontResolver resolver = new(matcher, primary.FamilyName);
         TerminalFontResolution result = resolver.ResolveTypeface(primary, "#\uFE0F");
         Assert.Same(primary, result.Typeface);
         Assert.False(result.UsedFallback);
         _ = resolver.ResolveTypeface(primary, "#\uFE0F");
-        Assert.Single(matcher.Families);
+        Assert.Empty(matcher.Families);
         resolver.Dispose();
         Assert.NotEqual(nint.Zero, primary.Handle);
         Assert.True(primary.ContainsGlyph('#'));
@@ -122,7 +154,7 @@ public sealed class TerminalPreferredEmojiFontTests
     public void SubstitutionWithCallerPrimaryDoesNotSuppressGeneralEmojiFallback()
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        Matcher matcher = new(() => primary, () => Load("NotoEmoji-Regular.ttf"));
+        Matcher matcher = new(() => primary, () => Load("NotoColorEmoji.ttf"));
         using (TerminalFontResolver resolver = new(matcher, "missing preferred family"))
         {
             TerminalFontResolution result = resolver.ResolveTypeface(primary, "#\uFE0F");
@@ -134,16 +166,16 @@ public sealed class TerminalPreferredEmojiFontTests
     }
 
     [Fact]
-    public void PreferredFontStillUsesWholeClusterCoverageAndLazyComponentCandidates()
+    public void UncoveredClusterDoesNotSelectComponentFontWithWrongBasePresentation()
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        SKTypeface preferred = Load("NotoEmoji-Regular.ttf");
+        SKTypeface preferred = Load("NotoColorEmoji.ttf");
         Assert.False(preferred.ContainsGlyph(0x0301));
         Matcher matcher = new(() => preferred);
         using TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
         TerminalFontResolution result = resolver.ResolveTypeface(primary, "#\uFE0F\u0301");
-        Assert.Same(primary, result.Typeface);
-        Assert.False(result.UsedFallback);
+        Assert.Same(preferred, result.Typeface);
+        Assert.True(result.UsedFallback);
         Assert.Single(matcher.Families);
     }
 
@@ -151,7 +183,7 @@ public sealed class TerminalPreferredEmojiFontTests
     public void WarmPreferredFallbackDoesNotAllocateOrDiscoverAgain()
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        SKTypeface preferred = Load("NotoEmoji-Regular.ttf");
+        SKTypeface preferred = Load("NotoColorEmoji.ttf");
         Matcher matcher = new(() => preferred);
         using TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
         for (int i = 0; i < 100; i++) _ = resolver.ResolveTypeface(primary, "#\uFE0F", CultureInfo.InvariantCulture);
@@ -167,7 +199,7 @@ public sealed class TerminalPreferredEmojiFontTests
     public async Task ConcurrentFirstUsePerformsOneNamedQuery()
     {
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
-        SKTypeface preferred = Load("NotoEmoji-Regular.ttf");
+        SKTypeface preferred = Load("NotoColorEmoji.ttf");
         Matcher matcher = new(() => preferred);
         using TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
         Task<TerminalFontResolution>[] queries = Enumerable.Range(0, 16)
@@ -206,6 +238,6 @@ public sealed class TerminalPreferredEmojiFontTests
     private sealed class CharacterOnlyMatcher : ITerminalFontMatcher
     {
         public SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint)
-            => Load("NotoEmoji-Regular.ttf");
+            => Load("NotoColorEmoji.ttf");
     }
 }

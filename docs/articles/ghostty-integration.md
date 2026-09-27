@@ -27,6 +27,31 @@ component candidates still apply. This is a named Skia lookup, not an additional
 native CoreText-to-Skia bridge or a copy of Ghostty's complete font collection.
 Both VT engines use this renderer behavior.
 
+Font selection also follows the pinned Ghostty
+[configured-face presentation rules](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/Collection.zig)
+and [adjacent-selector and cluster rules](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/shaper/run.zig).
+Without an adjacent VS15/VS16, a configured primary face keeps its glyph even
+when it is a deliberately monochrome emoji. Fallback discovery uses the exact
+Unicode 18 `Emoji_Presentation` property from Ghostty's pinned UCD, not a Unicode
+block heuristic. The separate generated range table adds 640 bytes without
+widening the packed width/grapheme lookup table. Only a selector immediately
+after the base changes its requested presentation; later selectors, keycaps,
+modifiers and tags cannot override it. Component discovery uses each component's
+own default, while whole-cluster validation requires the base's explicit
+presentation and permits either presentation for other components.
+
+Color coverage uses the existing pinned HarfBuzz library's public COLR v0/v1
+and bitmap glyph APIs. CoreText's `sbix`-face rule and macOS SVG support are
+retained; SVG is not enabled for the FreeType path. Glyph results are cached per
+resolver, and rejected candidates do not dispose fonts retained by another
+cache entry. Where Skia exposes a mapped font stream, a HarfBuzz blob borrows it
+with an owned release callback, avoiding a managed copy of large bitmap tables.
+This checks available color data, not an interactive guarantee for every font
+format/backend. Missing-whole-cluster replacement rendering and ordering across
+multiple configured faces remain separate parity work; the current public
+resolver still returns its non-null best-effort candidate for an uncovered
+cluster.
+
 `TerminalFontWarmup.StartAsync()` is a best-effort, one-shot macOS startup query.
 The demo starts it before Avalonia initialization, after rejecting inert toast
 activation. Embedders can call it at the same point in their composition root.
@@ -41,7 +66,11 @@ initializes DirectWrite fallback in its renderer, while
 [xterm.js](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-webgl/src/TextureAtlas.ts)
 warms ASCII atlas entries through idle callbacks. Neither defines macOS font
 registry behavior; this port follows Ghostty while retaining Skia's public APIs
-and ownership rules. Tests use deterministic font fixtures for family mismatch,
+and ownership rules. Windows Terminal passes the configured family and full
+text to DirectWrite; xterm.js delegates presentation and fallback to its canvas
+font stack. RoyalTerminal instead uses the explicit Ghostty policy above, with
+Skia for host discovery and HarfBuzz for color-table coverage.
+Tests use deterministic font fixtures for family mismatch,
 coverage, primary ownership, negative caching and whole-grapheme fallback.
 `--font-discovery` measures fresh-resolver emoji discovery; adding
 `--warm-font-registry` reports background query time separately from subsequent

@@ -34,6 +34,9 @@ public readonly record struct Codepoint
     /// <summary>Gets whether the scalar accepts an emoji skin-tone modifier.</summary>
     public bool IsEmojiModifierBase => (Unicode18Data.Get(_value) & (1 << 15)) != 0;
 
+    /// <summary>Gets the pinned Unicode Emoji_Presentation property (the default without VS15/VS16).</summary>
+    public bool IsEmojiPresentation => Unicode18Data.IsEmojiPresentation(_value);
+
     public static implicit operator int(Codepoint codepoint)
     {
         return (int)codepoint._value;

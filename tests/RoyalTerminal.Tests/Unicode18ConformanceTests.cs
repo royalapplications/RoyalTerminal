@@ -14,6 +14,18 @@ namespace RoyalTerminal.Tests;
 public sealed class Unicode18ConformanceTests
 {
     [Fact]
+    public void EmojiPresentationMatchesPinnedUcdForEveryCodepoint()
+    {
+        bool[] expected = new bool[0x110000];
+        foreach ((int start, int end, string[] fields) in ReadRecords("emoji-data.txt"))
+            if (fields[0] == "Emoji_Presentation") Array.Fill(expected, true, start, end - start);
+        for (uint cp = 0; cp < expected.Length; cp++)
+            if (expected[cp] != new Codepoint(cp).IsEmojiPresentation) Assert.Fail($"Emoji_Presentation U+{cp:X}");
+        Assert.False(new Codepoint(0x110000).IsEmojiPresentation);
+        Assert.False(new Codepoint(uint.MaxValue).IsEmojiPresentation);
+    }
+
+    [Fact]
     public void GraphemeSegmentationPassesEveryPinnedUnicode18ConformanceCase()
     {
         int cases = 0;

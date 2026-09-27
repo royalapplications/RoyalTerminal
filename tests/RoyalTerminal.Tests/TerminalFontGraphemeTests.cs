@@ -24,13 +24,11 @@ public class TerminalFontGraphemeTests
         Assert.True(result.UsedFallback);
         Assert.True(result.Typeface.ContainsGlyph('#'));
         Assert.True(result.Typeface.ContainsGlyph(0x20E3));
-        Assert.Equal(new[] { (int)'#', 0x20E3 }, matcher.Requests.Select(request => request.Codepoint));
-        Assert.True(matcher.Requests[0].EmojiPresentation);
-        Assert.False(matcher.Requests[1].EmojiPresentation);
+        Assert.Equal(new[] { 0x20E3 }, matcher.Requests.Select(request => request.Codepoint));
+        Assert.False(matcher.Requests[0].EmojiPresentation);
     }
 
     [Theory]
-    [InlineData("#\uFE0F\u20E3")]
     [InlineData("#\u200D\u20E3")]
     [InlineData("#\uFE0E\u20E3")]
     public void PresentationControlsDoNotRequireStandaloneGlyphCoverage(string text)
