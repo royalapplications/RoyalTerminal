@@ -199,11 +199,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
                 double scrollFraction = screen.RenderScrollFraction;
                 bool fullRedraw = !_cachedFrameValid || _forceFullRedrawRequested || scrollFraction != _lastRenderScrollFraction;
-                // A translated image scene requires all overlapping cell layers
-                // to be repainted together. Text-only stationary phases retain
-                // row damage; image-region damage can refine this conservative path.
-                fullRedraw |= scrollFraction != 0 && (screen.HasKittyGraphics || screen.HasRasterGraphics ||
-                    !screen.GetKittyPlacements(screen.RenderScrollOverscan).IsEmpty);
+                renderer.PrepareImageDamage(screen);
                 if (_invalidateViewportRequested)
                 {
                     TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
@@ -530,16 +526,19 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         float rowHeight = Math.Max(1f, renderer.CellHeight);
         TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
         double fraction = screen.RenderScrollFraction;
-        for (int row = 0; row < rows.Count; row++)
+        canvas.Save();
+        try
         {
-            if (!rows[row].Row.IsDirty)
+            // Use exactly the renderer's translation, avoiding a different
+            // floating-point rounding path at fractional device-pixel edges.
+            if (fraction != 0) canvas.Translate(0, -(float)(fraction * renderer.CellHeight));
+            for (int row = 0; row < rows.Count; row++)
             {
-                continue;
+                if (!rows[row].Row.IsDirty) continue;
+                canvas.DrawRect(0, rows[row].ViewportY * renderer.CellHeight, rowWidth, rowHeight, _clearPaint);
             }
-
-            float y = (float)((rows[row].ViewportY - fraction) * renderer.CellHeight);
-            canvas.DrawRect(0, y, rowWidth, rowHeight, _clearPaint);
         }
+        finally { canvas.Restore(); }
     }
 
     private void SetShaderState(

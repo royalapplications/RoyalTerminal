@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--image-row-damage", StringComparer.Ordinal))
+{
+    ImageRowDamageBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--fractional-scroll", StringComparer.Ordinal))
 {
     FractionalScrollBenchmark.Run();

@@ -684,7 +684,9 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
     /// <summary>
     /// Renders the terminal screen to the given SKCanvas.
-    /// Only re-renders rows marked as dirty unless forceFullRedraw is true.
+    /// Re-renders dirty rows, including changed image bounds, unless forceFullRedraw
+    /// is true. Retained-canvas callers must call <see cref="PrepareImageDamage"/>
+    /// before clearing dirty rows; rendering itself does not clear the canvas.
     /// </summary>
     public void Render(SKCanvas canvas, TerminalScreen screen, bool forceFullRedraw = false)
         => Render(canvas, screen, default, forceFullRedraw);
@@ -705,11 +707,29 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(screen);
 
+        overscan = GetImageRenderOverscan(screen, overscan);
+        PrepareImageDamage(screen, overscan);
+        int saveCount = canvas.Save();
+        try
+        {
+            RenderPreparedFrame(canvas, screen, overscan, forceFullRedraw);
+        }
+        catch
+        {
+            // No damage baseline is committed on failure. Text rows may already
+            // have been acknowledged before an image upload failed; retry them.
+            TerminalRenderViewport rows = screen.GetRenderViewport(overscan);
+            for (int index = 0; index < rows.Count; index++) rows[index].Row.IsDirty = true;
+            throw;
+        }
+        finally { canvas.RestoreToCount(saveCount); }
+    }
+
+    private void RenderPreparedFrame(SKCanvas canvas, TerminalScreen screen, TerminalRenderOverscan overscan, bool forceFullRedraw)
+    {
         double scrollFraction = screen.RenderScrollFraction;
-        if (scrollFraction != 0) overscan = new(overscan.Above, Math.Max(overscan.Below, (ushort)1));
         TerminalRenderViewport renderRows = screen.GetRenderViewport(overscan);
         PrepareRegisteredGlyphCache(screen);
-        canvas.Save();
         if (scrollFraction != 0) canvas.Translate(0, -(float)(scrollFraction * _cellHeight));
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
@@ -719,9 +739,11 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             !textHighlightRules.IsEmpty;
         ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements(overscan);
         ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
-        SKRect imageClip = new(0, -renderRows.CapturedOverscan.Above * _cellHeight,
-            screen.Columns * _cellWidth, (screen.ViewportRows + renderRows.CapturedOverscan.Below) * _cellHeight);
+        SKRect imageClip = GetImageRenderClip(screen, renderRows.CapturedOverscan);
+        BuildImageDamageClip(renderRows, imageClip, forceFullRedraw);
         long imageFrameId = unchecked(++_imageRenderFrameId);
+        foreach (ImageDamageItem item in _nextKittyDamage) TouchVisibleBitmap(_kittyBitmapCache, item.Pixels, imageFrameId);
+        foreach (ImageDamageItem item in _nextRasterDamage) TouchVisibleBitmap(_rasterBitmapCache, item.Pixels, imageFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         bool useFullRowBuffers = TryGetPooledRowBufferCellCount(
             renderRows.Count,
@@ -859,7 +881,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         if (CursorVisible && Preedit is not { Count: > 0 })
             RenderCursor(canvas, screen);
 
-        canvas.Restore();
+        CommitImageDamage(screen, imageClip);
     }
 
     /// <summary>
@@ -6162,6 +6184,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         canvas.Save();
         canvas.ClipRect(imageClip);
+        if (_clipImagesToDamage) canvas.ClipPath(_imageDamagePath, antialias: false);
 
         try
         {
@@ -6174,22 +6197,14 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
-                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
-                float destLeft = (placement.AnchorColumn * _cellWidth) + (placement.XOffsetPx * xScale);
-                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) +
-                    (placement.YOffsetPx * yScale);
-                SKRect destRect = new(
-                    destLeft,
-                    destTop,
-                    destLeft + (placement.WidthPx * xScale),
-                    destTop + (placement.HeightPx * yScale));
+                SKRect destRect = GetRasterDestination(placement, viewportTopAbsoluteRow);
                 if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
 
                 RecordImagePlacementVisible();
+                if (canvas.QuickReject(destRect)) continue;
                 if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
                     source is null)
                 {
@@ -6199,8 +6214,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 SKRect sourceRect = new(
                     placement.SourceX,
                     placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                    (float)placement.SourceX + placement.SourceWidth,
+                    (float)placement.SourceY + placement.SourceHeight);
                 if (!IsRenderableImageRect(sourceRect, destRect))
                 {
                     continue;
@@ -6243,6 +6258,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
         canvas.Save();
         canvas.ClipRect(imageClip);
+        if (_clipImagesToDamage) canvas.ClipPath(_imageDamagePath, antialias: false);
 
         try
         {
@@ -6255,20 +6271,14 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                (float xScale, float yScale) = GetKittyPlacementScale(placement);
-                float destLeft = (placement.ViewportColumn * _cellWidth) + (placement.XOffsetPx * xScale);
-                float destTop = (placement.ViewportRow * _cellHeight) + (placement.YOffsetPx * yScale);
-                SKRect destRect = new(
-                    destLeft,
-                    destTop,
-                    destLeft + (placement.WidthPx * xScale),
-                    destTop + (placement.HeightPx * yScale));
+                SKRect destRect = GetKittyDestination(placement);
                 if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
 
                 RecordImagePlacementVisible();
+                if (canvas.QuickReject(destRect)) continue;
                 if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
                     source is null)
                 {
@@ -6278,8 +6288,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 SKRect sourceRect = new(
                     placement.SourceX,
                     placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                    (float)placement.SourceX + placement.SourceWidth,
+                    (float)placement.SourceY + placement.SourceHeight);
                 if (!IsRenderableImageRect(sourceRect, destRect))
                 {
                     continue;
@@ -6522,6 +6532,11 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         _rasterBitmapCache.Clear();
         _kittyBitmapCacheBytes = 0;
         _rasterBitmapCacheBytes = 0;
+        _imageDamagePath.Dispose();
+        _lastKittyDamage.Clear();
+        _nextKittyDamage.Clear();
+        _lastRasterDamage.Clear();
+        _nextRasterDamage.Clear();
         _bgPaint.Dispose();
         _fgPaint.Dispose();
         _thickenedGlyphs.Dispose();
