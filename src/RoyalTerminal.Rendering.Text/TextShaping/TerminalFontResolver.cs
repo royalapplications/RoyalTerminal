@@ -45,6 +45,7 @@ public sealed partial class TerminalFontResolver : IDisposable
     private bool _ownsPreferredEmojiTypeface = true;
     private bool _preferredEmojiResolved;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
+    private readonly HashSet<SKTypeface> _retainedTypefaces = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
     private readonly Dictionary<nint, TerminalGlyphPresentation> _presentationCache = new();
     private readonly object _sync = new();
@@ -257,6 +258,7 @@ public sealed partial class TerminalFontResolver : IDisposable
                     preferEmojiPresentation,
                     discoveryStyle);
                 _fallbackCache.Add(key, entry);
+                if (entry.FallbackTypeface is { } retained) _retainedTypefaces.Add(retained);
             }
         }
 
@@ -316,6 +318,7 @@ public sealed partial class TerminalFontResolver : IDisposable
                 !_borrowedTypefaces.Contains(preferred) && disposedTypefaces.Add(preferred)) preferred.Dispose();
             _borrowedTypefaces.Clear();
             _preferredEmojiTypeface = null;
+            _retainedTypefaces.Clear();
         }
 
         if (_ownsFontManager)
@@ -355,6 +358,7 @@ public sealed partial class TerminalFontResolver : IDisposable
                     if (candidate is not null && string.Equals(candidate.FamilyName, _preferredEmojiFamily, StringComparison.Ordinal))
                     {
                         _preferredEmojiTypeface = candidate;
+                        _retainedTypefaces.Add(candidate);
                         _ownsPreferredEmojiTypeface = !_borrowedTypefaces.Contains(candidate);
                     }
                     else if (candidate is not null) ReleaseRejectedTypeface(candidate, primaryTypeface);
@@ -375,20 +379,44 @@ public sealed partial class TerminalFontResolver : IDisposable
         FontFallbackCacheEntry entry = Match(familyName);
         // A file-backed family may not be installed in the system collection.
         // Do not let a failed family-specific match suppress global discovery.
-        return entry.FallbackTypeface is null && familyName is not null ? Match(null) : entry;
+        if (entry.FallbackTypeface is null && familyName is not null) entry = Match(null);
+        if (entry.FallbackTypeface is not null || _fontMatcher is not ITerminalFontCandidateMatcher candidates) return entry;
+
+        // A cmap match may have the wrong presentation. Ghostty keeps iterating
+        // its platform discovery descriptors instead of accepting that failure
+        // as proof that no suitable face exists. The result cache above keeps
+        // this cold path out of repeated rendering, including complete misses.
+        foreach (SKTypeface candidate in candidates.MatchCandidates(discoveryStyle ?? primaryTypeface.FontStyle, languageTags, codepoint,
+            rejected => ReleaseRejectedTypeface(rejected, primaryTypeface)))
+        {
+            entry = Accept(candidate);
+            if (entry.FallbackTypeface is not null) return entry;
+        }
+        return FontFallbackCacheEntry.NoFallback;
 
         FontFallbackCacheEntry Match(string? family)
         {
             SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
                 family, discoveryStyle ?? primaryTypeface.FontStyle, languageTags, codepoint);
+            return Accept(fallbackTypeface);
+        }
+
+        FontFallbackCacheEntry Accept(SKTypeface? fallbackTypeface)
+        {
             if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
                 return FontFallbackCacheEntry.NoFallback;
-            if (fallbackTypeface.Handle != primaryTypeface.Handle && !TerminalFontCoverage.IsLastResort(fallbackTypeface) &&
-                ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
-                return new FontFallbackCacheEntry(fallbackTypeface, !_borrowedTypefaces.Contains(fallbackTypeface));
-
-            ReleaseRejectedTypeface(fallbackTypeface, primaryTypeface);
-            return FontFallbackCacheEntry.NoFallback;
+            bool accepted = false;
+            try
+            {
+                if (fallbackTypeface.Handle != primaryTypeface.Handle && !TerminalFontCoverage.IsLastResort(fallbackTypeface) &&
+                    ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
+                {
+                    accepted = true;
+                    return new FontFallbackCacheEntry(fallbackTypeface, !_borrowedTypefaces.Contains(fallbackTypeface));
+                }
+                return FontFallbackCacheEntry.NoFallback;
+            }
+            finally { if (!accepted) ReleaseRejectedTypeface(fallbackTypeface, primaryTypeface); }
         }
     }
 
@@ -399,12 +427,9 @@ public sealed partial class TerminalFontResolver : IDisposable
         // System matchers can return an object already retained for a
         // different presentation/codepoint. Reject this request, not the
         // lifetime of the earlier successful cache entry.
-        if (ReferenceEquals(fallbackTypeface, _preferredEmojiTypeface)) return;
-        foreach (FontFallbackCacheEntry cached in _fallbackCache.Values)
-            if (ReferenceEquals(cached.FallbackTypeface, fallbackTypeface)) return;
-        foreach (CollectionState collection in _collections.Values)
-            foreach (SKTypeface? mapped in collection.Descriptors.Values)
-                if (ReferenceEquals(mapped, fallbackTypeface)) return;
+        // Discovery can reject hundreds of faces. Membership must not scan
+        // every cached scalar or mapped descriptor for every rejected face.
+        if (_retainedTypefaces.Contains(fallbackTypeface)) return;
 
         // Remove the font holding a rejected candidate before releasing it;
         // native handles can be reused by the subsequent global match.

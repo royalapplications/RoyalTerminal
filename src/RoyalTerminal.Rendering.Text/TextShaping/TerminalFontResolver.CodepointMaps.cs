@@ -43,7 +43,11 @@ public sealed partial class TerminalFontResolver
             // Cache successful descriptors even when this particular codepoint
             // is missing. Other ranges using that descriptor reuse its face.
             state.Descriptors.Add(family, face);
-            if (face is not null) AddLoadedFace(state, face, isFallback: false);
+            if (face is not null)
+            {
+                _retainedTypefaces.Add(face);
+                AddLoadedFace(state, face, isFallback: false);
+            }
         }
         return face is not null && ContainsGlyph(face, codepoint) ? face : null;
     }

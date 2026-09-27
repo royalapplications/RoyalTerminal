@@ -187,11 +187,49 @@ with the same ASCII/style/face workload. **Execution and before/after performanc
 validation are deferred until the implementation batch is complete; no measured
 speedup is claimed yet.**
 
-Exhaustive platform fallback enumeration remains a parity requirement.
-Skia's family/global matching is not claimed to
-enumerate Ghostty's complete platform discovery iterator. The font benchmark
-compares existing single-face discovery with loaded-collection reuse; isolated
-font-query measurements are not an end-to-end rendering speedup claim.
+Fallback discovery now continues beyond a rejected first platform match, as
+Ghostty's [candidate loop](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/CodepointResolver.zig)
+does when character coverage has the wrong color/text presentation. The existing
+Skia family/global first match and macOS emoji fast path remain first, preserving
+successful platform/locale choices (including CJK). Only an unresolved request
+opens the additional candidate stream:
+
+- Linux uses Fontconfig's active configuration, charset/language substitution,
+  monospace preference and **untrimmed** sorted results. Equal cmap coverage must
+  not eliminate alternate presentation. Render-prepared file/collection indexes
+  retain native ordering and sysroot handling; fonts load only as consumed.
+- macOS queries codepoint-constrained CoreText descriptors, removes the temporary
+  charset restriction, and ranks monospace, exact style, slant, weight, fuzzy style
+  and glyph count. `head`/`OS/2` traits and variation values refine symbolic traits.
+  Variation axes use stable OpenType identifiers rather than localized display
+  names. Exact PostScript names map to Skia family entries or their original font
+  file/collection face; this avoids silently substituting another family.
+- Windows examines system and per-user font directories, including all TTC/OTC
+  collection faces, alongside application-registered fonts. Inaccessible, missing
+  or invalid files are skipped without suppressing later candidates.
+- The complete Skia family/style registry is also available after native candidates,
+  covering manager-private registrations and systems without optional native APIs.
+
+This ports exhaustive candidate coverage, not identical font choice to standalone
+Ghostty: successful Skia first choices retain the shared renderer's existing host
+contract. Windows Terminal obtains its primary fallback from DirectWrite and
+xterm.js from browser/canvas. No process-global font registry is mutated here.
+Native query resources close before faces are transferred; early iterator disposal
+does not dispose a selected face. Even source-internal discarded probes use the
+resolver's ownership guard. Configured, mapped and already-retained faces remain
+protected. A reference-identity retention set replaces repeated scans of every
+cached scalar/descriptor during rejection. Positive and negative scalar caching,
+regular-only collection discovery and loaded-face reuse keep the expanded search
+off warm rendering paths. More complete cold misses necessarily inspect more
+fonts; there is no claimed overall discovery speedup.
+
+The `--font-candidates` workload measures fresh mixed-presentation/unsupported
+queries separately from warmed hits/misses. Candidate iteration, ownership,
+failure cleanup, ranking/trait parsing, native descriptor smoke and collection
+header tests are written. **Execution, native platform sign-off and before/after
+performance measurement remain deferred to final validation.** The separate font
+discovery benchmark compares single-face discovery with loaded-collection reuse;
+neither isolated workload proves end-to-end rendering performance.
 
 Unsupported cells now carry an explicit `TerminalFontResolution.ReplacementCodepoint`:
 the entire cluster becomes U+FFFD, falling back to a space if that glyph is
