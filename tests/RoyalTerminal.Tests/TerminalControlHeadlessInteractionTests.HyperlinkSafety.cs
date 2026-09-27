@@ -78,6 +78,7 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             Point point = await PutOscLink(control, window, "https://example.com/hidden");
             Assert.True(control.EnableOsc8Hyperlinks);
             control.EnableOsc8Hyperlinks = false;
+            Dispatcher.UIThread.RunJobs();
             Assert.Null(control.HoveredLinkUrl);
             Assert.Null(control.HoveredLinkDisplayText);
             RaiseModifiedLeftClick(control, window, point, KeyModifiers.Control);
@@ -166,6 +167,7 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         Dispatcher.UIThread.RunJobs();
         Point point = await GetCellInteractionPointAsync(control, window, 1, 0);
         RaisePointerMove(control, window, point);
+        Dispatcher.UIThread.RunJobs();
         return point;
     }
 

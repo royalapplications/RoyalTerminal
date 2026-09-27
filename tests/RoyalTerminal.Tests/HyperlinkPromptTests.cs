@@ -21,21 +21,22 @@ public sealed class HyperlinkPromptTests
 {
     [Theory]
     [InlineData("custom:execute", "Editor", true)]
-    [InlineData("custom:execute", null, false)]
-    [InlineData("custom:execute", " ", false)]
+    [InlineData("custom:execute", null, true)]
+    [InlineData("custom:execute", " ", true)]
     [InlineData("file:///tmp/payload.command", "Editor", false)]
     [InlineData("https://example.com/a\u202Eb", "Editor", false)]
     [InlineData("https://example.com", "Editor", false)]
-    public async Task ViewModelOnlyEnablesOpenForCustomSchemeWithHandler(string target, string? handler, bool canOpen)
+    public async Task ViewModelOnlyEnablesOpenForCustomSchemes(string target, string? handler, bool canOpen)
     {
         using HyperlinkPromptViewModel model = new(TerminalHyperlinkSafety.Classify(target), handler);
         Assert.Equal(canOpen, model.CanOpen);
         Assert.Equal(canOpen, await model.OpenCommand.CanExecute.FirstAsync());
         Assert.Equal(TerminalHyperlinkSafety.SanitizeDisplay(target), model.Target);
+        if (string.IsNullOrWhiteSpace(handler)) Assert.Equal("The default application", model.Handler);
     }
 
     [Fact]
-    public async Task CopyIsExplicitAndPreservesOriginalWhileHandlerAndTargetAreEscaped()
+    public async Task CopyIsExplicitAndUsesEscapedDisplayedTarget()
     {
         const string target = "custom:a\u202Eb";
         using HyperlinkPromptViewModel model = new(TerminalHyperlinkSafety.Classify(target), "Editor\n\u200Bname");
@@ -49,7 +50,7 @@ public sealed class HyperlinkPromptTests
         });
         Assert.Null(copied);
         await model.CopyCommand.Execute().ToTask();
-        Assert.Equal(target, copied);
+        Assert.Equal(model.Target, copied);
         Assert.False(await model.CancelCommand.Execute().ToTask());
     }
 
@@ -117,7 +118,7 @@ public sealed class HyperlinkPromptTests
     [InlineData(TerminalHyperlinkDenialReason.UnsafeFile, "execute code")]
     [InlineData(TerminalHyperlinkDenialReason.InaccessibleFile, "does not exist")]
     [InlineData(TerminalHyperlinkDenialReason.FileInspectionUnavailable, "could not inspect")]
-    public async Task InspectedFileDenialShowsResolvedPreviewButCopiesOriginal(TerminalHyperlinkDenialReason reason, string explanation)
+    public async Task InspectedFileDenialCopiesTheResolvedEscapedPreview(TerminalHyperlinkDenialReason reason, string explanation)
     {
         const string original = "file:///alias/notes.txt";
         TerminalHyperlinkRequest request = TerminalHyperlinkSafety.Classify(original) with
@@ -136,6 +137,6 @@ public sealed class HyperlinkPromptTests
             context.SetOutput(Unit.Default);
         });
         await model.CopyCommand.Execute().ToTask();
-        Assert.Equal(original, copied);
+        Assert.Equal(model.Target, copied);
     }
 }

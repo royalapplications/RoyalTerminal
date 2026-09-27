@@ -131,6 +131,9 @@ public sealed class MainWindowControllerModeStartupTests
                 terminalHost.Children[0],
                 startupHeader);
             Assert.Equal(TerminalRenderMode.RenderedAuto, startupMode);
+            TerminalControl startupControl = Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.NotNull(startupControl.HyperlinkHost);
+            Assert.NotNull(startupControl.HyperlinkPathPreviewSource);
         }
         finally
         {

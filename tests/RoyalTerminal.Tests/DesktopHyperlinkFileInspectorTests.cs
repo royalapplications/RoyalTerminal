@@ -10,7 +10,7 @@ namespace RoyalTerminal.Tests;
 public sealed class DesktopHyperlinkFileInspectorTests
 {
     [Fact]
-    public async Task ResolvedPathAndOriginalCopyIdentityAreKeptSeparate()
+    public async Task ResolvedPathAndOriginalTargetIdentityAreKeptSeparate()
     {
         string canonical = Path.Combine(Path.GetTempPath(), "resolved.txt");
         TerminalHyperlinkRequest input = Request("alias.txt");

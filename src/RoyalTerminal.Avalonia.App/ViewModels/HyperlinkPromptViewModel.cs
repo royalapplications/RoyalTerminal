@@ -17,21 +17,22 @@ public sealed class HyperlinkPromptViewModel : ReactiveObject, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         TerminalHyperlinkRequest classified = TerminalHyperlinkSafety.Classify(request.Target);
+        if (classified.Disposition == TerminalHyperlinkDisposition.Deny && request.Disposition == TerminalHyperlinkDisposition.Deny)
+            classified = classified with { DisplayText = TerminalHyperlinkSafety.SanitizeDisplay(request.DisplayText) };
         // Inspection can add a canonical preview and a file-specific denial,
-        // never permission to confirm an unsafe file. Retain raw copy identity.
+        // never permission to confirm an unsafe file. Retain the target for policy.
         if (classified.Disposition == TerminalHyperlinkDisposition.InspectFile && request.Disposition == TerminalHyperlinkDisposition.Deny &&
             request.DenialReason is TerminalHyperlinkDenialReason.InaccessibleFile or TerminalHyperlinkDenialReason.UnsafeFile or TerminalHyperlinkDenialReason.FileInspectionUnavailable)
             classified = classified with { DisplayText = TerminalHyperlinkSafety.SanitizeDisplay(request.DisplayText),
                 Disposition = TerminalHyperlinkDisposition.Deny, DenialReason = request.DenialReason };
         request = classified;
         Target = request.DisplayText;
-        CanOpen = request.Disposition == TerminalHyperlinkDisposition.Confirm && !string.IsNullOrWhiteSpace(handler);
+        CanOpen = request.Disposition == TerminalHyperlinkDisposition.Confirm;
         Title = CanOpen ? "Open terminal link?" : "Terminal link blocked";
-        Handler = handler is null ? string.Empty : TerminalHyperlinkSafety.SanitizeDisplay(handler);
+        Handler = string.IsNullOrWhiteSpace(handler) ? "The default application" : TerminalHyperlinkSafety.SanitizeDisplay(handler);
         Message = request.Disposition switch
         {
-            TerminalHyperlinkDisposition.Confirm when CanOpen => "This terminal link will be sent to the application below. Only open it if you trust the target and application.",
-            TerminalHyperlinkDisposition.Confirm => "The registered application could not be identified. This link will not be opened.",
+            TerminalHyperlinkDisposition.Confirm => "This terminal link will be sent to the application below. Only open it if you trust the target and application.",
             TerminalHyperlinkDisposition.InspectFile => "This local target has not been inspected and cannot be opened.",
             _ => request.DenialReason switch
             {
@@ -46,7 +47,7 @@ public sealed class HyperlinkPromptViewModel : ReactiveObject, IDisposable
         OpenCommand = ReactiveCommand.Create(() => true, Observable.Return(CanOpen));
         CancelCommand = ReactiveCommand.Create(() => false);
         CopyTargetInteraction = new Interaction<string, Unit>();
-        CopyCommand = ReactiveCommand.CreateFromTask(async () => await CopyTargetInteraction.Handle(request.Target));
+        CopyCommand = ReactiveCommand.CreateFromTask(async () => await CopyTargetInteraction.Handle(Target));
     }
 
     /// <summary>Gets the dialog title.</summary>
@@ -63,7 +64,7 @@ public sealed class HyperlinkPromptViewModel : ReactiveObject, IDisposable
     public ReactiveCommand<Unit, bool> OpenCommand { get; }
     /// <summary>Closes without granting permission.</summary>
     public ReactiveCommand<Unit, bool> CancelCommand { get; }
-    /// <summary>Copies the original target only after an explicit user action.</summary>
+    /// <summary>Copies the displayed, escaped target only after an explicit user action, matching Ghostty's blocked-link UI.</summary>
     public ReactiveCommand<Unit, Unit> CopyCommand { get; }
     /// <summary>Requests a host-owned clipboard operation.</summary>
     public Interaction<string, Unit> CopyTargetInteraction { get; }

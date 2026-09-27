@@ -47,11 +47,15 @@ public partial class TerminalControl
         set
         {
             Dispatcher.UIThread.VerifyAccess();
-            if (SetAndRaise(HyperlinkHostProperty, ref _hyperlinkHost, value)) CancelPendingHyperlinkRequest();
+            if (SetAndRaise(HyperlinkHostProperty, ref _hyperlinkHost, value))
+            {
+                CancelPendingHyperlinkRequest();
+                HyperlinkPreviewTargetChanged();
+            }
         }
     }
 
-    /// <summary>Gets a single-line, escaped preview of the hovered target. Never use this as a launch URI.</summary>
+    /// <summary>Gets the UI-published escaped preview, optionally resolved by the host. Never use it as a launch URI.</summary>
     public string? HoveredLinkDisplayText => _hoveredLinkDisplayText;
 
     private bool ActivateUntrustedHyperlink(string target)

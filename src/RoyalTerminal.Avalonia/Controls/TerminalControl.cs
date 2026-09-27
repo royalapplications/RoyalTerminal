@@ -1226,6 +1226,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         ITerminalTransportFactory? transportFactory,
         ITerminalSecureInputScope secureInputScope)
     {
+        _hyperlinkPreview = new(PublishHyperlinkPreview);
+        _refreshHyperlinkPreview = RefreshHyperlinkPreview;
         _secureInputScope = secureInputScope ?? throw new ArgumentNullException(nameof(secureInputScope));
         TerminalSessionService = terminalSessionService ?? throw new ArgumentNullException(nameof(terminalSessionService));
         TerminalInputAdapter = terminalInputAdapter ?? throw new ArgumentNullException(nameof(terminalInputAdapter));
@@ -2265,6 +2267,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _hyperlinkPreviewAttached = true;
+        ResumeHyperlinkPreview();
+        QueueHyperlinkPreviewRefresh();
         _hostVisibility.Attach();
         _notificationHostDetached = false;
         BindNotificationHost(_vtProcessor, _notificationHost);
@@ -2286,6 +2291,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _hyperlinkPreviewAttached = false;
+        PauseHyperlinkPreview();
         CancelPendingHyperlinkRequest();
         _hostVisibility.Dispose();
         _notificationHostDetached = true;
@@ -5355,6 +5362,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void SetHoveredLinkUrl(string? url)
     {
+        ResumeHyperlinkPreview();
         string? normalized = string.IsNullOrWhiteSpace(url) ? null : url;
         if (string.Equals(_hoveredLinkUrl, normalized, StringComparison.Ordinal))
         {
@@ -5362,7 +5370,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = normalized;
-        _hoveredLinkDisplayText = normalized is null ? null : TerminalHyperlinkSafety.SanitizeDisplay(normalized);
+        HyperlinkPreviewTargetChanged();
         UpdateRendererParityStateFromScreen(invalidateViewportRows: true);
     }
 
@@ -6114,6 +6122,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     /// </summary>
     public void StopPty()
     {
+        PauseHyperlinkPreview();
         CancelPendingHyperlinkRequest();
         _dragDropBehavior.Cancel();
         FlushPendingTransportResize();
@@ -7604,7 +7613,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _lastPointerColumn = -1;
         _lastPointerRow = -1;
         _hoveredLinkUrl = null;
-        _hoveredLinkDisplayText = null;
+        HyperlinkPreviewTargetChanged();
 
         if (hadHover)
         {
@@ -7614,6 +7623,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void UpdatePointerCell(Point point)
     {
+        ResumeHyperlinkPreview();
         if (_renderer is null || _screen is null)
         {
             return;
@@ -7675,7 +7685,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _hoveredLinkUrl = nextUrl;
-        _hoveredLinkDisplayText = nextUrl is null ? null : TerminalHyperlinkSafety.SanitizeDisplay(nextUrl);
+        HyperlinkPreviewTargetChanged();
         return true;
     }
 

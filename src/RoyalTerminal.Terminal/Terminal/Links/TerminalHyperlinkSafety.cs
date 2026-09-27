@@ -41,7 +41,7 @@ public enum TerminalHyperlinkDenialReason
 }
 
 /// <summary>An immutable, untrusted launch request; classifying it never opens a URL or reads a file.</summary>
-/// <param name="Target">The original target, also used for an explicit copy action.</param>
+/// <param name="Target">The original target retained for policy and protocol identity, separate from display/copy text.</param>
 /// <param name="DisplayText">A single-line preview with unsafe scalars escaped visibly.</param>
 /// <param name="Uri">The parsed absolute URI, if available; its presence is not permission to open it.</param>
 /// <param name="Disposition">The next permitted step.</param>

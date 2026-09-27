@@ -9,6 +9,9 @@ namespace RoyalTerminal.Avalonia.App.Services.Links;
 
 internal static partial class WindowsHyperlinkFileProbe
 {
+    internal static string ResolvePath(string path)
+        => ResolveExisting(path) ?? NativeHyperlinkFileProbe.CanonicalizeMissingPath(path, ResolveExisting);
+
     internal static HyperlinkFileFacts Read(string path)
     {
         using SafeFileHandle handle = Open(path);

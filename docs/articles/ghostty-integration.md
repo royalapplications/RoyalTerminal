@@ -35,16 +35,19 @@ The application shell wires a passive compiled-XAML dialog and framework-free
 ReactiveUI view model. Custom schemes require explicit confirmation showing the
 escaped target and the registered application: a Launch Services bundle ID on
 macOS, or an application display name from GIO/Windows associations. Association
-lookup runs off the UI thread and never invokes a shell. Unknown/unavailable
-handlers cannot be confirmed. Cancel is the default action. Blocked targets
-remain copyable only by an explicit user action; copying preserves the original
-target, not its escaped display spelling. Cancellation is checked again after
+lookup runs off the UI thread and never invokes a shell. If no handler name is
+available, the dialog explicitly identifies "the default application" and still
+requires confirmation, as Ghostty does. Cancel is the default action. Blocked
+targets remain copyable only by an explicit user action; copying uses the
+displayed, escaped target, following the pinned
+[`UntrustedURLAlert`](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/macos/Sources/Helpers/UntrustedURLAlert.swift),
+not the original potentially invisible/control-bearing string. Cancellation is checked again after
 association lookup and after confirmation, before launching.
 
 Local-file requests now have a separate off-thread inspector. It standardizes
 the path, resolves aliases, inspects the effective object and publishes only a
 canonical file URI for safe regular files/directories. Reserved path characters
-are encoded once; original URL bytes remain the explicit-copy payload. Failed
+are encoded once; original URL bytes remain the protocol/activation identity. Failed
 inspection cannot be overridden by confirming a custom-scheme dialog. Missing
 leaves use their longest accessible resolved parent for the blocked preview.
 Remote/device paths, reserved Windows device names, alternate data streams,
@@ -70,10 +73,7 @@ released within the inspection operation, before its result is published.
 
 These platform implementations, canonical blocked-target previews, safe-file
 dispatch and their authored native-filesystem/host/policy/cancellation cases are
-awaiting final execution. The reusable control's hover preview still performs
-only scalar escaping without filesystem resolution; it is not yet Ghostty's
-canonical file hover preview. Full #13634 parity and cross-platform sign-off are
-not claimed. As with the upstream path-based OS opener, same-user filesystem or
+awaiting final execution. As with the upstream path-based OS opener, same-user filesystem or
 association changes can race inspection and dispatch; this is not an atomic
 open-by-verified-handle security boundary.
 
@@ -82,6 +82,38 @@ finishes, including native calls that cannot be interrupted. Host replacement or
 OSC 8 toggling therefore cannot accumulate abandoned inspection workers. A
 non-cooperating custom host blocks further non-direct links on that control
 until it completes; allowed web/mail links retain their direct path.
+
+File-hover previews now follow the pinned
+[`URLHoverBanner`](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/macos/Sources/Helpers/URLHoverBanner.swift)
+display policy through the separate `ITerminalHyperlinkPathPreviewSource` hook.
+The application wires canonical path resolution for native, managed and replay
+controls. It resolves file paths off the UI thread without reading file contents,
+MIME types or execution permissions. Scheme-less blocked targets are standardized
+without filesystem inspection. Web/custom URL spelling remains unchanged.
+Malformed, remote or otherwise rejected file targets retain escaped original
+previews without filesystem access, rather than hiding their rejected authority
+behind a local path. A preview is never cached launch permission; activation
+still performs fresh safety inspection against the original target.
+
+The control coalesces producer/hover changes into one queued UI refresh and owns
+at most one live resolution plus the newest pending target. Epochs invalidate
+even A-to-B-to-A transitions coalesced before UI dispatch. Host replacement,
+output changes under a stationary pointer, OSC 8 disable, detach and session
+stop prevent late publication. Unchanged targets reuse their published value;
+canceled non-cooperating resolution retains its slot until completion. The
+read-only `HoveredLinkDisplayText` direct property publishes on the UI thread,
+outside screen locks, and the app binds it through compiled XAML to Avalonia's
+tooltip. Embedders may present the same property elsewhere. This uses the
+shared application's tooltip rather than Ghostty's SwiftUI corner banner; the
+display policy is the port, not standalone Ghostty window chrome.
+[Windows Terminal's hover tooltip](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalControl/TermControl.cpp)
+also follows the hovered cell, but adds canonical/Punycode spelling for IDNs;
+RoyalTerminal follows Ghostty's unchanged web spelling instead.
+[xterm.js's linkifier](https://github.com/xtermjs/xterm.js/blob/master/src/browser/Linkifier.ts)
+similarly invalidates link hover when the rendered viewport changes, leaving
+presentation to its embedder. Both-engine
+headless, coordinator ordering/lifetime, native-path and allocation cases are
+authored but unrun; complete #13634/platform sign-off is still unverified.
 
 For comparison,
 [Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalApp/TerminalPage.cpp)

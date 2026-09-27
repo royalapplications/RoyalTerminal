@@ -2797,9 +2797,6 @@ internal sealed class MainWindowController
     {
         TerminalTheme theme = _viewModel.ActiveTheme;
         TerminalControl standaloneControl = CreateStandaloneControl();
-        standaloneControl.HyperlinkHost = new DesktopTerminalHyperlinkHost(
-            new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window),
-            new DesktopHyperlinkFileInspector(new NativeHyperlinkFileProbe()));
         ApplyFontSettings(standaloneControl);
         standaloneControl.TextHighlightingMode = _viewModel.TextHighlightingMode;
         standaloneControl.TextHighlightRules = _viewModel.TextHighlightRules;
@@ -3145,6 +3142,11 @@ internal sealed class MainWindowController
             credentialProvider,
             hostKeyValidator,
             transportFactory);
+        DesktopHyperlinkPathPreviewSource pathPreviews = new(new NativeHyperlinkFileProbe());
+        control.HyperlinkPathPreviewSource = pathPreviews;
+        control.HyperlinkHost = new DesktopTerminalHyperlinkHost(
+            new AvaloniaHyperlinkPrompt(_window), new DesktopHyperlinkHandlerResolver(), new AvaloniaHyperlinkLauncher(_window),
+            new DesktopHyperlinkFileInspector(new NativeHyperlinkFileProbe()), pathPreviews);
         if (notificationsEnabled && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
         {
             if (_desktopNotifications is null)

@@ -5,8 +5,16 @@ using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.Avalonia.App.Services.Links;
 
-internal sealed partial class NativeHyperlinkFileProbe : IHyperlinkFileProbe
+internal sealed partial class NativeHyperlinkFileProbe : IHyperlinkFileProbe, IHyperlinkPathResolver
 {
+    public string ResolvePath(string path)
+    {
+        if (!HyperlinkFilePolicy.IsLocalPath(path, OperatingSystem.IsWindows())) throw new IOException("Not a local path.");
+        if (OperatingSystem.IsWindows()) return WindowsHyperlinkFileProbe.ResolvePath(path);
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException();
+        return ResolveUnix(path) ?? CanonicalizeMissingPath(path, ResolveUnix);
+    }
+
     public HyperlinkFileFacts Read(string path)
     {
         if (!HyperlinkFilePolicy.IsLocalPath(path, OperatingSystem.IsWindows())) throw new IOException("Not a local path.");
