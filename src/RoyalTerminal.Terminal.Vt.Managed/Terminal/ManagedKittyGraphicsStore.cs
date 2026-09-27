@@ -80,17 +80,32 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     }
 
     internal bool TryAddImage(TerminalScreen screen, uint id, uint number, ManagedKittyImagePixels decoded,
-        bool transient, out string error)
+        bool transient, out string error, Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
     {
         error = "ENOMEM: out of memory";
         int storageBytes = decoded.StorageBytes;
         Image? existing = Find(id);
         long oldBytes = existing?.QuotaBytes ?? 0;
         if (storageBytes > byteLimit || storageBytes < 0) return false;
-        _images.EnsureCapacity(_images.Count + 1);
+        Image prepared;
+        try
+        {
+            // Match native reserve-before-evict ordering. Replacements reuse
+            // their existing slot; all managed owners must also exist before
+            // eviction starts, including the animation's initial frame list.
+            if (existing is null && _images.Count == _images.EnsureCapacity(0))
+            {
+                allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.ImageCapacity);
+                _images.EnsureCapacity(_images.Count + 1);
+            }
+            allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.Image);
+            prepared = new(id, number, decoded, storageBytes, transient, generation: 0);
+        }
+        catch (OutOfMemoryException) { return false; }
         if (!TryReserve(screen, storageBytes - oldBytes, id)) return false;
         if (existing is not null) RemoveImage(screen, id);
-        _images[id] = new(id, number, decoded, storageBytes, transient, ++_generation);
+        prepared.Generation = ++_generation;
+        _images[id] = prepared;
         _storedBytes += storageBytes;
         error = "OK";
         return true;
@@ -153,7 +168,8 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     }
 
     internal bool TryAddPlacement(TerminalScreen screen, Image image, ManagedKittyGraphicsCommand command,
-        int absoluteRow, int column, uint cellWidth, uint cellHeight, out Placement? placement, out string error)
+        int absoluteRow, int column, uint cellWidth, uint cellHeight, out Placement? placement, out string error,
+        Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
     {
         placement = null;
         error = "EINVAL: virtual placement cannot refer to a parent";
@@ -171,9 +187,31 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
             parent = resolved;
         }
 
-        TerminalScreenAnchor? anchor = virtualPlacement || parent is not null ? null : screen.CreateAnchor(absoluteRow, column);
-        placement = new(anchor, parent, virtualPlacement, command.GetSigned('H'), command.GetSigned('V'),
-            ManagedKittyPlacementOptions.From(command, cellWidth, cellHeight));
+        TerminalScreenAnchor? anchor = null;
+        error = "ENOMEM: out of memory";
+        try
+        {
+            if (!_placements.ContainsKey(key) && _placements.Count == _placements.EnsureCapacity(0))
+            {
+                allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.PlacementCapacity);
+                _placements.EnsureCapacity(_placements.Count + 1);
+            }
+            if (!virtualPlacement && parent is null)
+            {
+                allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.Anchor);
+                anchor = screen.CreateAnchor(absoluteRow, column);
+            }
+            allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.Placement);
+            placement = new(anchor, parent, virtualPlacement, command.GetSigned('H'), command.GetSigned('V'),
+                ManagedKittyPlacementOptions.From(command, cellWidth, cellHeight));
+        }
+        catch (OutOfMemoryException) { return false; }
+        finally
+        {
+            // Native's placement error path releases the newly tracked pin;
+            // the previous placement remains live until preparation succeeds.
+            if (placement is null && anchor is not null) screen.ReleaseAnchor(anchor);
+        }
         RemovePlacement(screen, key);
         _placements[key] = placement;
         image.PlacementCount++;
@@ -274,7 +312,9 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         while (_storedBytes + additionalBytes > byteLimit)
         {
             Image? victim = null;
-            foreach (Image image in _images.Values)
+            // Enumerate entries directly: creating Dictionary.ValueCollection
+            // here could allocate after the admission preparation boundary.
+            foreach ((uint _, Image image) in _images)
             {
                 if (image.Id == exceptId) continue;
                 if (victim is null || image.EvictionPriority < victim.EvictionPriority ||

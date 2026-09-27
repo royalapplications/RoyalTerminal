@@ -12,6 +12,7 @@ public sealed partial class BasicVtProcessor
     private bool _kittyPublicationPending;
     internal Action<ManagedKittyParserAllocation>? KittyParserAllocationCheckpoint { get; set; }
     internal Action<ManagedKittyImageAllocation>? KittyImageAllocationCheckpoint { get; set; }
+    internal Action<ManagedKittyStoreAllocation>? KittyStoreAllocationCheckpoint { get; set; }
 
     private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
@@ -186,7 +187,7 @@ public sealed partial class BasicVtProcessor
         uint imageId = _kittyStore.LoadingImageId;
         if (responseCommand.ImageId == 0 && responseCommand.ImageNumber == 0) respond = false;
         if (!_kittyStore.TryAddImage(_screen, imageId, responseCommand.ImageNumber,
-                decoded, transient: (responseCommand.Get('N') & 1) != 0, out error)) return false;
+                decoded, transient: (responseCommand.Get('N') & 1) != 0, out error, KittyStoreAllocationCheckpoint)) return false;
         responseId = imageId;
         if (responseCommand.Action == 'T')
             return TryDisplayKittyImage(responseCommand, out responseId, out error, imageId);
@@ -209,7 +210,7 @@ public sealed partial class BasicVtProcessor
         int anchorColumn = _cursorCol;
         if (!_kittyStore.TryAddPlacement(_screen, image, command, anchorRow, anchorColumn,
                 (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx(),
-                out ManagedKittyGraphicsStore.Placement? placement, out error)) return false;
+                out ManagedKittyGraphicsStore.Placement? placement, out error, KittyStoreAllocationCheckpoint)) return false;
         if (placement?.Anchor is not null && command.Get('C') != 1)
         {
             ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(

@@ -15,6 +15,9 @@ public sealed partial class TerminalScreen
     private Dictionary<TerminalScreenAnchor, TrackedCell> _trackedAnchors = [];
     private long _anchorRevision;
 
+    /// <summary>Number of screen-owned tracked identities, including pruned cells awaiting release.</summary>
+    internal int TrackedAnchorCount => _trackedAnchors.Count;
+
     /// <summary>Tracks a valid cell in the active buffer. Caller holds the screen lock.</summary>
     internal TerminalScreenAnchor CreateAnchor(int absoluteRow, int column)
     {

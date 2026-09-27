@@ -1588,6 +1588,23 @@ pinned native implementation here. Sixty-two new failure/ownership cases and six
 harness can run against `317610d3` for before/after profiling in final validation;
 reduced object churn is expected, not a measured throughput or working-set claim.
 
+Image-store admission separately follows
+[Ghostty's reserve-before-evict/replacement contract](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_storage.zig):
+prepare dictionary capacity and all managed image/initial-animation owners before
+evicting images or removing a replaced image's placements. Existing image and
+placement keys reuse their dictionary slots. Placement preparation similarly
+reserves capacity before replacement and releases a newly tracked anchor on any
+preparation failure. Allocation failures return `ENOMEM`; unrelated exceptions
+propagate after releasing that temporary ownership. Opportunistic pruning and
+explicit retransmission's earlier deletion remain native-compatible side effects,
+not rolled-back transactions. A successfully admitted image remains available when
+its subsequent display fails. The eviction scan enumerates dictionary entries
+directly to avoid a first-use value-collection allocation after preparation.
+Twenty-six focused admission, replacement, relative/virtual placement, anchor,
+retained-screen and processor retry cases are authored but unrun. Later animation
+editing and graphics publication remain separate failure boundaries. No measured
+performance improvement or complete allocation-failure parity is claimed.
+
 Kitty parser state is now stored by value in the processor, removing a separate
 heap parser owner for each APC while retaining one independently owned command.
 Active parser values must not be copied; helper calls take them by reference.
