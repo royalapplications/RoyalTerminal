@@ -61,43 +61,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private const int MaxOscBufferBytes = 8 * 1024 * 1024;
     private const int MaxDcsQueryBytes = 1024 * 1024;
     private const int MaxUnknownSequenceBytes = 4096;
-    private static readonly int[] ExtendedDecModes =
-    [
-        3,
-        4,
-        5,
-        8,
-        9,
-        12,
-        40,
-        45,
-        69,
-        1000,
-        1002,
-        1003,
-        1004,
-        1005,
-        1006,
-        1007,
-        1015,
-        1016,
-        1035,
-        1036,
-        1039,
-        1045,
-        2026,
-        2027,
-        2031,
-        2033,
-        2048,
-        5522,
-    ];
-    private static readonly int[] ExtendedDecModesEnabledByDefault =
-    [
-        1007,
-        1035,
-        1036,
-    ];
+    private static ReadOnlySpan<int> ExtendedDecModes => ManagedDecModeState.SupportedModes;
 
     private TerminalScreen _screen;
     private readonly ManagedTerminalSearch _search = new();
@@ -188,7 +152,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private uint _heightPx;
     private uint _reportCellWidthPx;
     private uint _reportCellHeightPx;
-    private readonly HashSet<int> _extendedDecModesEnabled = [];
+    private ManagedDecModeState _extendedDecModes;
     private TerminalMouseModeState _mouseModeState;
     private readonly ManagedMouseEncoder _mouseEncoder = new();
 
@@ -260,7 +224,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     public bool Win32InputMode => _win32InputMode;
 
     /// <inheritdoc />
-    public bool FocusEventsEnabled => _extendedDecModesEnabled.Contains(1004);
+    public bool FocusEventsEnabled => _extendedDecModes.Contains(ManagedDecModeFlag.FocusEvents);
 
     /// <inheritdoc />
     public bool MouseReportingEnabled => MouseModeState.IsMouseReportingEnabled;
@@ -269,7 +233,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     public TerminalCursorStyle CursorStyle => _renderHold?.CursorStyle ?? ActiveCursorStyle;
 
     /// <inheritdoc />
-    public bool CursorBlinking => _renderHold?.CursorBlinking ?? _extendedDecModesEnabled.Contains(12);
+    public bool CursorBlinking => _renderHold?.CursorBlinking ?? _extendedDecModes.Contains(ManagedDecModeFlag.CursorBlink);
 
     /// <inheritdoc />
     public int KittyKeyboardFlags => ActiveKittyKeyboard.Current;
@@ -756,7 +720,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         return _kittyClipboardProtocol.TryEncodePaste(
             text,
             bracketedPaste,
-            _extendedDecModesEnabled.Contains(5522),
+            _extendedDecModes.Contains(ManagedDecModeFlag.KittyClipboard),
             out sequence);
     }
 
@@ -959,8 +923,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         AppendMode(builder, ansi: false, 1004, FocusEventsEnabled);
         AppendMode(builder, ansi: false, 2004, _bracketedPaste);
-        AppendMode(builder, ansi: false, 2031, _extendedDecModesEnabled.Contains(2031));
-        AppendMode(builder, ansi: false, 2048, _extendedDecModesEnabled.Contains(2048));
+        AppendMode(builder, ansi: false, 2031, _extendedDecModes.Contains(ManagedDecModeFlag.ColorSchemeReports));
+        AppendMode(builder, ansi: false, 2048, _extendedDecModes.Contains(ManagedDecModeFlag.SizeReports));
         AppendMode(builder, ansi: false, 9001, _win32InputMode);
 
         for (int i = 0; i < ExtendedDecModes.Length; i++)
@@ -971,7 +935,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continue;
             }
 
-            AppendMode(builder, ansi: false, mode, _extendedDecModesEnabled.Contains(mode));
+            AppendMode(builder, ansi: false, mode, _extendedDecModes.Contains(mode));
         }
     }
 
@@ -1266,7 +1230,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        bool graphemeClusters = _extendedDecModesEnabled.Contains(2027);
+        bool graphemeClusters = _extendedDecModes.Contains(ManagedDecModeFlag.GraphemeClusters);
         // The byte-sized fast path never joins a grapheme in Ghostty's printer.
         // Zero-width and cluster continuations must be considered before wrapping.
         if (graphemeClusters && codepoint > 255 && _cursorCol > 0 &&
@@ -3078,7 +3042,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             "m" => $"{BuildCurrentSgrState()}m",
             "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
-            "s" when _extendedDecModesEnabled.Contains(69) => $"{_scrollLeft + 1};{RightMargin + 1}s",
+            "s" when _extendedDecModes.Contains(ManagedDecModeFlag.LeftRightMargins) => $"{_scrollLeft + 1};{RightMargin + 1}s",
             " q" => $"{CursorStyleReport} q",
             _ => null,
         };
@@ -3409,7 +3373,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case 's': // SCP — Save Cursor Position (ANSI.SYS)
                 if (_params.Count > 2) break;
-                if (_extendedDecModesEnabled.Contains(69))
+                if (_extendedDecModes.Contains(ManagedDecModeFlag.LeftRightMargins))
                 {
                     SetHorizontalMargins();
                     break;
@@ -3639,7 +3603,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private byte[]? CreateInBandSizeReport()
     {
-        if (ResponseCallback is null || !_extendedDecModesEnabled.Contains(2048) ||
+        if (ResponseCallback is null || !_extendedDecModes.Contains(ManagedDecModeFlag.SizeReports) ||
             _screen.Columns <= 0 ||
             _screen.ViewportRows <= 0)
         {
@@ -3747,57 +3711,17 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
     }
 
-    private static bool IsExtendedDecModeSupported(int mode)
-    {
-        for (int i = 0; i < ExtendedDecModes.Length; i++)
-        {
-            if (ExtendedDecModes[i] == mode)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private void SetExtendedDecMode(int mode, bool enabled)
-    {
-        if (!IsExtendedDecModeSupported(mode))
-        {
-            return;
-        }
-
-        if (enabled)
-        {
-            _extendedDecModesEnabled.Add(mode);
-        }
-        else
-        {
-            _extendedDecModesEnabled.Remove(mode);
-        }
-    }
+        => _extendedDecModes.Set(mode, enabled);
 
     private bool TryGetExtendedDecMode(int mode, out bool enabled)
-    {
-        if (!IsExtendedDecModeSupported(mode))
-        {
-            enabled = false;
-            return false;
-        }
-
-        enabled = _extendedDecModesEnabled.Contains(mode);
-        return true;
-    }
+        => _extendedDecModes.TryGet(mode, out enabled);
 
     private void ResetExtendedDecModesToDefaults()
     {
         _mouseEncoder.Reset();
         _mouseModeState = default;
-        _extendedDecModesEnabled.Clear();
-        for (int i = 0; i < ExtendedDecModesEnabledByDefault.Length; i++)
-        {
-            _extendedDecModesEnabled.Add(ExtendedDecModesEnabledByDefault[i]);
-        }
+        _extendedDecModes.Reset();
     }
 
     private void HandleAnsiMode(int mode, bool set)
@@ -5272,16 +5196,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Prepare every fallible component before changing the live owner or
         // reporting mode 2026 as enabled. A failed clone/clock leaves the
         // published prefix usable, not an invisible owner without a hold.
-        if (!_extendedDecModesEnabled.Contains(2026))
-            _extendedDecModesEnabled.EnsureCapacity(checked(_extendedDecModesEnabled.Count + 1));
         RenderHoldState hold = new(
             _options.TimeProvider.GetTimestamp(),
-            _cursorCol, _cursorRow, _cursorVisible, ActiveCursorStyle, _extendedDecModesEnabled.Contains(12), _inAltScreen);
+            _cursorCol, _cursorRow, _cursorVisible, ActiveCursorStyle, _extendedDecModes.Contains(ManagedDecModeFlag.CursorBlink), _inAltScreen);
         TerminalScreen staged = _publishedScreen.CreateStateCopy();
         PublicationCheckpoint?.Invoke(ManagedPublicationCheckpoint.HoldPrepared);
         _screen = staged;
         _renderHold = hold;
-        SetExtendedDecMode(2026, true); // Capacity was reserved before staging.
+        SetExtendedDecMode(2026, true); // Packed mode publication cannot allocate.
     }
 
     private bool EndRenderHold()

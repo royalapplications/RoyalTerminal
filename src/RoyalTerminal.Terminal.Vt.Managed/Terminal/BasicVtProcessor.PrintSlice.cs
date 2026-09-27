@@ -77,7 +77,7 @@ public sealed partial class BasicVtProcessor
         int first = int.CreateTruncating(codepoints[0]);
         int width = first <= 255 ? 1 : TerminalCellWidthCalculator.GetCodepointWidth(first);
         if (width is not (1 or 2) || first == 0x10EEEE) return 0;
-        bool clusters = _extendedDecModesEnabled.Contains(2027);
+        bool clusters = _extendedDecModes.Contains(ManagedDecModeFlag.GraphemeClusters);
         if (first > 255 && clusters)
         {
             if (_scrollLeft != 0 || _delayedWrap) return 0;

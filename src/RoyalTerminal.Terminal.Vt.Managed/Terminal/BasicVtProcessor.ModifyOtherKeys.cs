@@ -21,7 +21,7 @@ public sealed partial class BasicVtProcessor
         // Kitty takes precedence over the legacy extension.
         if (KittyKeyboardFlags != 0) return ManagedKittyKeyEncoder.TryEncode(request, KittyKeyboardFlags, out sequence);
         return ManagedLegacyKeyEncoder.TryEncode(request, ApplicationCursorKeys, ApplicationKeypad,
-            _extendedDecModesEnabled.Contains(1035), _extendedDecModesEnabled.Contains(1036),
+            _extendedDecModes.Contains(ManagedDecModeFlag.NumLockKeypad), _extendedDecModes.Contains(ManagedDecModeFlag.AltEscapePrefix),
             _backarrowKeyMode, ModifyOtherKeys2, out sequence);
     }
 

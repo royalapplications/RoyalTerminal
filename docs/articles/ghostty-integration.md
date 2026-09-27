@@ -307,6 +307,35 @@ palette changes/resets and immutable palette copies. Allocation and timing
 comparisons with the previous implementation remain deferred to final validation;
 no measured speedup is claimed.
 
+## Managed mode-state storage
+
+The managed engine's 28 extended DEC mode values now occupy one 32-bit field
+instead of a per-processor `HashSet<int>`. Known print/input/render checks use
+constant flags directly; queries and setters use a fixed number-to-flag switch
+instead of a linear whitelist scan followed by hashing. Supported mode numbers
+are exposed internally as an immutable span. Creation, reset, updates and reads
+need no mode-container heap allocation or capacity growth, including the mode
+commit after synchronized-output staging and raw snapshot-mode installation.
+
+This follows [Ghostty's fixed mode lookup](https://github.com/ghostty-org/ghostty/pull/14316)
+and packed mode state, and applies the fixed-heap reduction principle from
+[Ghostty #14138](https://github.com/ghostty-org/ghostty/pull/14138).
+[Windows Terminal's dispatch mode enumset](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.hpp)
+and [xterm.js's explicit mode fields](https://github.com/xtermjs/xterm.js/blob/master/src/common/services/CoreService.ts)
+were also checked. The CLR layout is deliberately private: snapshot-v1's
+43-bit current/saved/default order, semantic setters and all reset/hold/mouse
+side effects remain unchanged. Unknown and separately stored mode numbers do
+not alias an extended-mode bit.
+
+New regression cases cover every mode, independent value copies, set/reset/query
+cycles, the full 16-bit lookup domain, unknown/out-of-range numbers, built-in
+defaults, zero-allocation container operations and first snapshot installation.
+`--managed-mode-state` pairs the former hash-set/scan representation with packed
+storage for creation, known flags, numeric queries and toggling. `--managed-print`
+also includes mode-churn and grapheme-mode workloads for actual processor costs.
+Tests, before/after profiling and CI inspection remain deferred to final validation;
+neither a measured throughput gain nor a whole-terminal heap reduction is claimed.
+
 ## Managed search capture invalidation
 
 The search-only COW capture now has a lazy, buffer-specific change token. An

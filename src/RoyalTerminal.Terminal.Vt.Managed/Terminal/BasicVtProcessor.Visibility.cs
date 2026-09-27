@@ -15,7 +15,7 @@ public sealed partial class BasicVtProcessor : ITerminalVisibilityState
         {
             if (_potentiallyVisible == value) return;
             _potentiallyVisible = value;
-            if (_extendedDecModesEnabled.Contains(2033)) EmitVisibilityReport();
+            if (_extendedDecModes.Contains(ManagedDecModeFlag.VisibilityReports)) EmitVisibilityReport();
         }
     }
 }

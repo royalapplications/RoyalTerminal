@@ -48,7 +48,7 @@ public sealed partial class BasicVtProcessor
         TerminalCursorStyle.Underline => 4,
         TerminalCursorStyle.Bar => 6,
         _ => 2, // Ghostty's hollow block is reported as ordinary block.
-    }) - (_extendedDecModesEnabled.Contains(12) ? 1 : 0);
+    }) - (_extendedDecModes.Contains(ManagedDecModeFlag.CursorBlink) ? 1 : 0);
 
     internal (TerminalCursorStyle Style, bool? Blink, bool IsDefault) SnapshotCursorPolicy
         => (_defaultCursorStyle, _defaultCursorBlink, _cursorIsDefault);

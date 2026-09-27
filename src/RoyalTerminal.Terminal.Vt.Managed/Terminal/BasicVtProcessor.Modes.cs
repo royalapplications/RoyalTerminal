@@ -26,7 +26,6 @@ public sealed partial class BasicVtProcessor
     // operations: no erase, resize, cursor save, screen switch, response or hold.
     internal void InstallSnapshotModes(Snapshots.GhosttySnapshotTerminalHeader header)
     {
-        _extendedDecModesEnabled.EnsureCapacity(ExtendedDecModes.Length);
         ulong values = header.CurrentModes;
         for (int i = 0; i < TerminalModeRegistry.AnsiModes.Length; i++)
             SetPolicyModeValue(TerminalModeRegistry.AnsiModes[i], (values & (1UL << i)) != 0, ansi: true);
@@ -132,15 +131,13 @@ public sealed partial class BasicVtProcessor
 
     private void SetColumnMode(bool enabled)
     {
-        if (!_extendedDecModesEnabled.Contains(40))
+        if (!_extendedDecModes.Contains(ManagedDecModeFlag.AllowColumnMode))
         {
             SetExtendedDecMode(3, false);
             return;
         }
         // A VT-requested resize retains pixel geometry and does not emit the
         // host resize notification (Ghostty Terminal.deccolm/Handler.setMode).
-        if (enabled && !_extendedDecModesEnabled.Contains(3))
-            _extendedDecModesEnabled.EnsureCapacity(_extendedDecModesEnabled.Count + 1);
         ResizeScreenCore(enabled ? 132 : 80, _screen.ViewportRows, _widthPx, _heightPx,
             reflowOnResize: true, Span<RoyalTerminal.Avalonia.Rendering.TerminalGridPosition>.Empty,
             preserveViewportTopOnRowsIncrease: false, reportSize: false);

@@ -53,6 +53,12 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-mode-state", StringComparer.Ordinal))
+{
+    ManagedModeStateBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-print", StringComparer.Ordinal))
 {
     ManagedPrintBenchmark.Run();
