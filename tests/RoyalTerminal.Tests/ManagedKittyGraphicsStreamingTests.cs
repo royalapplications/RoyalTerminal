@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Runtime.CompilerServices;
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
@@ -91,15 +92,17 @@ public sealed class ManagedKittyGraphicsStreamingTests
         Assert.Equal(valid, bytewise.TryComplete(out _));
     }
 
-    [Fact]
-    public void LongControlStreamUsesConstantStorageOutsideThePayloadQuota()
+    [Theory]
+    [InlineData(1_000)]
+    [InlineData(100_000)]
+    public void LongControlStreamUsesConstantStorageOutsideThePayloadQuota(int count)
     {
         ManagedKittyGraphicsParser parser = new(0);
         Assert.True(parser.TryAppend("a=p,i=1,"u8));
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        bool accepted = true;
-        for (int i = 0; i < 100_000; i++) accepted &= parser.TryAppend("i=73,z=-1,"u8);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        // Warm the exact signed/unsigned header path, not just the initial
+        // action field. Keep assertions and first-use setup outside measurement.
+        Assert.True(MeasureControlStream(parser, 1_000).Accepted);
+        (bool accepted, long allocated) = MeasureControlStream(parser, count);
         Assert.True(accepted);
         Assert.Equal(0, allocated);
         Assert.True(parser.TryAppend("p=1"u8));
@@ -107,6 +110,18 @@ public sealed class ManagedKittyGraphicsStreamingTests
         Assert.Equal(73u, command.ImageId);
         Assert.Equal(-1, command.GetSigned('z'));
         Assert.Empty(command.Data.ToArray());
+    }
+
+    // As in BenchmarkDotNet's GC measurement helpers, avoid tier-0/OSR in the
+    // measuring method itself. Production parser optimization remains unchanged.
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static (bool Accepted, long Allocated) MeasureControlStream(ManagedKittyGraphicsParser parser, int count)
+    {
+        ReadOnlySpan<byte> header = "i=73,z=-1,"u8;
+        bool accepted = true;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < count; i++) accepted &= parser.TryAppend(header);
+        return (accepted, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
     [Fact]
