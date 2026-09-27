@@ -226,13 +226,12 @@ public sealed partial class TerminalFontResolver : IDisposable
     {
         CultureInfo usedCulture = culture ?? CultureInfo.CurrentUICulture;
         string cultureName = usedCulture.Name;
-        SKFontStyle requestedStyle = discoveryStyle ?? primaryTypeface.FontStyle;
 
         FontFallbackCacheKey key = new(
             primaryTypeface.Handle,
-            requestedStyle.Weight,
-            requestedStyle.Width,
-            requestedStyle.Slant,
+            discoveryStyle?.Weight ?? primaryTypeface.FontWeight,
+            discoveryStyle?.Width ?? primaryTypeface.FontWidth,
+            discoveryStyle?.Slant ?? primaryTypeface.FontSlant,
             codepoint,
             cultureName,
             preferEmojiPresentation);
@@ -252,7 +251,7 @@ public sealed partial class TerminalFontResolver : IDisposable
                     codepoint,
                     usedCulture,
                     preferEmojiPresentation,
-                    requestedStyle);
+                    discoveryStyle ?? primaryTypeface.FontStyle);
                 _fallbackCache.Add(key, entry);
             }
         }
