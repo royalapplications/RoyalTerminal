@@ -17,7 +17,7 @@ CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies eleven corrections to pinned upstream
+The generated source copy also applies twelve corrections to pinned upstream
 `622b4eecd7d2ce1a10930537c17f0d61abdba817` (identical runtime sources to the
 previously reviewed `22391ed6491f2924361dcad1f9a9176a390fd20f`). Each checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
@@ -111,6 +111,18 @@ fails the build until reviewed. The submodule checkout is never changed.
   repeated page recycling, implicit identities, styled writes, snapshot
   roundtrips and synchronized output after correction.
 
+- `PageList.zig`: abort non-reflow widening when a fresh page cannot clone even
+  one row. A valid source style table can hit the probe bound when reinserted in
+  row order; retrying the identical empty page otherwise allocates indefinitely.
+  Return allocation failure, dispose the unlinked empty page without asserting
+  it is live, and restore this chunk's pins before deleting earlier replacement
+  pages or resetting its backfill prefix. This twelfth correction is authored
+  but unbuilt/unrun. Its adversarial native regressions require rebuilding the
+  extension first; an old native library does not terminate on their fixture.
+  Managed processor resize rejects the same condition and retains its staged
+  transaction's original state. This is not a new whole-terminal native rollback
+  guarantee for failures after other source chunks have already committed.
+
 Correctness overlays have focused native and managed regression tests. Current
 validation evidence is recorded in the PR tables; no public upstream issue is
 claimed. Reassess and remove an overlay when its upstream fix is incorporated.
@@ -121,7 +133,7 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the eleven correctness fixes.
+These are host integration additions, separate from the twelve correctness fixes.
 Native rebuild and callback/lifetime tests validate this boundary.
 
 The sixteen additional C exports are declared in

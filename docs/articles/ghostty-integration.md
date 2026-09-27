@@ -538,6 +538,19 @@ filtering, row-clone rollback with anchors, and bounded adversarial set retries.
 Sparse logical capacities avoid allocating four-GiB pages in these cases.
 These changes and tests have not yet been executed or profiled.
 
+Non-reflow widening also rejects a zero-progress row clone instead of retaining
+its payload with an overflow marker. An already-valid source table may become
+unclonable in row order when 32 colliding styles precede another style that was
+originally inserted first. The processor's staged transaction keeps the original
+rows, metadata, anchors and held output usable on failure. Partial successful
+pages may still be split and retried; only failure on an empty fresh page aborts.
+The native source overlay terminates that same formerly unbounded retry, releases
+the unlinked page and restores this source chunk's pins before rollback cleanup.
+This does not claim whole-terminal native rollback after earlier source chunks
+have committed. Twelve managed rollback/recovery cases and two native collision/
+pin regressions are authored but unrun. Rebuild the native extension before
+executing the native regressions: the previous library loops on their fixture.
+
 This is not yet exact mutable allocator parity: the full failure/degradation and
 mutation-order audit remains unfinished. Cursor-style pressure splitting uses
 exact live row-layout selection, keeps the upper allocator and clones the suffix

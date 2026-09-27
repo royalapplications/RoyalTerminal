@@ -114,6 +114,22 @@ pub fn build(b: *std.Build) !void {
             .before = "                new_page.size.rows -= 1;\n                break;",
             .after = "                new_page.resetRow(dst_row);\n                new_page.size.rows -= 1;\n                break;",
         },
+        .{
+            // A row can fit its source yet fail in row-major clone order due
+            // to the set probe bound. Do not allocate empty pages forever.
+            .before = "        defer new_page.assertIntegrity();\n",
+            .after = "        var new_page_linked = false;\n        errdefer if (!new_page_linked) self.destroyNode(new_node);\n        defer if (new_page.size.rows > 0) new_page.assertIntegrity();\n",
+        },
+        .{
+            .before = "        const y_end = copied;\n\n        // Insert our new page\n        self.pages.insertBefore(chunk.node, new_node);",
+            .after = "        if (copied == y_start) return error.OutOfMemory;\n        const y_end = copied;\n\n        // Insert our new page\n        self.pages.insertBefore(chunk.node, new_node);\n        new_page_linked = true;",
+        },
+        .{
+            // Restore pin addresses before either existing errdefer destroys
+            // replacement pages or resets the successful backfill prefix.
+            .before = "    // We need to loop because our col growth may force us\n",
+            .after = @embedFile("src/nonreflow_clone_rollback.zig.inc"),
+        },
     });
     try addOverlay(b, sources, ghostty, "terminal/bitmap_allocator.zig", "bac61a65b5a3141ccfad2d9d0a6a452be7106a647182470fcf38e1289b5f86e1", &.{.{
         // The full-word loop checks its bounds, but it can finish (or be

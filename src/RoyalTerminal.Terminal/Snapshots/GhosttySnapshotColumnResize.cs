@@ -94,15 +94,11 @@ internal static class GhosttySnapshotColumnResize
                     if (sourceStorage is not null && !Copy(destination, sources[index], sourceStorage))
                     {
                         if (destination.NextSlot > 0) break;
-                        // A source row should fit its inherited style capacity.
-                        // If adversarial probing prevents even one row fitting,
-                        // retain the payload with explicit unrepresentable charge;
-                        // never retry forever or silently admit more history.
-                        destinations.RemoveAt(destinations.Count - 1);
-                        destination = new(new(capacity, metadataOverflow: true), new(capacity));
-                        destinations.Add(destination);
-                        Assign(destination, sources[index++], columns, foreground, background);
-                        break;
+                        // Reordering valid source IDs can hit the probe limit
+                        // even with inherited capacity. Another empty page has
+                        // the same outcome. Abort the processor's staged resize
+                        // instead of publishing payload without its ownership.
+                        throw new InvalidOperationException("Snapshot non-reflow row metadata clone made no progress.");
                     }
                     Assign(destination, sources[index++], columns, foreground, background);
                 }
