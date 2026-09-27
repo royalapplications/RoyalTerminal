@@ -102,6 +102,33 @@ public sealed class TerminalPalette
     /// </summary>
     public uint[] ToArray() => _colors.ToArray();
 
+    // Snapshot originals contain RGB only, with no application-override flags.
+    // A shared candidate must match both values and that metadata contract.
+    internal bool MatchesSnapshotRgb(ReadOnlySpan<byte> rgb)
+    {
+        if (rgb.Length != PaletteSize * 3) return false;
+        for (int index = 0; index < PaletteSize; index++)
+            if (_explicit[index] || _colors[index] != ReadOpaqueRgb(rgb, index)) return false;
+        return true;
+    }
+
+    internal static TerminalPalette FromSnapshotRgb(ReadOnlySpan<byte> rgb)
+    {
+        if (rgb.Length != PaletteSize * 3)
+            throw new ArgumentException("Snapshot palette must contain exactly 256 RGB triples.", nameof(rgb));
+        uint[] colors = new uint[PaletteSize];
+        for (int index = 0; index < colors.Length; index++) colors[index] = ReadOpaqueRgb(rgb, index);
+        // The newly allocated arrays transfer directly; never retain the input
+        // snapshot buffer or clone an intermediate 256-entry color array.
+        return new(colors, new bool[PaletteSize]);
+    }
+
+    private static uint ReadOpaqueRgb(ReadOnlySpan<byte> rgb, int index)
+    {
+        int offset = index * 3;
+        return 0xFF000000u | (uint)rgb[offset] << 16 | (uint)rgb[offset + 1] << 8 | rgb[offset + 2];
+    }
+
     /// <summary>Copies a batch of application overrides into one immutable palette.</summary>
     internal TerminalPalette WithOverrides(Dictionary<int, uint> overrides)
     {

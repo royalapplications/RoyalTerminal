@@ -36,11 +36,10 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
     // palette and sparse override identity, including overrides equal to defaults.
     internal void InstallSnapshot(GhosttySnapshotTerminalState state, TerminalTheme host)
     {
-        uint[] original = new uint[256];
+        TerminalPalette original = GetSnapshotOriginalPalette(state.OriginalPaletteRgb, host.Palette);
         Dictionary<int, uint>? overrides = null;
-        for (int i = 0; i < original.Length; i++)
+        for (int i = 0; i < 256; i++)
         {
-            original[i] = 0xFF000000 | state.OriginalPaletteColor(i);
             if (state.HasPaletteOverride(i))
                 (overrides ??= new())[i] = 0xFF000000 | state.CurrentPaletteColor(i);
         }
@@ -49,20 +48,32 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
             Argb(header.Foreground.Default) ?? host.DefaultForeground,
             Argb(header.Background.Default) ?? host.DefaultBackground,
             Argb(header.CursorColor.Default) ?? host.CursorColor,
-            new TerminalPalette(original), host.PaletteGenerationMode, host.OscColorReportFormat,
+            original, host.PaletteGenerationMode, host.OscColorReportFormat,
             host.SelectionForeground, host.SelectionBackground, host.BoldColor, host.CursorTextColor);
         // All allocations precede mutation. Missing defaults remain missing in
         // protocol/snapshot state; the host fallback is only for rendering.
         _configuredTheme = configured;
         _paletteOverrides = overrides;
         _effectiveTheme = null;
-        _effectivePalette = null;
+        _effectivePalette = overrides is null ? original : null;
         _defaultForeground = Argb(header.Foreground.Default);
         _defaultBackground = Argb(header.Background.Default);
         _defaultCursor = Argb(header.CursorColor.Default);
         _foreground = Argb(header.Foreground.Override);
         _background = Argb(header.Background.Override);
         _cursor = Argb(header.CursorColor.Override);
+    }
+
+    private TerminalPalette GetSnapshotOriginalPalette(ReadOnlySpan<byte> rgb, TerminalPalette host)
+    {
+        TerminalPalette configured = _configuredTheme.Palette;
+        if (configured.MatchesSnapshotRgb(rgb)) return configured;
+        if (!ReferenceEquals(host, configured) && host.MatchesSnapshotRgb(rgb)) return host;
+        // The built-in palette is already immutable/shared. No global per-value
+        // interning cache is introduced for arbitrary imported themes.
+        TerminalPalette canonical = TerminalTheme.Dark.Palette;
+        if (!ReferenceEquals(canonical, configured) && !ReferenceEquals(canonical, host) && canonical.MatchesSnapshotRgb(rgb)) return canonical;
+        return TerminalPalette.FromSnapshotRgb(rgb);
     }
 
     internal GhosttySnapshotDynamicColor GetSnapshotDynamic(int selector) => selector switch
