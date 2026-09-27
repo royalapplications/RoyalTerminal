@@ -8,6 +8,12 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
+[CollectionDefinition(nameof(TerminalFontPresentationCollection), DisableParallelization = true)]
+public sealed class TerminalFontPresentationCollection;
+
+// Keep the exact allocation assertion independent of concurrent native-font
+// creation/disposal and rendering tests sharing Skia's process-wide state.
+[Collection(nameof(TerminalFontPresentationCollection))]
 public sealed class TerminalFontPresentationTests
 {
     [Theory]
