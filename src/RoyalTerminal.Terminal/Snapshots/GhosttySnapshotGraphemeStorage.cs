@@ -146,6 +146,22 @@ internal sealed class GhosttySnapshotGraphemeStorage
     internal GhosttySnapshotGraphemeAddResult CopyCellFrom(int destination, GhosttySnapshotGraphemeStorage source, int index)
         => Set(destination, source.SuffixLength(index));
 
+    // ReflowCursor.writeCell checks the cell map BEFORE probing the bitmap,
+    // frees that probe, then calls setGraphemes. Ordinary row cloning does not
+    // perform these checks and must retain its allocation-before-map ordering.
+    internal GhosttySnapshotGraphemeAddResult CopyReflowCellFrom(int destination, GhosttySnapshotGraphemeStorage source, int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(destination);
+        if (_cells.ContainsKey(destination)) throw new InvalidOperationException("Grapheme reflow destination must be empty.");
+        int length = source.SuffixLength(index);
+        if (length == 0) return GhosttySnapshotGraphemeAddResult.Success;
+        if ((ulong)_cells.Count >= _mapCapacity) return GhosttySnapshotGraphemeAddResult.MapFull;
+        if (!_bitmap.TryAllocate(length * 4, out GhosttySnapshotBitmap.Slice scratch))
+            return GhosttySnapshotGraphemeAddResult.AllocatorFull;
+        _bitmap.Free(scratch);
+        return Set(destination, length);
+    }
+
     internal void RetainRows(IReadOnlySet<int> rows, int columns)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);

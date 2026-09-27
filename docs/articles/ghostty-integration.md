@@ -492,8 +492,32 @@ reflow retains the first page, and viewport padding reuses its remaining slots.
 Accounting is isolated from text, style and tracked-anchor movement; ordinary
 untracked screens do not create snapshot allocation metadata during reflow.
 
+Reflow metadata now uses a dedicated copy path matching Ghostty's
+[`ReflowCursor.writeCell` and `hyperlinkStringsFit`](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/PageList.zig).
+Graphemes check map capacity before probing and freeing their suffix allocation;
+growth retries until the suffix fits. Hyperlinks probe URI and explicit ID as
+separate rounded allocations, free that scratch, then duplicate before set
+deduplication—even when the destination already contains the same link. Set
+failure releases both duplicated strings before growth/rehash, and replacement
+pages receive a fresh string-capacity check. Ordinary row cloning keeps its
+different lookup-before-allocation and failed-clone string-retention behavior.
+
+The managed reflow copy shares immutable encoded link bytes and their cached
+hash, avoiding an extra URI-sized CLR copy or hash while preserving logical
+native allocation transitions. This is an expected hot-path cost reduction, not
+a measured throughput claim. Windows Terminal's
+[`TextBuffer::Reflow`](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
+and xterm.js's [`Buffer._reflow`](https://github.com/xtermjs/xterm.js/blob/master/src/common/buffer/Buffer.ts)
+are visible-layout references but do not define Ghostty's page-local allocator.
+Sixteen new cases cover map-versus-bitmap pressure, separate string rounding,
+duplicate scratch, growth/rehash cleanup, retained owners and repeated native
+resize comparisons. `--managed-snapshot-reflow` adds four snapshot-tracked
+workloads alongside the existing untracked reflow harness. Test execution,
+before/after profiling and CI remain deferred to the final validation phase.
+
 This is not yet exact mutable allocator parity: the full failure/degradation and
-mutation-order audit remains unfinished. Cursor-style pressure splitting uses
+mutation-order audit remains unfinished, including reflow's page-ceiling row
+split and final-cell degradation policies. Cursor-style pressure splitting uses
 exact live row-layout selection, keeps the upper allocator and clones the suffix
 before publication. Migrating links precede the style retry; failed SGR retries its
 previous pen while cursor restoration/movement falls back to default. Other

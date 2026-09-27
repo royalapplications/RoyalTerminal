@@ -165,6 +165,53 @@ public sealed class GhosttySnapshotGraphemeStorageTests
     }
 
     [Fact]
+    public void ReflowChecksMapCapacityBeforeProbingAnAlreadyFullBitmap()
+    {
+        GhosttySnapshotGraphemeStorage source = new(1024), destination = new(64);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, source.Set(0, 64));
+        for (int cell = 0; cell < 4; cell++)
+            Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.Set(cell, 64));
+        GhosttySnapshotGraphemeStorage retained = destination.Copy();
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.MapFull, destination.CopyReflowCellFrom(4, source, 0));
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.AllocatorFull, destination.CopyCellFrom(4, source, 0));
+        Assert.Equal(1024UL, destination.AllocatedBytes);
+        destination.Clear(1);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.CopyReflowCellFrom(4, source, 0));
+        Assert.Equal(new GhosttySnapshotBitmap.Slice(16, 16), Slice(destination, 4));
+        Assert.Equal(64, retained.SuffixLength(1));
+        Assert.Equal(0, retained.SuffixLength(4));
+        Assert.Equal(64, source.SuffixLength(0));
+    }
+
+    [Fact]
+    public void ReflowProbeIsFreedBeforeTheActualGraphemeCopy()
+    {
+        GhosttySnapshotGraphemeStorage source = new(1024), destination = new(1024);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, source.Set(0, 64));
+        for (int cell = 0; cell < 3; cell++)
+            Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.Set(cell, 64));
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.CopyReflowCellFrom(3, source, 0));
+        Assert.Equal(new GhosttySnapshotBitmap.Slice(48, 16), Slice(destination, 3));
+        Assert.Equal(1024UL, destination.AllocatedBytes);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.AllocatorFull, destination.CopyReflowCellFrom(4, source, 0));
+        Assert.Equal(4, destination.Count);
+        destination.Clear(0);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.CopyReflowCellFrom(4, source, 0));
+        Assert.Equal(new GhosttySnapshotBitmap.Slice(0, 16), Slice(destination, 4));
+    }
+
+    [Fact]
+    public void ReflowEmptySourcesDoNotAllocateAndOccupiedTargetsAreRejected()
+    {
+        GhosttySnapshotGraphemeStorage source = new(1024), destination = new(0);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, destination.CopyReflowCellFrom(8, source, 3));
+        Assert.Equal(0, destination.Count);
+        Assert.Equal(0UL, destination.AllocatedBytes);
+        Assert.Equal(GhosttySnapshotGraphemeAddResult.Success, source.Set(3, 1));
+        Assert.Throws<InvalidOperationException>(() => source.CopyReflowCellFrom(3, destination, 8));
+    }
+
+    [Fact]
     public void HugeHintsOnlyMaterializeUsedBitmapWordsAndMapEntries()
     {
         _ = new GhosttySnapshotGraphemeStorage(uint.MaxValue);

@@ -142,18 +142,16 @@ internal sealed class GhosttySnapshotReflowAllocation
                 // Native copies grapheme, hyperlink, then style. Keep grouped
                 // style-only copies when there is no other per-cell metadata.
                 int batch = storage.Graphemes.Count == 0 && storage.Hyperlinks.CellCount == 0 ? run : 1;
-                if (includeGraphemes && !retried && batch == 1 && storage.Graphemes.SuffixLength(offset) != 0 &&
-                    _destinationStorage!.Graphemes.CopyCellFrom(target, storage.Graphemes, offset) != GhosttySnapshotGraphemeAddResult.Success)
+                if (includeGraphemes && !retried && batch == 1 && storage.Graphemes.SuffixLength(offset) != 0)
                 {
-                    if (!GrowMetadata(GhosttySnapshotCapacityDimension.GraphemeBytes)) return;
-                    if (_destinationStorage!.Graphemes.CopyCellFrom(target, storage.Graphemes, offset) != GhosttySnapshotGraphemeAddResult.Success)
-                    { MarkOverflow(); return; }
+                    while (_destinationStorage!.Graphemes.CopyReflowCellFrom(target, storage.Graphemes, offset) != GhosttySnapshotGraphemeAddResult.Success)
+                        if (!GrowMetadata(GhosttySnapshotCapacityDimension.GraphemeBytes)) return;
                 }
                 if (!retried && batch == 1)
                 {
                     while (true)
                     {
-                        GhosttySnapshotHyperlinkAddResult hyperlink = _destinationStorage!.Hyperlinks.CopyCellFrom(target, storage.Hyperlinks, offset);
+                        GhosttySnapshotHyperlinkAddResult hyperlink = _destinationStorage!.Hyperlinks.CopyReflowCellFrom(target, storage.Hyperlinks, offset);
                         if (hyperlink == GhosttySnapshotHyperlinkAddResult.Success) break;
                         if (!GrowMetadata(GhosttySnapshotHyperlinkStorage.GrowthDimension(hyperlink))) return;
                     }

@@ -200,6 +200,110 @@ public sealed class GhosttySnapshotHyperlinkStorageTests
         Assert.Equal(32UL, rebuilt.StringBytes);
     }
 
+    [Theory]
+    [InlineData(2048, 0)]
+    [InlineData(1984, 1)]
+    public void ReflowRequiresDuplicateScratchEvenWhenOrdinaryCloneCanReuseTheLink(int uriLength, int idLength)
+    {
+        byte[] value = Link(uriLength, idLength);
+        GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(192, 2048);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.StartCursor(value));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.WriteCursorToCell(0));
+        source.EndCursor();
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.CopyReflowCellFrom(0, source, 0));
+        GhosttySnapshotHyperlinkStorage retained = destination.Copy();
+        ulong used = destination.StringBytes;
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.StringsFull, destination.CopyReflowCellFrom(1, source, 0));
+        Assert.Equal(used, destination.StringBytes);
+        Assert.Equal(1, destination.ReferenceCount(destination.CellId(0)));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.CopyCellFrom(1, source, 0));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.Rebuild(192, 4096, out GhosttySnapshotHyperlinkStorage? grown));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, grown!.CopyReflowCellFrom(2, source, 0));
+        Assert.Equal(used, grown.StringBytes);
+        Assert.Equal(3, grown.ReferenceCount(grown.CellId(0)));
+        Assert.Equal(1, retained.ReferenceCount(retained.CellId(0)));
+        Assert.Equal(used, retained.StringBytes);
+        Assert.Equal(1, source.ReferenceCount(source.CellId(0)));
+    }
+
+    [Fact]
+    public void ReflowProbesUriAndExplicitIdAsSeparateRoundedAllocations()
+    {
+        GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(192, 2048);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.StartCursor(Link(2016)));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.WriteCursorToCell(0));
+        destination.EndCursor();
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.StartCursor(Link(31, 1)));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.WriteCursorToCell(0));
+        // A combined 32-byte probe would fit, but dupe needs two chunks.
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.StringsFull, destination.CopyReflowCellFrom(1, source, 0));
+        Assert.Equal(2016UL, destination.StringBytes);
+        Assert.Equal(0, destination.CellId(1));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.StartCursor(Link(32, identity: 2)));
+        Assert.Equal(new GhosttySnapshotBitmap.Slice(63, 1), Allocation(destination, destination.CursorId).Uri);
+    }
+
+    [Fact]
+    public void ReflowMapPressurePrecedesStringPressure()
+    {
+        GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(192, 2048);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.StartCursor(Link(2048)));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.WriteCursorToCell(0));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.StartCursor(Link(1)));
+        for (int cell = 0; cell < 102; cell++)
+            Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.WriteCursorToCell(cell));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.MapFull, destination.CopyReflowCellFrom(102, source, 0));
+        Assert.Equal(32UL, destination.StringBytes);
+        destination.Clear(1);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.StringsFull, destination.CopyReflowCellFrom(102, source, 0));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReflowSetFailureFreesScratchBeforeGrowthOrRehash(bool rehash)
+    {
+        ushort capacity = rehash ? (ushort)384 : (ushort)192;
+        GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(capacity, 2048);
+        int count = rehash ? 5 : 2;
+        for (int cell = 0; cell < count; cell++)
+        {
+            Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.StartCursor(Link(1, identity: (uint)cell + 1)));
+            Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.WriteCursorToCell(cell));
+        }
+        destination.EndCursor();
+        if (rehash) destination.Clear(1); // Interior dead ID; the preferred source ID remains occupied.
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.StartCursor(Link(64, 1)));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.WriteCursorToCell(0));
+        GhosttySnapshotHyperlinkStorage retained = destination.Copy();
+        Assert.Equal(rehash ? GhosttySnapshotHyperlinkAddResult.SetNeedsRehash : GhosttySnapshotHyperlinkAddResult.SetFull,
+            destination.CopyReflowCellFrom(9, source, 0));
+        Assert.Equal((ulong)count * 32, destination.StringBytes);
+        Assert.Equal(0, destination.CellId(9));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.Rebuild(384, 2048, out GhosttySnapshotHyperlinkStorage? rebuilt));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, rebuilt!.CopyReflowCellFrom(9, source, 0));
+        Assert.Equal((ulong)(rehash ? count - 1 : count) * 32 + 96, rebuilt.StringBytes);
+        Assert.Equal((ulong)count * 32, retained.StringBytes);
+        Assert.Equal(0, retained.CellId(9));
+    }
+
+    [Fact]
+    public void ReflowCopiesUriBeforeIdAndRequiresAnEmptyDestination()
+    {
+        byte[] value = Link(64, 1);
+        GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(192, 2048);
+        int id = source.AddDecodedTableReference(GhosttySnapshotHyperlink.Read(value, out _), value);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.AttachDecodedCell(0, id));
+        source.ReleaseTableReference(id);
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.CopyReflowCellFrom(4, source, 0));
+        Assert.Equal((new GhosttySnapshotBitmap.Slice(2, 1), new GhosttySnapshotBitmap.Slice(0, 2)), Allocation(destination, destination.CellId(4)));
+        Assert.Throws<InvalidOperationException>(() => destination.CopyReflowCellFrom(4, source, 8));
+        Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.CopyReflowCellFrom(5, source, 8));
+        Assert.Equal(1, destination.CellCount);
+        source.Clear(0);
+        Assert.Equal(1, destination.ReferenceCount(destination.CellId(4)));
+    }
+
     [Fact]
     public void HugeCapacityHintsDoNotMaterializeDenseStringOrCellStorage()
     {

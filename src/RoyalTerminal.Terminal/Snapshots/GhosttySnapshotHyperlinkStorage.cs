@@ -230,6 +230,48 @@ internal sealed class GhosttySnapshotHyperlinkStorage
         return GhosttySnapshotHyperlinkAddResult.Success;
     }
 
+    // ReflowCursor.writeCell always probes and duplicates URI then explicit ID,
+    // even for an existing value. Its set failure frees both strings before
+    // growing/rehashing, unlike Page.clonePartialRowFrom. Reuse the immutable
+    // encoding and cached hash: logical native scratch needs neither a CLR
+    // string copy nor another hash over a potentially very long URI.
+    internal GhosttySnapshotHyperlinkAddResult CopyReflowCellFrom(int destination, GhosttySnapshotHyperlinkStorage source, int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(destination);
+        if (CellId(destination) != 0) throw new InvalidOperationException("Hyperlink reflow destination must be empty.");
+        int sourceId = source.CellId(index);
+        if (sourceId == 0) return GhosttySnapshotHyperlinkAddResult.Success;
+        if ((ulong)_cells.Count >= _mapCapacity) return GhosttySnapshotHyperlinkAddResult.MapFull;
+        Entry value = source._links.Get(sourceId);
+        GhosttySnapshotHyperlink link = GhosttySnapshotHyperlink.Read(value.Encoded, out _);
+        if (!TryAllocateReflowStrings(link, out GhosttySnapshotBitmap.Slice idSlice, out GhosttySnapshotBitmap.Slice uriSlice))
+            return GhosttySnapshotHyperlinkAddResult.StringsFull;
+        _strings.Free(idSlice);
+        _strings.Free(uriSlice);
+        if (!TryAllocateReflowStrings(link, out idSlice, out uriSlice))
+            return GhosttySnapshotHyperlinkAddResult.StringsFull;
+        Entry copied = new(value.Encoded, idSlice, uriSlice, value.Hash);
+        GhosttySnapshotSetAddResult result = _links.TryAddWithId(copied, sourceId, out int id);
+        if (result != GhosttySnapshotSetAddResult.Success)
+        {
+            _strings.Deleted(copied);
+            return Convert(result);
+        }
+        _cells.Add(destination, id);
+        return GhosttySnapshotHyperlinkAddResult.Success;
+    }
+
+    private bool TryAllocateReflowStrings(GhosttySnapshotHyperlink link,
+        out GhosttySnapshotBitmap.Slice id, out GhosttySnapshotBitmap.Slice uri)
+    {
+        id = default;
+        if (!_strings.TryAllocate(link.Uri.Length, out uri)) return false;
+        if (!link.HasExplicitId || _strings.TryAllocate(link.ExplicitId.Length, out id)) return true;
+        _strings.Free(uri);
+        uri = default;
+        return false;
+    }
+
     // cursorSetHyperlink reserves an extra URI on map failure before growing
     // hyperlink capacity. Successful scratch is intentionally not freed: native
     // immediately replaces the page. The owner must rebuild after this call.
