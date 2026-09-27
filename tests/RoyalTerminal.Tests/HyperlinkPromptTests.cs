@@ -9,6 +9,8 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
+using ReactiveUI.Primitives.Reactive.Concurrency;
+using ReactiveUI.Reactive;
 using RoyalTerminal.Avalonia.App.Services.Links;
 using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Avalonia.App.Views;
@@ -72,14 +74,39 @@ public sealed class HyperlinkPromptTests
             Button button = dialog.FindControl<Button>(accept ? "OpenLinkButton" : "CancelButton")!;
             Assert.True(button.IsVisible);
             Assert.True(button.IsEnabled);
-            button.Focus();
+            Assert.True(button.Focus());
+            Assert.True(button.IsFocused);
+            Assert.NotNull(button.Command);
+            Assert.True(button.Command.CanExecute(button.CommandParameter));
+            HyperlinkPromptViewModel model = Assert.IsType<HyperlinkPromptViewModel>(dialog.DataContext);
+            Assert.Same(accept ? model.OpenCommand : model.CancelCommand, button.Command);
             dialog.KeyPressQwerty(PhysicalKey.Space, RawInputModifiers.None);
+            Assert.True(button.IsFocused);
+            Assert.True(button.IsPressed);
             dialog.KeyReleaseQwerty(PhysicalKey.Space, RawInputModifiers.None);
             Dispatcher.UIThread.RunJobs();
             Assert.Equal(accept, await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.False(dialog.IsVisible);
             Assert.Empty(owner.OwnedWindows);
         }
         finally { owner.Close(); await HeadlessTerminalTestCleanup.DrainDispatcherAsync(); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CommandsPublishResultsOnEachIsolatedApplicationDispatcher(bool accept)
+    {
+        // A process-wide scheduler can target a disposed prior test dispatcher.
+        // Both cases must deliver results through the real current UI scheduler.
+        Assert.Same(Dispatcher.UIThread, Assert.IsType<AvaloniaScheduler>(RxSchedulers.MainThreadScheduler).Dispatcher);
+        using HyperlinkPromptViewModel model = new(TerminalHyperlinkSafety.Classify("custom:execute"), "Editor");
+        ReactiveCommand<Unit, bool> command = accept ? model.OpenCommand : model.CancelCommand;
+        TaskCompletionSource<bool> result = new();
+        using IDisposable subscription = command.Subscribe(value => result.TrySetResult(value));
+        ((System.Windows.Input.ICommand)command).Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(accept, await result.Task.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [AvaloniaFact]

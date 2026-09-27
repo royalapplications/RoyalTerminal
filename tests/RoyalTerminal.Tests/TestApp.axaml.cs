@@ -5,7 +5,10 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Markup.Xaml;
 using Avalonia.Skia;
+using Avalonia.Threading;
 using ReactiveUI.Avalonia.Reactive;
+using ReactiveUI.Primitives.Reactive.Concurrency;
+using ReactiveUI.Reactive;
 
 [assembly: AvaloniaTestApplication(typeof(RoyalTerminal.Tests.TestAppBuilder))]
 
@@ -29,5 +32,9 @@ public class TestAppBuilder
             .UseHeadless(new AvaloniaHeadlessPlatformOptions
             {
                 UseHeadlessDrawing = false,
-            });
+            })
+            // Headless replaces Dispatcher.UIThread between isolated cases.
+            // The package singleton retains the first dispatcher; bind command
+            // result delivery to this application's dispatcher after setup.
+            .AfterSetup(_ => RxSchedulers.MainThreadScheduler = new AvaloniaScheduler(Dispatcher.UIThread));
 }
