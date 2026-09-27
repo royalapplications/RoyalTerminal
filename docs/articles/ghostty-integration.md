@@ -487,6 +487,49 @@ expected gains are smaller storage, fewer lookup operations and removal of
 temporary export arrays; no measured speedup is claimed. Tests, before/after
 profiling and CI execution/inspection remain deferred to final validation.
 
+## Managed DCS reply formatting
+
+DECRQSS requests are decoded from their bounded two-byte parser payload without
+copying a DCS array or creating strings. SGR, margins, cursor style and unsupported
+replies use 256-byte stack formatting; the callback receives one exact-size owned
+array. SGR keeps native ordering, compact ANSI/palette identity and colon RGB
+syntax, including overline and underline variants but not underline color.
+This is the reply-path application of
+[Ghostty #13587](https://github.com/ghostty-org/ghostty/pull/13587)'s direct-formatting
+principle, following the pinned `dcs.Command.DECRQSS` and `Terminal.printAttributes`
+contract. Styled VT replay continues to use its separate, richer SGR formatter.
+
+XTGETTCAP now normalizes bounded hex keys on the stack and looks up the frozen
+table through a character span. The generator emits the actual longest key
+bound alongside all 272 capabilities. Replies write ASCII directly into their
+owned array, preserving uppercase key/value spelling, boolean capabilities with
+no equals sign, ignored unsupported keys and the configured per-processor TN
+name. TN validates its 128-byte UTF-8 bound before allocating a response and
+encodes the name through stack storage, without temporary UTF-8/hex strings.
+Small query batches use 512 bytes of stack storage; larger batches reuse pooled
+storage within the existing 1 MiB parser limit. Storage is isolated from live
+parser buffers before any callback and returned/cleared in `finally`; callback
+arrays never alias stack, pooled or shared data. Queries without a reply consumer
+skip encoding.
+
+Reference decision: pinned Ghostty's supported query subset and reply spelling
+remain authoritative.
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+also reports real SGR state but supports additional status requests/underline
+color, whereas
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
+reports a fixed reset-only SGR response and exposes XTGETTCAP to embedders rather
+than a built-in table. Those differences are not imported into native parity.
+
+New tests cover every palette index, all underline styles, exact streamed/native
+status replies, owned callback arrays, no-consumer/oversized requests, UTF-8 TN
+limits, mixed/invalid/unknown capability keys, and stack/pool-sized batches.
+`--managed-dcs-replies` pairs the former string/list pipeline with bounded
+formatting for default/palette/RGB SGR and color/boolean/TN capability replies.
+The expected reduction is intermediate allocation and transcoding, not elimination
+of the callback's owned-array cost. Tests, benchmark measurements and CI inspection
+remain deferred; no measured throughput gain is claimed.
+
 ## Managed search capture invalidation
 
 The search-only COW capture now has a lazy, buffer-specific change token. An

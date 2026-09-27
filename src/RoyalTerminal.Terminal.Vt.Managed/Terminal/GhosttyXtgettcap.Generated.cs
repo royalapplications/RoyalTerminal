@@ -9,6 +9,8 @@ namespace RoyalTerminal.Terminal;
 
 internal static partial class GhosttyXtgettcap
 {
+    internal const int MaximumEncodedKeyLength = 14;
+
     private static readonly FrozenDictionary<string, string?> Capabilities =
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {

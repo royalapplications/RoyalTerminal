@@ -2708,6 +2708,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        ReadOnlySpan<byte> borrowed = CollectionsMarshal.AsSpan(_dcsBuffer);
+        if (borrowed.StartsWith("$q"u8))
+        {
+            // The normalized request is at most two bytes. Copy it before
+            // clearing parser storage, then format directly into bounded bytes.
+            Span<byte> request = stackalloc byte[2];
+            int length = borrowed.Length - 2;
+            borrowed[2..].CopyTo(request);
+            _dcsBuffer.Clear();
+            HandleDecRequestStatusString(request[..length]);
+            return;
+        }
+        if (borrowed.StartsWith("+q"u8))
+        {
+            HandleTerminfoQueries(borrowed[2..]);
+            return;
+        }
+
         byte[] payloadBytes = _dcsBuffer.ToArray();
         _dcsBuffer.Clear();
 
@@ -2718,37 +2736,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        string payload = Encoding.ASCII.GetString(payloadBytes);
-
-        // DCS $ q Pt ST — DECRQSS request.
-        if (payload.StartsWith("$q", StringComparison.Ordinal))
-        {
-            string request = payload.Length > 2 ? payload[2..] : string.Empty;
-            HandleDecRequestStatusString(request);
-            return;
-        }
-
-        // DCS + q Pt ST — XTGETTCAP query. One reply is emitted per supported key.
-        if (payload.StartsWith("+q", StringComparison.Ordinal))
-        {
-            ReadOnlySpan<char> keys = payload.AsSpan(2);
-            while (!keys.IsEmpty)
-            {
-                int separator = keys.IndexOf(';');
-                ReadOnlySpan<char> key = separator < 0 ? keys : keys[..separator];
-                if (GhosttyXtgettcap.TryCreateResponse(key, _options.TerminfoName, out byte[] response))
-                {
-                    ResponseCallback?.Invoke(response);
-                }
-
-                if (separator < 0)
-                {
-                    break;
-                }
-
-                keys = keys[(separator + 1)..];
-            }
-        }
     }
 
     private void HandleSixelDcsPayload(ReadOnlySpan<byte> payload)
@@ -3021,96 +3008,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _isDiscardingOscPayload = false;
         _isDiscardingDcsPayload = false;
         _state = ParserState.Ground;
-    }
-
-    private void HandleDecRequestStatusString(string request)
-    {
-        string? responsePayload = request switch
-        {
-            "m" => $"{BuildCurrentSgrState()}m",
-            "r" => $"{_scrollTop + 1};{_scrollBottom + 1}r",
-            "s" when _extendedDecModes.Contains(ManagedDecModeFlag.LeftRightMargins) => $"{_scrollLeft + 1};{RightMargin + 1}s",
-            " q" => $"{CursorStyleReport} q",
-            _ => null,
-        };
-
-        if (responsePayload is null)
-        {
-            // Unsupported request.
-            ResponseCallback?.Invoke("\x1bP0$r\x1b\\"u8.ToArray());
-            return;
-        }
-
-        string response = $"\x1bP1$r{responsePayload}\x1b\\";
-        ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
-    }
-
-    private string BuildCurrentSgrState()
-    {
-        // DEC DECRPSS requires an initial reset parameter. Ghostty and
-        // Windows Terminal both preserve indexed colors in this response.
-        List<string> parameters = ["0"];
-
-        if ((_currentAttrs & CellAttributes.Bold) != 0) parameters.Add("1");
-        if ((_currentAttrs & CellAttributes.Dim) != 0) parameters.Add("2");
-        if ((_currentAttrs & CellAttributes.Italic) != 0) parameters.Add("3");
-        if (_currentUnderlineStyle > TerminalUnderlineStyle.Single)
-        {
-            parameters.Add($"4:{(int)_currentUnderlineStyle}");
-        }
-        else if (_currentUnderlineStyle != TerminalUnderlineStyle.None ||
-                 (_currentAttrs & CellAttributes.Underline) != 0)
-        {
-            parameters.Add("4");
-        }
-        if ((_currentDecorations & CellDecorations.Overline) != 0) parameters.Add("53");
-        if ((_currentAttrs & CellAttributes.Blink) != 0) parameters.Add("5");
-        if ((_currentAttrs & CellAttributes.Inverse) != 0) parameters.Add("7");
-        if ((_currentAttrs & CellAttributes.Hidden) != 0) parameters.Add("8");
-        if ((_currentAttrs & CellAttributes.Strikethrough) != 0) parameters.Add("9");
-
-        AppendSgrColor(
-            parameters,
-            foreground: true,
-            _currentFgKind,
-            _currentFgPaletteIndex,
-            _currentFg);
-        AppendSgrColor(
-            parameters,
-            foreground: false,
-            _currentBgKind,
-            _currentBgPaletteIndex,
-            _currentBg);
-
-        return string.Join(';', parameters);
-    }
-
-    private static void AppendSgrColor(
-        ICollection<string> parameters,
-        bool foreground,
-        SgrColorKind kind,
-        int paletteIndex,
-        uint rgb)
-    {
-        int baseIndex = foreground ? 30 : 40;
-        switch (kind)
-        {
-            case SgrColorKind.Default:
-                return;
-            case SgrColorKind.Palette when paletteIndex < 8:
-                parameters.Add((baseIndex + paletteIndex).ToString(CultureInfo.InvariantCulture));
-                return;
-            case SgrColorKind.Palette when paletteIndex < 16:
-                parameters.Add((baseIndex + 60 + paletteIndex - 8).ToString(CultureInfo.InvariantCulture));
-                return;
-            case SgrColorKind.Palette:
-                parameters.Add($"{baseIndex + 8}:5:{paletteIndex}");
-                return;
-            case SgrColorKind.Rgb:
-                parameters.Add(
-                    $"{baseIndex + 8}:2::{(rgb >> 16) & 0xFF}:{(rgb >> 8) & 0xFF}:{rgb & 0xFF}");
-                return;
-        }
     }
 
     private void ExecuteCsi(char finalByte)

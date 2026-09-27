@@ -73,6 +73,8 @@ def main() -> None:
         "",
         "internal static partial class GhosttyXtgettcap",
         "{",
+        f"    internal const int MaximumEncodedKeyLength = {max(4, max(len(name.encode('utf-8')) * 2 for name in entries))};",
+        "",
         "    private static readonly FrozenDictionary<string, string?> Capabilities =",
         "        new Dictionary<string, string?>(StringComparer.Ordinal)",
         "        {",
