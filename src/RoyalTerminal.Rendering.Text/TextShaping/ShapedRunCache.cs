@@ -14,7 +14,8 @@ internal readonly record struct ShapedRunCacheKey(
     int CellWidthBits,
     int CellHeightBits,
     TextDirectionMode Direction,
-    bool EnableLigatures);
+    bool EnableLigatures,
+    TerminalFontSynthesis Synthesis = TerminalFontSynthesis.None);
 
 internal sealed class CachedShapedRun : IDisposable
 {

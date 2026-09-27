@@ -19,7 +19,7 @@ public sealed partial class SkiaTerminalRenderer
         if (resolution.ReplacementCodepoint == 0 &&
             _singleGlyphIdCache.TryGetOrCreate(new SingleGlyphIdCacheKey(0xF023, typeface.Handle), typeface, out _))
         {
-            SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
+            SKFont font = _textRowFontCache.GetOrCreate(new(resolution), _fontSize, _fontRenderingSettings);
             font.MeasureText("\uF023", out SKRect bounds);
             if (bounds.Width > 0 && bounds.Height > 0)
             {

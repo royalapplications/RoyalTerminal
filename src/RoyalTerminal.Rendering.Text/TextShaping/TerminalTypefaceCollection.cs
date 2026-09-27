@@ -74,6 +74,7 @@ public sealed partial class TerminalTypefaceCollection
     private TerminalTypefaceCollection(TerminalTypefaceCollection source, byte disabledStyles)
     {
         _faces = source._faces;
+        _synthesis = source._synthesis;
         _codepointRanges = source._codepointRanges;
         _codepointFamilies = source._codepointFamilies;
         _disabledStyles = disabledStyles;

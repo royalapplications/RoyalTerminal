@@ -17,6 +17,7 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
     private string? _codepointMapError;
     private ImmutableArray<string> _validCodepointMaps = [];
     private string _regularStyle = string.Empty, _boldStyle = string.Empty, _italicStyle = string.Empty, _boldItalicStyle = string.Empty;
+    private bool _syntheticBold = true, _syntheticItalic = true, _syntheticBoldItalic = true;
 
     /// <summary>Regular families, highest priority first; empty restores the primary family/file.</summary>
     public string Regular { get => _regular; set => this.RaiseAndSetIfChanged(ref _regular, value ?? string.Empty); }
@@ -35,6 +36,13 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
     public string ItalicStyle { get => _italicStyle; set => this.RaiseAndSetIfChanged(ref _italicStyle, value ?? string.Empty); }
     /// <summary>Advertised bold-italic face name, or false to use regular text.</summary>
     public string BoldItalicStyle { get => _boldItalicStyle; set => this.RaiseAndSetIfChanged(ref _boldItalicStyle, value ?? string.Empty); }
+
+    /// <summary>Allow synthetic outlines when no bold face is available.</summary>
+    public bool SyntheticBold { get => _syntheticBold; set => this.RaiseAndSetIfChanged(ref _syntheticBold, value); }
+    /// <summary>Allow synthetic outlines when no italic face is available.</summary>
+    public bool SyntheticItalic { get => _syntheticItalic; set => this.RaiseAndSetIfChanged(ref _syntheticItalic, value); }
+    /// <summary>Allow completion of combined outlines independently of bold and italic.</summary>
+    public bool SyntheticBoldItalic { get => _syntheticBoldItalic; set => this.RaiseAndSetIfChanged(ref _syntheticBoldItalic, value); }
 
     /// <summary>One U+XXXX[-U+YYYY][,...]=family mapping per line; later ranges win.</summary>
     public string CodepointMaps
@@ -67,6 +75,7 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
         Regular = Parse(Regular), Bold = Parse(Bold), Italic = Parse(Italic), BoldItalic = Parse(BoldItalic),
         CodepointMaps = _validCodepointMaps,
         RegularStyle = RegularStyle, BoldStyle = BoldStyle, ItalicStyle = ItalicStyle, BoldItalicStyle = BoldItalicStyle,
+        SyntheticBold = SyntheticBold, SyntheticItalic = SyntheticItalic, SyntheticBoldItalic = SyntheticBoldItalic,
     };
 
     /// <summary>Loads a configuration; null restores empty family lists.</summary>
@@ -82,6 +91,9 @@ public sealed class TerminalFontFamilyEditorViewModel : ReactiveObject
         BoldStyle = settings.BoldStyle;
         ItalicStyle = settings.ItalicStyle;
         BoldItalicStyle = settings.BoldItalicStyle;
+        SyntheticBold = settings.SyntheticBold;
+        SyntheticItalic = settings.SyntheticItalic;
+        SyntheticBoldItalic = settings.SyntheticBoldItalic;
     }
 
     private static ImmutableArray<string> Parse(string text)

@@ -129,7 +129,7 @@ selection; `false` independently disables bold, italic or bold italic. Disabling
 one component does not disable the combined style. Regular cannot be disabled.
 Names apply to explicit families, their inherited regular-family variants and
 the existing primary-system-family setting, not a primary font file. Missing names continue normal
-family/regular fallback; they are not silently replaced by a nearest weight.
+family fallback and missing-style completion; they are not silently replaced by a nearest weight.
 The Skia adapter compares advertised names case-insensitively, retaining the
 caller spelling in profiles. The ReactiveUI editor, profile serialization,
 live settings and split panes carry these controls. Disabled styles route to
@@ -139,6 +139,40 @@ when copied. This follows Ghostty's `Config.finalize` family inheritance,
 `SharedGridSet` named descriptors and `CodepointResolver` disabled-style rule;
 Windows Terminal and xterm.js instead delegate logical weight/slant selection
 to DirectWrite and canvas respectively.
+
+`SyntheticBold`, `SyntheticItalic` and `SyntheticBoldItalic` default to enabled.
+They follow Ghostty's
+[missing-style completion](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/Collection.zig):
+real configured styles win, including deliberately named faces whose intrinsic
+weight/slant differs from the requested category. Automatic family lookup rejects
+a nearest regular face when a real styled face was requested. Missing italic and
+bold are synthesized from the first regular face with non-color text; missing
+combined style first italicizes an existing real bold face, otherwise emboldens
+the completed italic face. Disabling a synthesis toggle aliases regular outlines
+for that missing style; it does not disable an available real face. The combined
+toggle is independent, but its resulting outlines still depend on the chosen base
+face. `false` named-style disables take precedence over these toggles.
+
+Synthesis is carried in the resolved font, not inferred from the requested style
+or native face handle. Mapped glyphs and discovered/regular fallback faces do not
+inherit synthetic effects. Run boundaries, ASCII/general resolution caches,
+batched rows, shaped/Pretext/cell blobs, paths, cursor text and IME/caret drawing
+retain this distinction. No font bytes are cloned and no extra discovery is
+performed for warm synthetic lookups. Pretext's direct fallback also reuses the
+font cache instead of constructing a native font for each draw.
+
+The shared Skia path uses native emboldening and a 15-degree italic shear without
+changing HarfBuzz glyph identity or terminal cell metrics. The macOS smoothing
+path uses a matching CoreText font transform plus Ghostty's size-dependent bold
+stroke; transformed bounds and stroke padding participate in bounded glyph-mask
+caches. Global rasterizer emboldening remains separate and is combined without
+double-applying the effect. Skia rasterization is not claimed pixel-identical to
+Ghostty's FreeType/CoreText backends. A caller-supplied emoji-only collection stays
+usable without synthetic text, rather than rejecting the whole configuration when
+Ghostty's text-base completion reports `DefaultUnavailable`; a focused test records
+this deliberate borrowed-collection compatibility choice. Profiles, live settings,
+compiled controls and split panes persist all three toggles. Regression tests are
+written; execution is deferred to the final validation stage.
 
 Ordinary printable ASCII uses lazy 95-entry tables per used style for the first
 lookup culture. Other cultures, explicit presentation selectors and Unicode
@@ -153,8 +187,8 @@ with the same ASCII/style/face workload. **Execution and before/after performanc
 validation are deferred until the implementation batch is complete; no measured
 speedup is claimed yet.**
 
-Synthetic style policy and exhaustive platform fallback enumeration remain
-parity requirements. Skia's family/global matching is not claimed to
+Exhaustive platform fallback enumeration remains a parity requirement.
+Skia's family/global matching is not claimed to
 enumerate Ghostty's complete platform discovery iterator. The font benchmark
 compares existing single-face discovery with loaded-collection reuse; isolated
 font-query measurements are not an end-to-end rendering speedup claim.

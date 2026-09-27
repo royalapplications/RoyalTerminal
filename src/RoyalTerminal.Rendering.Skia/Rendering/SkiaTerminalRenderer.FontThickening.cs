@@ -12,12 +12,12 @@ public sealed partial class SkiaTerminalRenderer
     internal int ThickenedGlyphCount => _thickenedGlyphs.Count;
     private bool FontThickeningEnabled => _fontRenderingSettings.Thicken && OperatingSystem.IsMacOS();
 
-    private bool TryDrawThickenedGlyphs(SKCanvas canvas, SKTypeface typeface,
+    private bool TryDrawThickenedGlyphs(SKCanvas canvas, RenderFont typeface,
         ReadOnlySpan<ushort> glyphs, ReadOnlySpan<SKPoint> points, float x, float y)
-        => FontThickeningEnabled && _thickenedGlyphs.TryDraw(canvas, typeface, _fontSize,
-            _fontRenderingSettings, glyphs, points, x, y, _fgPaint);
+        => FontThickeningEnabled && _thickenedGlyphs.TryDraw(canvas, typeface.Typeface, _fontSize,
+            _fontRenderingSettings, glyphs, points, x, y, _fgPaint, typeface.Synthesis);
 
-    private bool TryDrawThickenedText(SKCanvas canvas, SKTypeface typeface, SKFont font,
+    private bool TryDrawThickenedText(SKCanvas canvas, RenderFont typeface, SKFont font,
         string text, float x, float y)
     {
         if (!FontThickeningEnabled) return false;
@@ -42,7 +42,7 @@ public sealed partial class SkiaTerminalRenderer
         }
     }
 
-    private bool TryDrawThickenedShapedRun(SKCanvas canvas, CachedShapedRun run, SKTypeface typeface,
+    private bool TryDrawThickenedShapedRun(SKCanvas canvas, CachedShapedRun run, RenderFont typeface,
         float originX, float rowY, float baselineY, float runWidth, float xScale,
         bool clampToRunWidth, ReadOnlySpan<float> textGridOffsets, bool useClusterGridFit)
     {
@@ -66,7 +66,7 @@ public sealed partial class SkiaTerminalRenderer
     }
 
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-    private bool TryDrawThickenedPretextRun(SKCanvas canvas, CachedPretextRun run, SKTypeface typeface,
+    private bool TryDrawThickenedPretextRun(SKCanvas canvas, CachedPretextRun run, RenderFont typeface,
         float originX, float rowY, float baselineY, float runWidth, float xScale)
     {
         if (!FontThickeningEnabled) return false;

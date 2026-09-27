@@ -88,6 +88,8 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.FontFamiliesEditor.CodepointMaps = "U+2611=Mapped Symbol";
             viewModel.SettingsPanelState.FontFamiliesEditor.RegularStyle = "Book";
             viewModel.SettingsPanelState.FontFamiliesEditor.BoldStyle = "false";
+            viewModel.SettingsPanelState.FontFamiliesEditor.SyntheticBold = false;
+            viewModel.SettingsPanelState.FontFamiliesEditor.SyntheticItalic = false;
             viewModel.SettingsPanelState.FontSize = 17;
             viewModel.SettingsPanelState.FontSubpixelPositioning = true;
             viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
@@ -116,6 +118,9 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(new[] { "U+2611=Mapped Symbol" }, viewModel.FontFamilies.CodepointMaps);
             Assert.Equal("Book", viewModel.FontFamilies.RegularStyle);
             Assert.Equal("false", viewModel.FontFamilies.BoldStyle);
+            Assert.False(viewModel.FontFamilies.SyntheticBold);
+            Assert.False(viewModel.FontFamilies.SyntheticItalic);
+            Assert.True(viewModel.FontFamilies.SyntheticBoldItalic);
             Assert.Equal(17, viewModel.FontSize);
             Assert.True(viewModel.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Antialias, viewModel.FontEdging);
@@ -192,6 +197,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.FontFamiliesEditor.CodepointMaps = "U+2611=Saved Symbol";
             viewModel.SettingsPanelState.FontFamiliesEditor.ItalicStyle = "Saved Oblique";
             viewModel.SettingsPanelState.FontFamiliesEditor.BoldItalicStyle = "false";
+            viewModel.SettingsPanelState.FontFamiliesEditor.SyntheticBoldItalic = false;
             viewModel.SettingsPanelState.FontSubpixelPositioning = true;
             viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
             viewModel.SettingsPanelState.SelectedFontHinting = TerminalFontHinting.Normal;
@@ -217,6 +223,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(new[] { "U+2611=Saved Symbol" }, savedProfile.Appearance.FontFamilies.CodepointMaps);
             Assert.Equal("Saved Oblique", savedProfile.Appearance.FontFamilies.ItalicStyle);
             Assert.Equal("false", savedProfile.Appearance.FontFamilies.BoldItalicStyle);
+            Assert.False(savedProfile.Appearance.FontFamilies.SyntheticBoldItalic);
             Assert.True(savedProfile.Appearance.FontRendering.SubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Antialias, savedProfile.Appearance.FontRendering.Edging);
             Assert.Equal(TerminalFontHinting.Normal, savedProfile.Appearance.FontRendering.Hinting);

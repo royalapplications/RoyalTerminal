@@ -1027,7 +1027,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
             TerminalFontResolution firstFont = ResolveFontForCell(in firstCell);
-            SKTypeface runTypeface = firstFont.Typeface;
+            RenderFont runTypeface = new(firstFont);
             _displayCells.Clear();
             _displayCells.Add(in firstCell, firstFont);
             bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in _displayCells.Cells[0]) &&
@@ -1089,7 +1089,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
                 // Even programming ligatures cannot cross a resolved font
                 // boundary: a replacement glyph may use a different face.
-                if (nextFont.Typeface.Handle != runTypeface.Handle)
+                if (!runTypeface.Matches(new(nextFont)))
                 {
                     break;
                 }
@@ -3132,7 +3132,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
@@ -3272,12 +3272,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
             TerminalFontResolution resolution = ResolveFontForCell(in cell);
             if (resolution.ReplacementCodepoint != 0) return false;
-            SKTypeface typeface = resolution.Typeface;
+            RenderFont typeface = new(resolution);
             if (!_singleGlyphIdCache.TryGetOrCreate(
                 new SingleGlyphIdCacheKey(
                     cell.Codepoint,
                     typeface.Handle),
-                typeface,
+                typeface.Typeface,
                 out ushort glyphId))
             {
                 return false;
@@ -3288,7 +3288,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 _simpleTextRowBatchGroups,
                 groupCount,
                 color,
-                typeface.Handle);
+                typeface);
 
             if (groupIndex < 0)
             {
@@ -3301,7 +3301,6 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 _simpleTextRowBatchGroups[groupIndex] = new SimpleTextRowBatchGroup
                 {
                     Color = color,
-                    TypefaceHandle = typeface.Handle,
                     Typeface = typeface,
                 };
             }
@@ -3410,12 +3409,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<SimpleTextRowBatchGroup> groups,
         int groupCount,
         SKColor color,
-        nint typefaceHandle)
+        RenderFont typeface)
     {
         for (int i = 0; i < groupCount; i++)
         {
             if (groups[i].Color == color &&
-                groups[i].TypefaceHandle == typefaceHandle)
+                groups[i].Typeface.Matches(typeface))
             {
                 return i;
             }
@@ -3462,7 +3461,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private CachedPretextRun GetOrCreateCachedPretextRun(
         ReadOnlySpan<char> runText,
         ulong textHash,
-        SKTypeface runTypeface)
+        RenderFont runTypeface)
     {
         PretextRunCacheKey cacheKey = new(
             textHash,
@@ -3470,7 +3469,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             runTypeface.Handle,
             BitConverter.SingleToInt32Bits(_fontSize),
             _textDirectionMode,
-            _enableLigatures);
+            _enableLigatures, runTypeface.Synthesis);
 
         if (_pretextRunCache.TryGet(cacheKey, runText, out CachedPretextRun cachedRun))
         {
@@ -3500,7 +3499,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
@@ -3647,15 +3646,15 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                !IsSymbolGlyphClipCandidate(in cell);
     }
 
-    private string CreatePretextFontDescriptor(SKTypeface typeface)
+    private string CreatePretextFontDescriptor(RenderFont typeface)
     {
-        SKFontStyle fontStyle = typeface.FontStyle;
+        SKFontStyle fontStyle = typeface.Typeface.FontStyle;
         string slant = fontStyle.Slant is SKFontStyleSlant.Italic or SKFontStyleSlant.Oblique
             ? "italic "
             : string.Empty;
-        string familyName = string.IsNullOrWhiteSpace(typeface.FamilyName)
+        string familyName = string.IsNullOrWhiteSpace(typeface.Typeface.FamilyName)
             ? "monospace"
-            : typeface.FamilyName.Replace("\"", string.Empty, StringComparison.Ordinal);
+            : typeface.Typeface.FamilyName.Replace("\"", string.Empty, StringComparison.Ordinal);
 
         return string.Create(
             s_renderCulture,
@@ -3694,7 +3693,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private void DrawCachedPretextRun(
         SKCanvas canvas,
         CachedPretextRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -3721,7 +3720,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             }
             else
             {
-                using SKFont directFont = GlyphCache.CreateFont(typeface, _fontSize, _fontRenderingSettings);
+                SKFont directFont = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
                 canvas.DrawText(run.Text, originX, baselineY, directFont, _fgPaint);
             }
 
@@ -3751,7 +3750,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         }
         else
         {
-            using SKFont font = GlyphCache.CreateFont(typeface, _fontSize, _fontRenderingSettings);
+            SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             canvas.DrawText(run.Text, originX, baselineY, font, _fgPaint);
         }
 
@@ -3780,17 +3779,17 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         return (float)Math.Max(maxLineWidth, lineWidth);
     }
 
-    private static ushort[] CreatePretextNaturalGlyphIds(SKTypeface typeface, string text)
+    private static ushort[] CreatePretextNaturalGlyphIds(RenderFont typeface, string text)
     {
         if (text.Length <= 0)
         {
             return [];
         }
 
-        return typeface.GetGlyphs(text);
+        return typeface.Typeface.GetGlyphs(text);
     }
 
-    private SKTextBlob? CreatePretextNaturalTextBlob(SKTypeface typeface, ReadOnlySpan<ushort> glyphIds)
+    private SKTextBlob? CreatePretextNaturalTextBlob(RenderFont typeface, ReadOnlySpan<ushort> glyphIds)
     {
         if (glyphIds.Length <= 0)
         {
@@ -3809,12 +3808,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
         int utf16Length = 0;
-        bool singleWidthSingleUtf16Cells = !runTypeface.IsFixedPitch;
+        bool singleWidthSingleUtf16Cells = !runTypeface.Typeface.IsFixedPitch;
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
@@ -3904,11 +3903,11 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 BitConverter.SingleToInt32Bits(_cellWidth),
                 BitConverter.SingleToInt32Bits(_cellHeight),
                 _textDirectionMode,
-                _enableLigatures);
+                _enableLigatures, runTypeface.Synthesis);
 
             if (!_shapedRunCache.TryGet(cacheKey, runText, out CachedShapedRun cachedRun))
             {
-                ShapedTextRun shaped = _textShaper.Shape(runText, runTypeface, options);
+                ShapedTextRun shaped = _textShaper.Shape(runText, runTypeface.Typeface, options);
                 if (shaped.GlyphCount <= 0)
                 {
                     DrawCellAnchoredFallbackRun(
@@ -3956,7 +3955,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
             float xScale = 1f;
             GridPlacementMode placement;
-            if (runTypeface.IsFixedPitch && IsWithinGridPlacementTolerance(cachedRun.TotalAdvanceX, runWidth))
+            if (runTypeface.Typeface.IsFixedPitch && IsWithinGridPlacementTolerance(cachedRun.TotalAdvanceX, runWidth))
             {
                 placement = GridPlacementMode.Natural;
             }
@@ -4050,7 +4049,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private void DrawCachedShapedRun(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -4137,7 +4136,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private void DrawClusterGridFittedShapedRun(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -4210,7 +4209,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private void DrawCachedShapedRunPath(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         float originX,
         float rowY,
         float baselineY,
@@ -4242,7 +4241,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     }
 
     private SKTextBlob? CreateGridTextBlob(
-        SKTypeface typeface,
+        RenderFont typeface,
         CachedShapedRun run,
         float runWidth,
         float xScale,
@@ -4275,7 +4274,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     }
 
     private SKPath? CreateShapedRunPath(
-        SKTypeface typeface,
+        RenderFont typeface,
         CachedShapedRun run,
         float runWidth,
         float xScale,
@@ -4358,7 +4357,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     }
 
     private SKTextBlob? CreateNaturalTextBlob(
-        SKTypeface typeface,
+        RenderFont typeface,
         ReadOnlySpan<ushort> glyphIds,
         ReadOnlySpan<float> xOffsets,
         ReadOnlySpan<float> yOffsets)
@@ -4400,7 +4399,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float y,
         float runWidth)
@@ -4460,13 +4459,13 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         return text;
     }
 
-    private SKTextBlob? GetOrCreateCellTextBlob(SKTypeface typeface, SKFont font, string text)
+    private SKTextBlob? GetOrCreateCellTextBlob(RenderFont typeface, SKFont font, string text)
     {
         CellTextBlobCacheKey key = new(
             ComputeTextHash(text.AsSpan()),
             text.Length,
             typeface.Handle,
-            BitConverter.SingleToInt32Bits(_fontSize));
+            BitConverter.SingleToInt32Bits(_fontSize), typeface.Synthesis);
         return _cellTextBlobCache.GetOrCreate(key, text, font);
     }
 
@@ -6758,7 +6757,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         private readonly Dictionary<TextRowFontCacheKey, SKFont> _cache = new();
 
         public SKFont GetOrCreate(
-            SKTypeface typeface,
+            RenderFont typeface,
             float fontSize,
             TerminalFontRenderingSettings fontRenderingSettings)
         {
@@ -6773,13 +6772,13 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 settings.EmbeddedBitmaps,
                 settings.Embolden,
                 settings.ForceAutoHinting,
-                settings.LinearMetrics);
+                settings.LinearMetrics, typeface.Synthesis);
             if (_cache.TryGetValue(key, out SKFont? font))
             {
                 return font;
             }
 
-            font = GlyphCache.CreateFont(typeface, fontSize, settings);
+            font = GlyphCache.CreateFont(typeface.Typeface, fontSize, settings, typeface.Synthesis);
             _cache[key] = font;
             return font;
         }
@@ -6805,7 +6804,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         bool EmbeddedBitmaps,
         bool Embolden,
         bool ForceAutoHinting,
-        bool LinearMetrics);
+        bool LinearMetrics,
+        TerminalFontSynthesis Synthesis);
 
     private sealed class CellTextBlobCache
     {
@@ -6866,7 +6866,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         ulong TextHash,
         int TextLength,
         nint TypefaceHandle,
-        int FontSizeBits);
+        int FontSizeBits,
+        TerminalFontSynthesis Synthesis);
 
     private sealed class CachedCellTextBlob : IDisposable
     {
@@ -6889,8 +6890,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private struct SimpleTextRowBatchGroup
     {
         public SKColor Color;
-        public nint TypefaceHandle;
-        public SKTypeface Typeface;
+        public RenderFont Typeface;
         public int Count;
     }
 
@@ -6959,7 +6959,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         nint TypefaceHandle,
         int FontSizeBits,
         TextDirectionMode Direction,
-        bool EnableLigatures);
+        bool EnableLigatures,
+        TerminalFontSynthesis Synthesis);
 
     private sealed class CachedPretextRun : IDisposable
     {

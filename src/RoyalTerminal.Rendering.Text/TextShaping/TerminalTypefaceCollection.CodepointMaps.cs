@@ -32,6 +32,7 @@ public sealed partial class TerminalTypefaceCollection
     private TerminalTypefaceCollection(TerminalTypefaceCollection source, TerminalTypefaceCodepointMapping[] mappings)
     {
         _faces = source._faces;
+        _synthesis = source._synthesis;
         _disabledStyles = source._disabledStyles;
         _codepointRanges = new (int, int)[mappings.Length];
         _codepointFamilies = new string[mappings.Length];

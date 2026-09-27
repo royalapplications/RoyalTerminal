@@ -33,14 +33,22 @@ internal sealed class SkiaConfiguredFontFamilyMatcher(SKFontManager manager) : I
                     return styles.CreateTypeface(i);
             return null;
         }
-        return styles.CreateTypeface(style switch
+        SKTypeface? candidate = styles.CreateTypeface(style switch
         {
             TerminalTypefaceStyle.Bold => SKFontStyle.Bold,
             TerminalTypefaceStyle.Italic => SKFontStyle.Italic,
             TerminalTypefaceStyle.BoldItalic => SKFontStyle.BoldItalic,
             _ => SKFontStyle.Normal,
         });
+        if (candidate is null || MatchesStyle(candidate, style)) return candidate;
+        candidate.Dispose();
+        return null;
     }
+
+    internal static bool MatchesStyle(SKTypeface face, TerminalTypefaceStyle style)
+        => style == TerminalTypefaceStyle.Regular ||
+            (face.IsBold == (style is TerminalTypefaceStyle.Bold or TerminalTypefaceStyle.BoldItalic) &&
+             face.IsItalic == (style is TerminalTypefaceStyle.Italic or TerminalTypefaceStyle.BoldItalic));
 }
 
 /// <summary>Owns configured face references independently of renderer/discovery caches.</summary>
@@ -79,6 +87,8 @@ internal sealed class ConfiguredFontFamilies : IDisposable
             AddStyle(settings.Italic, TerminalTypefaceStyle.Italic, settings.ItalicStyle);
             AddStyle(settings.BoldItalic, TerminalTypefaceStyle.BoldItalic, settings.BoldItalicStyle);
             owner.Collection = new(entries.ToArray());
+            owner.Collection = owner.Collection.WithSyntheticStyles(settings.SyntheticBold,
+                settings.SyntheticItalic, settings.SyntheticBoldItalic);
             if (settings.BoldStyle == "false" || settings.ItalicStyle == "false" || settings.BoldItalicStyle == "false")
                 owner.Collection = owner.Collection.WithDisabledStyles(settings.BoldStyle == "false",
                     settings.ItalicStyle == "false", settings.BoldItalicStyle == "false");
@@ -119,11 +129,12 @@ internal sealed class ConfiguredFontFamilies : IDisposable
                     {
                         SKTypeface? named = matcher.Match(legacy.RegularTypeface.FamilyName, style, namedStyle);
                         if (named is not null) owner._owned.Add(named);
-                        entries.Add(new(named ?? legacy.RegularTypeface, style));
+                        if (named is not null) entries.Add(new(named, style));
                         return;
                     }
-                    entries.Add(new(legacy.GetTypeface(style is TerminalTypefaceStyle.Bold or TerminalTypefaceStyle.BoldItalic,
-                        style is TerminalTypefaceStyle.Italic or TerminalTypefaceStyle.BoldItalic), style));
+                    SKTypeface candidate = legacy.GetTypeface(style is TerminalTypefaceStyle.Bold or TerminalTypefaceStyle.BoldItalic,
+                        style is TerminalTypefaceStyle.Italic or TerminalTypefaceStyle.BoldItalic);
+                    if (SkiaConfiguredFontFamilyMatcher.MatchesStyle(candidate, style)) entries.Add(new(candidate, style));
                     return;
                 }
                 for (int index = 0; index < regularCount; index++)
@@ -132,8 +143,7 @@ internal sealed class ConfiguredFontFamilies : IDisposable
                         owner._owned.Add(face);
                         entries.Add(new(face, style));
                     }
-                // An unavailable variant leaves the style empty; the resolver
-                // then uses ordered regular faces before system discovery.
+                // Complete missing styles only after loading all real variants.
             }
 
             static string? Named(string value) => value.Length == 0 || value == "false" ? null : value;

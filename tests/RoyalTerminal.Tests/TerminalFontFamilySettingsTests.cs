@@ -269,6 +269,18 @@ public sealed class TerminalFontFamilySettingsTests
                 style.Text = "false";
                 await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
                 Assert.Equal("false", state.FontFamiliesEditor.BuildSettings().BoldStyle);
+                CheckBox syntheticBold = Assert.Single(expander.GetVisualDescendants().OfType<CheckBox>(), e => e.Name == "SyntheticBoldFontEditor");
+                CheckBox syntheticItalic = Assert.Single(expander.GetVisualDescendants().OfType<CheckBox>(), e => e.Name == "SyntheticItalicFontEditor");
+                CheckBox syntheticCombined = Assert.Single(expander.GetVisualDescendants().OfType<CheckBox>(), e => e.Name == "SyntheticBoldItalicFontEditor");
+                syntheticBold.IsChecked = false;
+                syntheticItalic.IsChecked = false;
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+                Assert.False(state.FontFamiliesEditor.SyntheticBold);
+                Assert.False(state.FontFamiliesEditor.SyntheticItalic);
+                Assert.True(state.FontFamiliesEditor.SyntheticBoldItalic);
+                syntheticCombined.IsChecked = false;
+                await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
+                Assert.False(state.FontFamiliesEditor.BuildSettings().SyntheticBoldItalic);
                 return;
             }
             Assert.Fail("Ordered font-family editor was not available in settings.");

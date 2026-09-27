@@ -8,7 +8,7 @@ namespace RoyalTerminal.Avalonia.Rendering;
 public sealed partial class SkiaTerminalRenderer
 {
     private void DrawDisplayTextRun(SKCanvas canvas, ReadOnlySpan<TerminalCell> cells, int column,
-        SKTypeface typeface, SKColor color, float y, bool usePretextPipeline)
+        RenderFont typeface, SKColor color, float y, bool usePretextPipeline)
     {
         // All lengths, hashes, cluster/grid offsets, fallback blobs and font
         // thickening use the same display projection. Source cells remain the
@@ -46,7 +46,7 @@ public sealed partial class SkiaTerminalRenderer
         {
             canvas.ClipRect(new SKRect(column * _cellWidth, y,
                 (column + Math.Max(1, (int)cell.Width)) * _cellWidth, y + _cellHeight));
-            DrawDisplayTextRun(canvas, _displayCells.Cells, column, font.Typeface, CursorTextColor, y,
+            DrawDisplayTextRun(canvas, _displayCells.Cells, column, new(font), CursorTextColor, y,
                 CanUsePretextTextPipeline());
         }
         finally

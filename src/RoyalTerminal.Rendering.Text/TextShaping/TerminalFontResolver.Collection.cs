@@ -29,7 +29,7 @@ public sealed partial class TerminalFontResolver
             ThrowIfDisposed();
             CollectionState state = GetCollectionState(collection);
             SKTypeface primary = collection.GetPrimaryTypeface(style);
-            if (!Rune.IsValid(codepoint)) return new(primary, false);
+            if (!Rune.IsValid(codepoint)) return new(primary, false) { Synthesis = collection.GetSynthesis(style) };
             return TryResolveTypefaceCore(primary, codepoint, culture, null, out TerminalFontResolution result, state, style)
                 ? result : ResolveReplacement(primary, culture, null, state, style);
         }
@@ -93,16 +93,17 @@ public sealed partial class TerminalFontResolver
                 AsciiFaceResult cached = ascii[asciiIndex];
                 if (cached.Known)
                 {
-                    resolution = new(cached.Face ?? primary, cached.Face is not null && cached.Face.Handle != primary.Handle);
-                    return cached.Face is not null;
+                    resolution = ToResolution(cached.Face, primary);
+                    return cached.Face.HasValue;
                 }
             }
         }
         CollectionCodepointKey key = new(style, codepoint, presentation, usedCulture.Name);
-        SKTypeface? face = null;
+        CollectionFace? face = null;
         if (ascii is not null || !state.Results.TryGetValue(key, out face))
         {
-            face = FindCodepointOverride(state, codepoint);
+            SKTypeface? mapped = FindCodepointOverride(state, codepoint);
+            if (mapped is not null) face = new(mapped, TerminalFontSynthesis.None);
             face ??= FindConfiguredFace(state, style, codepoint, presentation);
             if (face is null && style != TerminalTypefaceStyle.Regular)
                 face = FindConfiguredFace(state, TerminalTypefaceStyle.Regular, codepoint, presentation);
@@ -117,8 +118,8 @@ public sealed partial class TerminalFontResolver
                     state.Configured.GetPrimaryTypeface(), codepoint, usedCulture, requiredPresentation, SKFontStyle.Normal);
                 if (discovered.UsedFallback)
                 {
-                    face = discovered.Typeface;
-                    AddLoadedFace(state, face, isFallback: true);
+                    face = new(discovered.Typeface, TerminalFontSynthesis.None);
+                    AddLoadedFace(state, discovered.Typeface, isFallback: true);
                 }
             }
             // ANY is restricted to already loaded regular faces. A rejected
@@ -130,26 +131,32 @@ public sealed partial class TerminalFontResolver
             if (ascii is not null) ascii[asciiIndex] = new(face, true);
             else state.Results.Add(key, face);
         }
-        resolution = new(face ?? primary, face is not null && face.Handle != primary.Handle);
-        return face is not null;
+        resolution = ToResolution(face, primary);
+        return face.HasValue;
     }
 
-    private SKTypeface? FindConfiguredFace(CollectionState state, TerminalTypefaceStyle style,
+    private static TerminalFontResolution ToResolution(CollectionFace? face, SKTypeface primary)
+        => new(face?.Typeface ?? primary, face.HasValue && face.Value.Typeface.Handle != primary.Handle)
+        { Synthesis = face?.Synthesis ?? TerminalFontSynthesis.None };
+
+    private CollectionFace? FindConfiguredFace(CollectionState state, TerminalTypefaceStyle style,
         int codepoint, bool? presentation)
     {
         foreach (SKTypeface face in state.Configured.GetFaces(style))
             // Avoid querying/marshalling the family name for every scalar the
             // configured face cannot cover (the common discovery path).
-            if (ContainsGlyph(face, codepoint, presentation) && !TerminalFontCoverage.IsLastResort(face)) return face;
+            if (ContainsGlyph(face, codepoint, presentation) && !TerminalFontCoverage.IsLastResort(face))
+                return new(face, state.Configured.GetSynthesis(style));
         return null;
     }
 
-    private SKTypeface? FindLoadedFace(CollectionState state, int codepoint, bool? presentation, bool? fallbackPresentation)
+    private CollectionFace? FindLoadedFace(CollectionState state, int codepoint, bool? presentation, bool? fallbackPresentation)
     {
         // Mapped and discovered faces retain insertion order, but only fallback
         // discovery imposes UCD default presentation; mappings are configured faces.
         foreach (LoadedCollectionFace face in state.Loaded)
-            if (ContainsGlyph(face.Typeface, codepoint, presentation ?? (face.IsFallback ? fallbackPresentation : null))) return face.Typeface;
+            if (ContainsGlyph(face.Typeface, codepoint, presentation ?? (face.IsFallback ? fallbackPresentation : null)))
+                return new(face.Typeface, TerminalFontSynthesis.None);
         return null;
     }
 
@@ -159,7 +166,7 @@ public sealed partial class TerminalFontResolver
         public List<LoadedCollectionFace> Loaded { get; } = new();
         public Dictionary<string, SKTypeface?> Descriptors { get; } = new(StringComparer.Ordinal);
         public Dictionary<int, SKTypeface?>? SpriteOverrides { get; set; }
-        public Dictionary<CollectionCodepointKey, SKTypeface?> Results { get; } = new();
+        public Dictionary<CollectionCodepointKey, CollectionFace?> Results { get; } = new();
         public string? AsciiCultureName { get; set; }
         private AsciiFaceResult[]? _regularAscii, _boldAscii, _italicAscii, _boldItalicAscii;
 
@@ -172,7 +179,8 @@ public sealed partial class TerminalFontResolver
         };
     }
 
-    private readonly record struct AsciiFaceResult(SKTypeface? Face, bool Known);
+    private readonly record struct CollectionFace(SKTypeface Typeface, TerminalFontSynthesis Synthesis);
+    private readonly record struct AsciiFaceResult(CollectionFace? Face, bool Known);
 
     private readonly record struct CollectionCodepointKey(TerminalTypefaceStyle Style,
         int Codepoint, bool? Presentation, string CultureName);

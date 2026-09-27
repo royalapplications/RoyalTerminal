@@ -17,6 +17,9 @@ namespace RoyalTerminal.Avalonia.Rendering;
 /// </summary>
 public readonly record struct TerminalFontResolution(SKTypeface Typeface, bool UsedFallback)
 {
+    /// <summary>Outline effects for the selected configured face; discovery and mapped faces have none.</summary>
+    public TerminalFontSynthesis Synthesis { get; init; }
+
     /// <summary>
     /// Gets the scalar to display instead of the entire unsupported input cluster:
     /// U+FFFD, or a space when no replacement glyph is available. Zero preserves
@@ -118,7 +121,8 @@ public sealed partial class TerminalFontResolver : IDisposable
     {
         if (text.IsEmpty)
         {
-            return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
+            return new TerminalFontResolution(primaryTypeface, UsedFallback: false)
+            { Synthesis = collection?.Configured.GetSynthesis(style) ?? TerminalFontSynthesis.None };
         }
         if (Rune.DecodeFromUtf16(text, out Rune firstRune, out int charsConsumed) != OperationStatus.Done)
             return ResolveReplacement(primaryTypeface, culture, null, collection, style);

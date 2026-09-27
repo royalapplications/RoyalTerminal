@@ -37,12 +37,20 @@ public sealed record TerminalFontFamilySettings
     /// <summary>Advertised bold-italic face name; false routes combined requests to regular.</summary>
     public string BoldItalicStyle { get; init; } = string.Empty;
 
+    /// <summary>Synthesize missing bold outlines; does not affect real bold faces or combined styles.</summary>
+    public bool SyntheticBold { get; init; } = true;
+    /// <summary>Synthesize missing italic outlines; does not affect real italic faces or the combined toggle.</summary>
+    public bool SyntheticItalic { get; init; } = true;
+    /// <summary>Complete missing bold-italic outlines independently of the individual style toggles.</summary>
+    public bool SyntheticBoldItalic { get; init; } = true;
+
     /// <summary>Whether no family, named/disabled style or codepoint override has been configured.</summary>
     [JsonIgnore]
     public bool IsEmpty => Regular.IsDefaultOrEmpty && Bold.IsDefaultOrEmpty &&
         Italic.IsDefaultOrEmpty && BoldItalic.IsDefaultOrEmpty && CodepointMaps.IsDefaultOrEmpty &&
         string.IsNullOrEmpty(RegularStyle) && string.IsNullOrEmpty(BoldStyle) &&
-        string.IsNullOrEmpty(ItalicStyle) && string.IsNullOrEmpty(BoldItalicStyle);
+        string.IsNullOrEmpty(ItalicStyle) && string.IsNullOrEmpty(BoldItalicStyle) &&
+        SyntheticBold && SyntheticItalic && SyntheticBoldItalic;
 
     /// <summary>Trims entries without changing priority, and validates codepoint-map syntax.</summary>
     /// <exception cref="FormatException">A codepoint mapping is malformed.</exception>

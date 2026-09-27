@@ -512,6 +512,10 @@
                     <TextBox Name="BoldFontStyleEditor" Watermark="Bold face name or false" Text="{Binding BoldStyle, Mode=TwoWay}" />
                     <TextBox Name="ItalicFontStyleEditor" Watermark="Italic face name or false" Text="{Binding ItalicStyle, Mode=TwoWay}" />
                     <TextBox Name="BoldItalicFontStyleEditor" Watermark="Bold italic face name or false" Text="{Binding BoldItalicStyle, Mode=TwoWay}" />
+                    <TextBlock Text="Synthesize missing styles" FontWeight="SemiBold" />
+                    <CheckBox Name="SyntheticBoldFontEditor" Content="Bold" IsChecked="{Binding SyntheticBold, Mode=TwoWay}" />
+                    <CheckBox Name="SyntheticItalicFontEditor" Content="Italic" IsChecked="{Binding SyntheticItalic, Mode=TwoWay}" />
+                    <CheckBox Name="SyntheticBoldItalicFontEditor" Content="Bold italic (independent)" IsChecked="{Binding SyntheticBoldItalic, Mode=TwoWay}" />
                     <TextBlock Text="Codepoint font overrides" />
                     <TextBlock Text="One mapping per line, e.g. U+2500-U+257F=My Font. Later ranges win; unavailable fonts or glyphs use normal fallback."
                                TextWrapping="Wrap" />

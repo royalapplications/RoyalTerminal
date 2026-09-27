@@ -19,7 +19,7 @@ internal sealed partial class MacFontThickeningCache : IDisposable
     private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
     private const long MaxBytes = 16 * 1024 * 1024;
     private readonly int _capacity;
-    private readonly Dictionary<SKTypeface, Face?> _faces = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<FaceKey, Face?> _faces = new();
     private readonly Dictionary<GlyphKey, GlyphMask> _glyphs = new();
     private nint _graphicsLibrary;
     private nint _colorSpace;
@@ -35,7 +35,8 @@ internal sealed partial class MacFontThickeningCache : IDisposable
 
     internal bool TryDraw(SKCanvas canvas, SKTypeface typeface, float size,
         TerminalFontRenderingSettings settings, ReadOnlySpan<ushort> glyphs,
-        ReadOnlySpan<SKPoint> positions, float originX, float baselineY, SKPaint paint)
+        ReadOnlySpan<SKPoint> positions, float originX, float baselineY, SKPaint paint,
+        TerminalFontSynthesis synthesis = TerminalFontSynthesis.None)
     {
         if (_disposed || !OperatingSystem.IsMacOS() || !settings.Thicken ||
             !float.IsFinite(size) || size <= 0 || glyphs.Length != positions.Length) return false;
@@ -46,11 +47,12 @@ internal sealed partial class MacFontThickeningCache : IDisposable
             _strength = settings.ThickenStrength;
             _embolden = settings.Embolden;
         }
-        if (!_faces.TryGetValue(typeface, out Face? face))
+        FaceKey faceKey = new(typeface, synthesis);
+        if (!_faces.TryGetValue(faceKey, out Face? face))
         {
             if (_faces.Count >= 64) Clear();
-            face = CreateFace(typeface, size, settings);
-            _faces.Add(typeface, face);
+            face = CreateFace(typeface, size, settings, synthesis);
+            _faces.Add(faceKey, face);
         }
         if (face is null) return false;
         for (int i = 0; i < glyphs.Length; i++)
@@ -58,7 +60,7 @@ internal sealed partial class MacFontThickeningCache : IDisposable
             GlyphKey key = new(face, glyphs[i]);
             if (!_glyphs.TryGetValue(key, out GlyphMask mask))
             {
-                mask = Rasterize(face.Font, glyphs[i]);
+                mask = Rasterize(face, glyphs[i]);
                 if (_glyphs.Count >= _capacity || _bytes + mask.Bytes > MaxBytes) ClearGlyphs();
                 _glyphs.Add(key, mask);
                 _bytes += mask.Bytes;
@@ -83,7 +85,8 @@ internal sealed partial class MacFontThickeningCache : IDisposable
         return true;
     }
 
-    private Face? CreateFace(SKTypeface typeface, float size, TerminalFontRenderingSettings settings)
+    private unsafe Face? CreateFace(SKTypeface typeface, float size, TerminalFontRenderingSettings settings,
+        TerminalFontSynthesis synthesis)
     {
         // Native color glyphs do not use the grayscale smoothing path upstream.
         if (typeface.GetTableSize(0x73626978) > 0 || typeface.GetTableSize(0x434F4C52) > 0 ||
@@ -101,9 +104,11 @@ internal sealed partial class MacFontThickeningCache : IDisposable
             descriptors = Native.CTFontManagerCreateFontDescriptorsFromData(cfData);
             if (descriptors == 0 || collectionIndex < 0 || collectionIndex >= Native.CFArrayGetCount(descriptors)) return null;
             nint descriptor = Native.CFArrayGetValueAtIndex(descriptors, collectionIndex);
-            font = Native.CTFontCreateWithFontDescriptor(descriptor, size, 0);
+            CgAffineTransform transform = new(1, 0, 0.267949, 1, 0, 0);
+            font = Native.CTFontCreateWithFontDescriptor(descriptor, size,
+                (synthesis & TerminalFontSynthesis.Italic) != 0 ? (nint)(&transform) : 0);
             if (font == 0 || Native.CTFontGetGlyphCount(font) != typeface.GlyphCount) return null;
-            Face result = new(font, GlyphCache.CreateFont(typeface, size, settings));
+            Face result = new(font, GlyphCache.CreateFont(typeface, size, settings, synthesis), synthesis);
             font = 0;
             return result;
         }
@@ -115,11 +120,14 @@ internal sealed partial class MacFontThickeningCache : IDisposable
         }
     }
 
-    private unsafe GlyphMask Rasterize(nint font, ushort glyph)
+    private unsafe GlyphMask Rasterize(Face face, ushort glyph)
     {
+        nint font = face.Font;
         CgRect bounds = Native.CTFontGetBoundingRectsForGlyphs(font, 1, &glyph, null, 1);
         if (bounds.Width <= 0 || bounds.Height <= 0) return new(null, 0, 0, 0, true);
         double stroke = _embolden ? _size / 24.0 : 0;
+        if ((face.Synthesis & TerminalFontSynthesis.Bold) != 0)
+            stroke = Math.Max(stroke, Math.Max(_size / 14.0, 1));
         int padding = 1 + (int)Math.Ceiling(stroke / 2);
         double left = Math.Floor(bounds.X) - padding;
         double bottom = Math.Floor(bounds.Y) - padding;
@@ -153,7 +161,7 @@ internal sealed partial class MacFontThickeningCache : IDisposable
             Native.CGContextSetShouldAntialias(context, 1);
             Native.CGContextSetGrayFillColor(context, _strength / 255.0, 1);
             Native.CGContextSetGrayStrokeColor(context, _strength / 255.0, 1);
-            if (_embolden)
+            if (stroke > 0)
             {
                 Native.CGContextSetTextDrawingMode(context, 2 /* fill + stroke */);
                 Native.CGContextSetLineWidth(context, stroke);
@@ -190,18 +198,22 @@ internal sealed partial class MacFontThickeningCache : IDisposable
         _colorSpace = _graphicsLibrary = 0;
     }
 
-    private sealed class Face(nint font, SKFont fallback) : IDisposable
+    private sealed class Face(nint font, SKFont fallback, TerminalFontSynthesis synthesis) : IDisposable
     {
         internal nint Font { get; } = font;
         internal SKFont Fallback { get; } = fallback;
+        internal TerminalFontSynthesis Synthesis { get; } = synthesis;
         public void Dispose() { Fallback.Dispose(); Native.CFRelease(Font); }
     }
+    private readonly record struct FaceKey(SKTypeface Typeface, TerminalFontSynthesis Synthesis);
     private readonly record struct GlyphKey(Face Face, ushort Glyph);
     private readonly record struct GlyphMask(SKImage? Image, float Left, float Top, long Bytes, bool Available);
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct CgPoint(double X, double Y);
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct CgRect(double X, double Y, double Width, double Height);
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct CgAffineTransform(double A, double B, double C, double D, double Tx, double Ty);
 
     private static partial class Native
     {

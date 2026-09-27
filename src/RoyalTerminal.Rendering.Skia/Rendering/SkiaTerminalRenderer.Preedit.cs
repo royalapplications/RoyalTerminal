@@ -40,11 +40,11 @@ public sealed partial class SkiaTerminalRenderer
         int column = range.Start;
         for (int i = 0; i < range.Offset; i++) column -= cells[i].Width;
         int caretOffset = 0, caretLength = 0, caretColumn = 0;
-        SKTypeface? caretTypeface = null;
+        RenderFont? caretTypeface = null;
         SKRect textClip = new(range.Start * _cellWidth, y, (range.End + 1) * _cellWidth, y + _cellHeight);
         for (int offset = 0; offset < range.Limit;)
         {
-            SKTypeface typeface = fonts[offset].Typeface;
+            RenderFont typeface = new(fonts[offset]);
             Script script = GetPreeditScript(in cells[offset]);
             int limit = offset + 1;
             int width = cells[offset].Width;
@@ -53,7 +53,7 @@ public sealed partial class SkiaTerminalRenderer
                 Script nextScript = GetPreeditScript(in cells[limit]);
                 if (!IsNeutralPreeditScript(script) && !IsNeutralPreeditScript(nextScript) && script != nextScript)
                     break;
-                if (fonts[limit].Typeface.Handle != typeface.Handle)
+                if (!typeface.Matches(new(fonts[limit])))
                     break;
                 if (IsNeutralPreeditScript(script)) script = nextScript;
                 width += cells[limit++].Width;
@@ -89,20 +89,20 @@ public sealed partial class SkiaTerminalRenderer
         canvas.DrawRect(range.Caret * _cellWidth, y, _cellWidth, _cellHeight, _cursorPaint);
         // Recolor the same shaped context under a one-cell clip. Reshaping only
         // the caret cluster would replace joined forms and split ligatures.
-        if (caretTypeface is not null)
+        if (caretTypeface is { } caretFont)
         {
             canvas.Save();
             try
             {
                 canvas.ClipRect(new SKRect(range.Caret * _cellWidth, y, (range.Caret + 1) * _cellWidth, y + _cellHeight));
-                DrawPreeditRun(canvas, cells.Slice(caretOffset, caretLength), caretColumn, caretTypeface, CursorTextColor, y, textClip);
+                DrawPreeditRun(canvas, cells.Slice(caretOffset, caretLength), caretColumn, caretFont, CursorTextColor, y, textClip);
             }
             finally { canvas.Restore(); }
         }
     }
 
     private void DrawPreeditRun(SKCanvas canvas, ReadOnlySpan<TerminalCell> cells, int column,
-        SKTypeface typeface, SKColor color, float y, SKRect clip)
+        RenderFont typeface, SKColor color, float y, SKRect clip)
     {
         canvas.Save();
         try
