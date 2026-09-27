@@ -38,7 +38,8 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             token = screen.RegisterHyperlink(identity!.UriBytes, default, counter);
         }
-        List<TerminalRow> group = Group(rows, page);
+        using PageRowsLease lease = RentGroup(rows, page);
+        List<TerminalRow> group = lease.Rows;
         State state = Writable(page, group);
         if (!Synchronize(ref page, state, group, layout, screen)) return token;
         byte[]? encoded = screen.SnapshotHyperlinkEncoding(token);

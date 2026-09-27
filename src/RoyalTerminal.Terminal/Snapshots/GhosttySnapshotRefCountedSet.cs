@@ -33,6 +33,10 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
     private readonly List<Item?> _items = [null];
     private readonly int[] _probes = new int[32];
     private int _nextId = 1, _maximumProbe, _living;
+    // Native items live in reusable page storage. Keep one cleared CLR wrapper
+    // for churn without allocating densely from an untrusted capacity hint.
+    // It is scratch, never a live/dead table entry and never shared by Copy().
+    private Item? _spareItem;
 
     internal int Count => _living;
 
@@ -120,7 +124,10 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
 
     private int Insert(T value, int newId)
     {
-        Item fresh = new(value), held = fresh;
+        Item fresh = _spareItem ?? new(value);
+        _spareItem = null;
+        fresh.Value = value;
+        Item held = fresh;
         int chosen = newId, heldId = newId;
         ulong hash = context.Hash(value);
         for (int i = 0; i < _tableCapacity - 1; i++)
@@ -135,6 +142,7 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
                 _probes[item.Probe]--;
                 _items[id] = null;
                 if (id < newId) chosen = id;
+                RecycleItem(item);
                 Place(bucket, heldId, held);
                 break;
             }
@@ -228,6 +236,17 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
         }
         _buckets.Remove(previous);
         while (_maximumProbe > 0 && _probes[_maximumProbe] == 0) _maximumProbe--;
+        RecycleItem(item);
+    }
+
+    private void RecycleItem(Item item)
+    {
+        // The native deletion callback already ran. Do not retain a hyperlink's
+        // encoded payload (or any T-owned object graph) in reusable scratch.
+        item.Value = default!;
+        item.References = item.Probe = 0;
+        item.Bucket = -1;
+        _spareItem ??= item;
     }
 
     private void Place(int bucket, int id, Item item)

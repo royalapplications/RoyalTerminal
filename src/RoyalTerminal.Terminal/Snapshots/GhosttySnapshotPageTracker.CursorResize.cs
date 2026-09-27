@@ -11,7 +11,8 @@ internal sealed partial class GhosttySnapshotPageTracker
         TerminalRow row, ref int token, GhosttySnapshotAllocation layout)
     {
         if (row.SnapshotAllocation is not { MetadataOverflow: false } page) return null;
-        List<TerminalRow> group = Group(rows, page);
+        using PageRowsLease rowsLease = RentGroup(rows, page);
+        List<TerminalRow> group = rowsLease.Rows;
         State state = Writable(page, group);
         if (!Synchronize(ref page, state, group, layout, screen)) return null;
         token = CursorHyperlinkToken(key, token);

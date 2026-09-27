@@ -20,6 +20,7 @@ internal enum SnapshotMutationCheckpoint
     ThemeRowResolved,
     ResetPrepared,
     CursorResizeRestore,
+    MetadataReconciliation,
 }
 
 public sealed partial class TerminalScreen

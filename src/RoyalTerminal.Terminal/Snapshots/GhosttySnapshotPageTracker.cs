@@ -22,9 +22,10 @@ internal sealed partial class GhosttySnapshotPageTracker
         internal int NextRowSlot;
         internal Queue<int>? ReusableTailSlots;
         internal bool Shared;
+        internal bool RowsReconciled;
         internal State Copy()
         {
-            State copy = new(Storage.Copy()) { NextRowSlot = NextRowSlot };
+            State copy = new(Storage.Copy()) { NextRowSlot = NextRowSlot, RowsReconciled = RowsReconciled };
             if (ReusableTailSlots is { Count: > 0 }) copy.ReusableTailSlots = new(ReusableTailSlots);
             foreach ((int row, ulong? revision) in Revisions) copy.Revisions.Add(row, revision);
             return copy;
@@ -186,7 +187,8 @@ internal sealed partial class GhosttySnapshotPageTracker
             ? screen.SnapshotHyperlinkEncoding(CursorHyperlinkToken(key, 0)) : null;
         if (departing is not null && !ReferenceEquals(departing, page) && _pages.TryGetValue(departing, out _))
         {
-            List<TerminalRow> oldRows = Group(rows, departing);
+            using PageRowsLease oldLease = RentGroup(rows, departing);
+            List<TerminalRow> oldRows = oldLease.Rows;
             State old = Writable(departing, oldRows);
             GhosttySnapshotPageAllocation oldPage = departing;
             if (oldRows.Count != 0) Synchronize(ref oldPage, old, oldRows, layout, screen);
@@ -195,7 +197,8 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (oldRows.Count == 0) _pages.Remove(departing);
         }
 
-        List<TerminalRow> group = Group(rows, page);
+        using PageRowsLease lease = RentGroup(rows, page);
+        List<TerminalRow> group = lease.Rows;
         State state = Writable(page, group);
         if (!Synchronize(ref page, state, group, layout, screen)) return false;
         bool success = true;
@@ -239,8 +242,42 @@ internal sealed partial class GhosttySnapshotPageTracker
     private bool Synchronize(ref GhosttySnapshotPageAllocation page, State state,
         List<TerminalRow> group, GhosttySnapshotAllocation layout, TerminalScreen? screen)
     {
-        HashSet<int> retained = [];
-        foreach (TerminalRow row in group) retained.Add(row.SnapshotAllocationRow);
+        // Reconciliation never calls a host or recursively synchronizes a page.
+        // Keep the lease explicit nevertheless so future nested work cannot
+        // overwrite an in-flight set. Copy() deliberately does not copy scratch.
+        HashSet<int> retained = _retainedSlotScratch ?? [];
+        _retainedSlotScratch = null;
+        try
+        {
+            bool synchronized = true;
+            foreach (TerminalRow row in group)
+            {
+                int slot = row.SnapshotAllocationRow;
+                if (!retained.Add(slot) || !state.Revisions.TryGetValue(slot, out ulong? revision) ||
+                    revision != row.SnapshotMetadataRevision) synchronized = false;
+            }
+            // All live slots must match, not just the cursor row. This also
+            // detects retirement, direct host writes and interleaved pages.
+            // A restored seed can contain metadata outside its installed live
+            // rows; its first reconciliation must still trim those references.
+            if (state.RowsReconciled && synchronized && retained.Count == state.Revisions.Count) return true;
+            screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.MetadataReconciliation);
+            bool complete = SynchronizeRows(ref page, state, group, layout, screen, retained);
+            if (complete) state.RowsReconciled = true;
+            return complete;
+        }
+        finally
+        {
+            retained.Clear();
+            // Pathological restore hints must not permanently inflate scratch.
+            if (retained.EnsureCapacity(0) <= MaximumCachedGroupCapacity)
+                _retainedSlotScratch ??= retained;
+        }
+    }
+
+    private bool SynchronizeRows(ref GhosttySnapshotPageAllocation page, State state,
+        List<TerminalRow> group, GhosttySnapshotAllocation layout, TerminalScreen? screen, HashSet<int> retained)
+    {
         state.Storage.Styles.RetainRows(retained, page.Capacity.Columns);
         state.Storage.Graphemes.RetainRows(retained, page.Capacity.Columns);
         state.Storage.Hyperlinks.RetainRows(retained, page.Capacity.Columns);

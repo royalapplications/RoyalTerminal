@@ -296,11 +296,12 @@ internal sealed class GhosttySnapshotStyleStorage
 
     internal void RetainRows(IReadOnlySet<int> rows, int columns)
     {
-        int[] chunks = new int[_cells.Count];
-        _cells.Keys.CopyTo(chunks, 0);
-        foreach (int chunkIndex in chunks)
+        ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
+        // ClearCell only removes dictionary entries, which .NET enumeration
+        // supports. Keep the current chunk rooted without allocating key copies.
+        foreach ((int chunkIndex, CellChunk chunk) in _cells)
         {
-            ReadOnlySpan<ushort> ids = _cells[chunkIndex].Ids;
+            ReadOnlySpan<ushort> ids = chunk.Ids;
             for (int offset = 0; offset < ids.Length; offset++)
             {
                 int index = (chunkIndex << ChunkShift) + offset;

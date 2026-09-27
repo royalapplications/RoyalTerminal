@@ -736,6 +736,33 @@ are authored but unrun. Expected savings are fewer temporary collections and
 unnecessary source scans, not a measured throughput claim; before/after profiling
 and all execution remain in the final validation stage.
 
+Snapshot metadata coordination now reuses two bounded row-group buffers and one
+retained-slot set per tracker. Leases clear row references on both success and
+failure; scratch is neither copied nor shared with independent COW owners. Page
+synchronization skips metadata-map rescans only after its first full reconciliation
+and only when every live physical slot has the expected revision. Restored seeds
+still discard metadata outside installed rows; dirty non-cursor rows, changed
+slot membership and interleaved pages retain their full reconciliation path.
+Grouping still scans the row buffer: this is not constant-time page lookup.
+Style retirement also enumerates removable dictionary chunks directly instead of
+allocating a copy of the chunk keys.
+
+Ghostty `Screen.cursorChangePin` retains same-page state and migrates references
+across pages; its `RefCountedSet` recycles entries in page storage. The managed
+reference set now keeps one cleared entry wrapper for tail trimming, preferred-ID
+replacement and dead-bucket reuse. Deletion callbacks, IDs, probe/backshift order,
+native rehash/capacity refusals and reference counts are unchanged. The spare keeps
+no encoded hyperlink payload and is not copied into another allocator. This is
+bounded CLR reuse, not a dense allocation from snapshot capacity hints. Windows
+Terminal's `ROW` and xterm.js's `BufferLine` remain row-storage references, not
+definitions of Ghostty's PAGE allocation contract.
+
+Twenty-two new revision/retirement, allocation, seed, COW, collision and weak-owner
+lifetime cases are authored but unrun. `--managed-print` adds isolated snapshot
+pen changes and 128-row cross-page cursor cycles. Expected benefits are fewer
+temporary collections, metadata scans and per-style wrapper allocations; timings,
+allocation measurements and regression execution remain deferred to final validation.
+
 Full-width IL/DL now clamp the count to the affected rows and traverse once in
 the native direction, copying directly from the requested distance. In-place
 SU/SD share this bounded movement; the primary top-origin history path still

@@ -17,7 +17,8 @@ internal sealed partial class GhosttySnapshotPageTracker
             state = Exclusive(page, known);
         else
         {
-            List<TerminalRow> group = Group(rows, page);
+            using PageRowsLease lease = RentGroup(rows, page);
+            List<TerminalRow> group = lease.Rows;
             state = Writable(page, group);
             if (!Synchronize(ref page, state, group, layout, screen)) return default;
         }
