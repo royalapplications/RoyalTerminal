@@ -226,6 +226,9 @@ public sealed record TerminalSessionAppearanceSettings
     /// </summary>
     public string? FontFilePath { get; init; }
 
+    /// <summary>Ordered per-style family overrides; empty lists preserve legacy font selection.</summary>
+    public TerminalFontFamilySettings FontFamilies { get; init; } = TerminalFontFamilySettings.Default;
+
     /// <summary>
     /// Font size in points.
     /// </summary>

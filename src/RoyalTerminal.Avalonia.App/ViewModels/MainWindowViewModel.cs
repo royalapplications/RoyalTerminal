@@ -33,6 +33,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _fontSize = 14.0;
     private TerminalFontSource _fontSource = TerminalFontSource.System;
     private string _fontFamilyName = GetDefaultMonospaceFont();
+    private TerminalFontFamilySettings _fontFamilies = TerminalFontFamilySettings.Default;
     private string _fontFilePath = string.Empty;
     private bool _fontSubpixelPositioning = TerminalFontRenderingSettings.Default.SubpixelPositioning;
     private TerminalFontEdging _fontEdging = TerminalFontRenderingSettings.Default.Edging;
@@ -697,6 +698,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _fontFilePath;
         set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
+    }
+
+    /// <summary>Ordered system families for regular and styled terminal text.</summary>
+    public TerminalFontFamilySettings FontFamilies
+    {
+        get => _fontFamilies;
+        set => this.RaiseAndSetIfChanged(ref _fontFamilies, (value ?? TerminalFontFamilySettings.Default).Normalize());
     }
 
     public bool FontSubpixelPositioning

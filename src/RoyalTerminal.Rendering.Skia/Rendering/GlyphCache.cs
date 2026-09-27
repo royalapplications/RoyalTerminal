@@ -27,6 +27,7 @@ public sealed class GlyphCache : IDisposable
     private readonly SKTypeface? _italicTypeface;
     private readonly SKTypeface? _boldItalicTypeface;
     private readonly bool _ownsTypefaces = true;
+    private readonly ConfiguredFontFamilies? _configuredFamilies;
     private TerminalFontRenderingSettings _fontRenderingSettings;
     private bool _disposed;
 
@@ -125,8 +126,9 @@ public sealed class GlyphCache : IDisposable
     }
 
     private GlyphCache(TerminalTypefaceCollection typefaces, int maxEntries,
-        TerminalFontRenderingSettings? fontRenderingSettings)
+        TerminalFontRenderingSettings? fontRenderingSettings, ConfiguredFontFamilies? configuredFamilies = null)
     {
+        _configuredFamilies = configuredFamilies;
         _maxEntries = maxEntries;
         _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
         _ownsTypefaces = false;
@@ -135,6 +137,24 @@ public sealed class GlyphCache : IDisposable
         _boldTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Bold);
         _italicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Italic);
         _boldItalicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.BoldItalic);
+    }
+
+    /// <summary>
+    /// Creates and owns ordered configured system families. Empty/unavailable
+    /// regular lists retain the legacy family/file selection. Unlike
+    /// <see cref="CreateWithTypefaces"/>, the caller does not own loaded faces.
+    /// </summary>
+    public static GlyphCache CreateWithFontFamilies(TerminalFontFamilySettings families,
+        string fontFamily = "Consolas", TerminalFontSource fontSource = TerminalFontSource.System,
+        string? fontFilePath = null, int maxEntries = 8192, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(families);
+        if (families.IsEmpty) return new(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings);
+        using SKFontManager manager = SKFontManager.CreateDefault();
+        ConfiguredFontFamilies loaded = ConfiguredFontFamilies.Load(families, new SkiaConfiguredFontFamilyMatcher(manager),
+            () => new GlyphCache(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings));
+        try { return new(loaded.Collection, maxEntries, fontRenderingSettings, loaded); }
+        catch { loaded.Dispose(); throw; }
     }
 
     /// <summary>
@@ -271,6 +291,7 @@ public sealed class GlyphCache : IDisposable
             _italicTypeface?.Dispose();
             _boldItalicTypeface?.Dispose();
         }
+        _configuredFamilies?.Dispose();
     }
 
     private static SKTypeface CreateSystemTypeface(string fontFamily, SKFontStyle style)

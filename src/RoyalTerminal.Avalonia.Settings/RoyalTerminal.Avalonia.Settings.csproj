@@ -18,6 +18,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Controls.ColorPicker" />
+    <PackageReference Include="ReactiveUI.Reactive" />
   </ItemGroup>
 
 </Project>

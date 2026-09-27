@@ -18,6 +18,7 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
     private readonly string? _fontFilePath;
     private readonly int _cacheCapacity;
     private readonly TerminalTypefaceCollection? _typefaces;
+    private readonly TerminalFontFamilySettings? _families;
     private readonly object _sync = new();
     private readonly Dictionary<uint, bool> _coverage = new();
     private GlyphCache? _fonts;
@@ -61,6 +62,20 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
         _typefaces = typefaces;
     }
 
+    /// <summary>Creates lazy, independently owned coverage using ordered configured families.</summary>
+    public static SkiaTerminalGlyphCoverageSource CreateWithFontFamilies(TerminalFontFamilySettings families,
+        string fontFamily = "Consolas", TerminalFontSource fontSource = TerminalFontSource.System, string? fontFilePath = null)
+    {
+        ArgumentNullException.ThrowIfNull(families);
+        return new(families.Normalize(), fontFamily, fontSource, fontFilePath);
+    }
+
+    private SkiaTerminalGlyphCoverageSource(TerminalFontFamilySettings families, string fontFamily,
+        TerminalFontSource fontSource, string? fontFilePath) : this(fontFamily, fontSource, fontFilePath, 4096)
+    {
+        _families = families;
+    }
+
     /// <inheritdoc />
     /// <remarks>Returns false for invalid scalars and after disposal.</remarks>
     public bool HasSystemGlyph(uint codepoint)
@@ -70,9 +85,9 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
         {
             if (_disposed) return false;
             if (_coverage.TryGetValue(codepoint, out bool found)) return found;
-            _fonts ??= _typefaces is null
-                ? new GlyphCache(_fontFamily, _fontSource, _fontFilePath)
-                : GlyphCache.CreateWithTypefaces(_typefaces);
+            _fonts ??= _typefaces is not null ? GlyphCache.CreateWithTypefaces(_typefaces)
+                : _families is not null ? GlyphCache.CreateWithFontFamilies(_families, _fontFamily, _fontSource, _fontFilePath)
+                : new GlyphCache(_fontFamily, _fontSource, _fontFilePath);
             _resolver ??= new TerminalFontResolver();
             if (_coverage.Count == _cacheCapacity)
             {

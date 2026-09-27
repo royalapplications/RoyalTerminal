@@ -393,7 +393,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalFontSource fontSource = TerminalFontSource.System,
         string? fontFilePath = null,
         TerminalFontRenderingSettings? fontRenderingSettings = null)
-        : this(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null)
+        : this(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null, null)
     {
     }
 
@@ -406,17 +406,34 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         float fontSize = 14f, TerminalFontRenderingSettings? fontRenderingSettings = null)
     {
         ArgumentNullException.ThrowIfNull(typefaces);
-        return new(string.Empty, fontSize, TerminalFontSource.System, null, fontRenderingSettings, typefaces);
+        return new(string.Empty, fontSize, TerminalFontSource.System, null, fontRenderingSettings, typefaces, null);
+    }
+
+    /// <summary>
+    /// Creates a renderer owning the configured per-style families. Empty or
+    /// unavailable regular lists retain the supplied legacy family/file selection.
+    /// Coverage owns independent resources and follows the same family order.
+    /// </summary>
+    public static SkiaTerminalRenderer CreateWithFontFamilies(TerminalFontFamilySettings families,
+        string fontFamily = "Consolas", float fontSize = 14f, TerminalFontSource fontSource = TerminalFontSource.System,
+        string? fontFilePath = null, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(families);
+        return new(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null, families.Normalize());
     }
 
     private SkiaTerminalRenderer(string fontFamily, float fontSize, TerminalFontSource fontSource,
-        string? fontFilePath, TerminalFontRenderingSettings? fontRenderingSettings, TerminalTypefaceCollection? typefaces)
+        string? fontFilePath, TerminalFontRenderingSettings? fontRenderingSettings, TerminalTypefaceCollection? typefaces,
+        TerminalFontFamilySettings? families)
     {
         _fontSize = fontSize;
-        _glyphCoverageSource = typefaces is null ? new(fontFamily, fontSource, fontFilePath)
-            : SkiaTerminalGlyphCoverageSource.CreateWithTypefaces(typefaces);
+        _glyphCoverageSource = typefaces is not null ? SkiaTerminalGlyphCoverageSource.CreateWithTypefaces(typefaces)
+            : families is not null ? SkiaTerminalGlyphCoverageSource.CreateWithFontFamilies(families, fontFamily, fontSource, fontFilePath)
+            : new(fontFamily, fontSource, fontFilePath);
         _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
-        _glyphCache = typefaces is not null ? GlyphCache.CreateWithTypefaces(typefaces, fontRenderingSettings: _fontRenderingSettings) : new GlyphCache(
+        _glyphCache = typefaces is not null ? GlyphCache.CreateWithTypefaces(typefaces, fontRenderingSettings: _fontRenderingSettings)
+            : families is not null ? GlyphCache.CreateWithFontFamilies(families, fontFamily, fontSource, fontFilePath, fontRenderingSettings: _fontRenderingSettings)
+            : new GlyphCache(
             fontFamily,
             fontSource,
             fontFilePath,

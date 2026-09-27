@@ -312,6 +312,23 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private TerminalTypefaceCollection? _typefaceCollection;
 
+    /// <summary>Persistable ordered system families for each terminal font style.</summary>
+    public static readonly DirectProperty<TerminalControl, TerminalFontFamilySettings> FontFamiliesProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalFontFamilySettings>(
+            nameof(FontFamilies), o => o.FontFamilies, (o, v) => o.FontFamilies = v);
+
+    private TerminalFontFamilySettings _fontFamilies = TerminalFontFamilySettings.Default;
+
+    /// <summary>
+    /// Gets or sets ordered family overrides. Empty lists restore default
+    /// family/file selection. A caller-supplied TypefaceCollection takes precedence.
+    /// </summary>
+    public TerminalFontFamilySettings FontFamilies
+    {
+        get => _fontFamilies;
+        set => SetAndRaise(FontFamiliesProperty, ref _fontFamilies, (value ?? TerminalFontFamilySettings.Default).Normalize());
+    }
+
     /// <summary>
     /// Gets or sets ordered configured font faces. Null restores family/file
     /// selection. Faces are borrowed and must outlive all renderers using them,
@@ -1271,6 +1288,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
         if (change.Property == FontFamilyNameProperty ||
             change.Property == TypefaceCollectionProperty ||
+            change.Property == FontFamiliesProperty ||
             change.Property == FontSourceProperty ||
             change.Property == FontFilePathProperty ||
             change.Property == TerminalFontSizeProperty ||
@@ -1432,6 +1450,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         SkiaTerminalRenderer renderer = _typefaceCollection is { } typefaces
             ? SkiaTerminalRenderer.CreateWithTypefaces(typefaces,
                 (float)GetActualTerminalFontSize(TerminalFontSize), CreateFontRenderingSettings())
+            : !_fontFamilies.IsEmpty ? SkiaTerminalRenderer.CreateWithFontFamilies(_fontFamilies,
+                family, (float)GetActualTerminalFontSize(TerminalFontSize), FontSource, fontFilePath, CreateFontRenderingSettings())
             : new(
             family,
             (float)GetActualTerminalFontSize(TerminalFontSize),

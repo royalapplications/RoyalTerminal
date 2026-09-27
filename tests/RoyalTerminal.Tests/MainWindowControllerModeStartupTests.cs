@@ -2873,6 +2873,7 @@ public sealed class MainWindowControllerModeStartupTests
                     Appearance = new TerminalSessionAppearanceSettings
                     {
                         FontFamilyName = "Profile A Mono",
+                        FontFamilies = new() { Regular = ["Profile A first", "Profile A second"], Bold = ["Profile A bold"] },
                         FontSize = 19.0,
                         FontRendering = new TerminalFontRenderingSettings
                         {
@@ -2909,6 +2910,7 @@ public sealed class MainWindowControllerModeStartupTests
                     Appearance = new TerminalSessionAppearanceSettings
                     {
                         FontFamilyName = "Profile B Mono",
+                        FontFamilies = new() { Regular = ["Profile B regular"] },
                         FontSize = 11.0,
                         AutoScroll = true,
                         BackgroundOpacityEnabled = false,
@@ -2972,6 +2974,8 @@ public sealed class MainWindowControllerModeStartupTests
                 GetStandaloneControls(terminalHost),
                 control => !controlsBeforeSplit.Contains(control) && control.TerminalFontSize == 19.0);
             Assert.Equal("Profile A Mono", splitControl.FontFamilyName);
+            Assert.Equal(new[] { "Profile A first", "Profile A second" }, splitControl.FontFamilies.Regular);
+            Assert.Equal(new[] { "Profile A bold" }, splitControl.FontFamilies.Bold);
             Assert.Equal(TerminalFontSource.System, splitControl.FontSource);
             Assert.False(splitControl.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Alias, splitControl.FontEdging);

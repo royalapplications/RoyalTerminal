@@ -55,6 +55,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.True(viewModel.SettingsPanelState.SixelGraphicsEnabled);
             Assert.Equal(TerminalFontSource.File, viewModel.SettingsPanelState.SelectedFontSource);
             Assert.Equal(GetStoredFontPath(), viewModel.SettingsPanelState.FontFilePath);
+            Assert.Equal(new[] { "Stored first", "Stored second" }, viewModel.SettingsPanelState.FontFamiliesEditor.BuildSettings().Regular);
             Assert.Equal(18, viewModel.SettingsPanelState.FontSize);
             Assert.False(viewModel.SettingsPanelState.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Alias, viewModel.SettingsPanelState.SelectedFontEdging);
@@ -80,6 +81,10 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.EnableLigatures = true;
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.System;
             viewModel.SettingsPanelState.FontFamilyName = "Monaco";
+            viewModel.SettingsPanelState.FontFamiliesEditor.Regular = "First\nSecond";
+            viewModel.SettingsPanelState.FontFamiliesEditor.Bold = "Bold";
+            viewModel.SettingsPanelState.FontFamiliesEditor.Italic = "Italic";
+            viewModel.SettingsPanelState.FontFamiliesEditor.BoldItalic = "Both";
             viewModel.SettingsPanelState.FontSize = 17;
             viewModel.SettingsPanelState.FontSubpixelPositioning = true;
             viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
@@ -101,6 +106,10 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.True(viewModel.EnableLigatures);
             Assert.Equal(TerminalFontSource.System, viewModel.FontSource);
             Assert.Equal("Monaco", viewModel.FontFamilyName);
+            Assert.Equal(new[] { "First", "Second" }, viewModel.FontFamilies.Regular);
+            Assert.Equal(new[] { "Bold" }, viewModel.FontFamilies.Bold);
+            Assert.Equal(new[] { "Italic" }, viewModel.FontFamilies.Italic);
+            Assert.Equal(new[] { "Both" }, viewModel.FontFamilies.BoldItalic);
             Assert.Equal(17, viewModel.FontSize);
             Assert.True(viewModel.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Antialias, viewModel.FontEdging);
@@ -116,6 +125,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             TerminalControl control = Assert.Single(GetStandaloneControls(terminalHost));
             Assert.Equal(TerminalFontSource.System, control.FontSource);
             Assert.Equal("Monaco", control.FontFamilyName);
+            Assert.Equal(viewModel.FontFamilies, control.FontFamilies);
             Assert.Equal(17, control.TerminalFontSize);
             Assert.True(control.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Antialias, control.FontEdging);
@@ -172,6 +182,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             viewModel.SettingsPanelState.SelectedFontSource = TerminalFontSource.File;
             viewModel.SettingsPanelState.FontFamilyName = "Saved Font";
             viewModel.SettingsPanelState.FontFilePath = GetSavedFontPath();
+            viewModel.SettingsPanelState.FontFamiliesEditor.BoldItalic = "Saved bold italic";
             viewModel.SettingsPanelState.FontSubpixelPositioning = true;
             viewModel.SettingsPanelState.SelectedFontEdging = TerminalFontEdging.Antialias;
             viewModel.SettingsPanelState.SelectedFontHinting = TerminalFontHinting.Normal;
@@ -193,6 +204,7 @@ public sealed class MainWindowControllerSettingsPanelTests
             Assert.Equal(TerminalFontSource.File, savedProfile.Appearance.FontSource);
             Assert.Equal("Saved Font", savedProfile.Appearance.FontFamilyName);
             Assert.Equal(GetSavedFontPath(), savedProfile.Appearance.FontFilePath);
+            Assert.Equal(new[] { "Saved bold italic" }, savedProfile.Appearance.FontFamilies.BoldItalic);
             Assert.True(savedProfile.Appearance.FontRendering.SubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Antialias, savedProfile.Appearance.FontRendering.Edging);
             Assert.Equal(TerminalFontHinting.Normal, savedProfile.Appearance.FontRendering.Hinting);
@@ -583,6 +595,7 @@ public sealed class MainWindowControllerSettingsPanelTests
                         FontSource = TerminalFontSource.File,
                         FontFamilyName = "Stored Font",
                         FontFilePath = GetStoredFontPath(),
+                        FontFamilies = new() { Regular = ["Stored first", "Stored second"] },
                         FontSize = 18,
                         FontRendering = new TerminalFontRenderingSettings
                         {

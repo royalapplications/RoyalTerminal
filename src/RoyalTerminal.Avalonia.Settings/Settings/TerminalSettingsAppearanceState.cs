@@ -65,6 +65,9 @@ public sealed class TerminalSettingsAppearanceState : TerminalSettingsCategorySt
         set => Owner.FontFilePath = value;
     }
 
+    /// <summary>Ordered family overrides for the current profile.</summary>
+    public TerminalFontFamilyEditorViewModel FontFamiliesEditor => Owner.FontFamiliesEditor;
+
     public double FontSize
     {
         get => Owner.FontSize;

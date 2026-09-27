@@ -73,8 +73,30 @@ resolver on eviction. Cluster selection, cursor, IME and password rendering use
 the same collection policy. Resolver-owned discovery faces are released once;
 configured faces are never disposed by borrowed-collection consumers.
 
-Persisted application family lists, per-codepoint overrides, disabled/synthetic
-style policy and exhaustive platform fallback enumeration are still distinct
+Persisted `FontFamilies` settings supply four immutable ordered lists (regular,
+bold, italic, bold italic). The settings editor accepts one family per line and
+keeps comma-containing names intact. Profiles, launch configuration, runtime
+settings and split panes preserve the lists. Existing profiles and empty lists
+keep their single family/file behavior. A non-empty regular list overrides that
+primary selection; unavailable entries are skipped, and an entirely unavailable
+list restores the legacy primary. Missing/empty styled lists use variants of
+the loaded regular families, then regular-face fallback. Caller-supplied
+`TypefaceCollection` still takes precedence over persisted family settings.
+
+This follows Ghostty's
+[repeatable per-style family configuration](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/config/Config.zig),
+not the implicit DirectWrite/canvas family fallback of Windows Terminal/xterm.js.
+Skia family style sets distinguish unavailable families from implicit system
+substitution without enumerating or reordering the system fallback registry.
+Configured face references are owned by each renderer/coverage source and
+disposed after their consumers; partial loading failures dispose all acquired
+references. Skia protects shared system faces from public disposal and may keep
+their native resources cached; this does not promise immediate OS-font reclamation.
+Profile JSON now uses generated metadata for the complete profile graph,
+including immutable family lists, rather than introducing reflected font models.
+
+Per-codepoint overrides, named and disabled/synthetic style policy and exhaustive
+platform fallback enumeration are still distinct
 remaining parity requirements. Skia's family/global matching is not claimed to
 enumerate Ghostty's complete platform discovery iterator. The font benchmark
 compares existing single-face discovery with loaded-collection reuse; isolated

@@ -488,6 +488,25 @@
                 <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SubtleTextBrush}"
                            IsVisible="{Binding IsFileFontSourceSelected}"
                            Text="{Binding FontFamilyName, StringFormat='Resolved family: {0}'}" />
+                <Expander Header="Ordered font families" HorizontalAlignment="Stretch">
+                  <StackPanel Spacing="8" DataContext="{Binding FontFamiliesEditor}"
+                              x:DataType="settings:TerminalFontFamilyEditorViewModel">
+                    <TextBlock Text="One system family per line, highest priority first. Unavailable families are skipped. Empty regular uses the primary family/file above; empty styled lists inherit regular-family variants."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Regular" />
+                    <TextBox Name="RegularFontFamiliesEditor" Text="{Binding Regular, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Bold" />
+                    <TextBox Name="BoldFontFamiliesEditor" Text="{Binding Bold, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Italic" />
+                    <TextBox Name="ItalicFontFamiliesEditor" Text="{Binding Italic, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Bold italic" />
+                    <TextBox Name="BoldItalicFontFamiliesEditor" Text="{Binding BoldItalic, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                  </StackPanel>
+                </Expander>
               </StackPanel>
 
               <StackPanel Spacing="8">

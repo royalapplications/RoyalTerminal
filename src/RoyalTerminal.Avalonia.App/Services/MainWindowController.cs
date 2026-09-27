@@ -1239,6 +1239,7 @@ internal sealed class MainWindowController
         _viewModel.FontSource = appearance.FontSource;
         _viewModel.FontFamilyName = appearance.FontFamilyName;
         _viewModel.FontFilePath = appearance.FontFilePath ?? string.Empty;
+        _viewModel.FontFamilies = appearance.FontFamilies;
         _viewModel.SetFontSizeFromSettings(appearance.FontSize > 0 ? appearance.FontSize : 14.0);
         _viewModel.FontSubpixelPositioning = appearance.FontRendering.SubpixelPositioning;
         _viewModel.FontEdging = appearance.FontRendering.Edging;
@@ -1820,6 +1821,7 @@ internal sealed class MainWindowController
             FontSource = fontSource,
             FontFamilyName = fontFamily,
             FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
+            FontFamilies = _viewModel.FontFamilies,
             FontSize = _viewModel.FontSize > 0 ? _viewModel.FontSize : 14.0,
             FontRendering = new TerminalFontRenderingSettings
             {
@@ -5164,6 +5166,7 @@ internal sealed class MainWindowController
 
         standalone.FontFamilyName = fontFamily;
         standalone.FontFilePath = fontFilePath;
+        standalone.FontFamilies = _viewModel.FontFamilies;
         standalone.FontSource = _viewModel.FontSource == TerminalFontSource.File && !string.IsNullOrWhiteSpace(fontFilePath)
             ? TerminalFontSource.File
             : TerminalFontSource.System;
@@ -5189,6 +5192,7 @@ internal sealed class MainWindowController
 
         standalone.FontFamilyName = fontFamily;
         standalone.FontFilePath = fontFilePath;
+        standalone.FontFamilies = appearance.FontFamilies;
         standalone.FontSource = appearance.FontSource == TerminalFontSource.File &&
             !string.IsNullOrWhiteSpace(fontFilePath)
                 ? TerminalFontSource.File
@@ -5223,6 +5227,7 @@ internal sealed class MainWindowController
             FontSource = fontSource,
             FontFamilyName = NormalizeFontFamily(control.FontFamilyName),
             FontFilePath = fontSource == TerminalFontSource.File ? fontFilePath : null,
+            FontFamilies = control.FontFamilies,
             FontSize = control.TerminalFontSize > 0 ? control.TerminalFontSize : 14.0,
             FontRendering = new TerminalFontRenderingSettings
             {
@@ -5620,6 +5625,7 @@ internal sealed class MainWindowController
             current.SelectedFontSource = _viewModel.FontSource;
             current.FontFamilyName = _viewModel.FontFamilyName;
             current.FontFilePath = _viewModel.FontFilePath;
+            current.FontFamiliesEditor.Load(_viewModel.FontFamilies);
             current.FontSize = _viewModel.FontSize;
             current.FontSubpixelPositioning = _viewModel.FontSubpixelPositioning;
             current.SelectedFontEdging = _viewModel.FontEdging;
@@ -5793,6 +5799,7 @@ internal sealed class MainWindowController
         _viewModel.FontSource = fontSource;
         _viewModel.FontFamilyName = fontFamilyName;
         _viewModel.FontFilePath = fontFilePath;
+        _viewModel.FontFamilies = state.FontFamiliesEditor.BuildSettings();
         _viewModel.FontSubpixelPositioning = state.FontSubpixelPositioning;
         _viewModel.FontEdging = state.SelectedFontEdging;
         _viewModel.FontHinting = state.SelectedFontHinting;

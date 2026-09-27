@@ -631,6 +631,10 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     public TerminalSettingsPanelState()
     {
+        FontFamiliesEditor.PropertyChanged += (_, _) =>
+        {
+            if (!_suppressDirtyTracking) IsDirty = true;
+        };
         Profiles = [];
 
         TransportModes =
@@ -1117,6 +1121,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         get => GetValue(FontFilePathProperty);
         set => SetValue(FontFilePathProperty, value);
     }
+
+    /// <summary>Edits the current profile's ordered per-style family overrides.</summary>
+    public TerminalFontFamilyEditorViewModel FontFamiliesEditor { get; } = new();
 
     public double FontSize
     {
@@ -1636,6 +1643,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                     ? TerminalFontSource.File
                     : TerminalFontSource.System,
                 FontFamilyName = NormalizeOptional(FontFamilyName) ?? GetDefaultMonospaceFont(),
+                FontFamilies = FontFamiliesEditor.BuildSettings(),
                 FontFilePath = SelectedFontSource == TerminalFontSource.File
                     ? NormalizeOptional(FontFilePath)
                     : null,
@@ -1819,6 +1827,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             SelectedFontSource = profile.Appearance.FontSource;
             FontFamilyName = profile.Appearance.FontFamilyName;
             FontFilePath = profile.Appearance.FontFilePath ?? string.Empty;
+            FontFamiliesEditor.Load(profile.Appearance.FontFamilies);
             FontSize = profile.Appearance.FontSize;
             TerminalFontRenderingSettings fontRendering = profile.Appearance.FontRendering.Normalize();
             FontSubpixelPositioning = fontRendering.SubpixelPositioning;
