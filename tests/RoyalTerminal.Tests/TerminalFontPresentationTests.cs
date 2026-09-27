@@ -2,18 +2,13 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using RoyalTerminal.Avalonia.Rendering;
 using SkiaSharp;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-[CollectionDefinition(nameof(TerminalFontPresentationCollection), DisableParallelization = true)]
-public sealed class TerminalFontPresentationCollection;
-
-// Keep the exact allocation assertion independent of concurrent native-font
-// creation/disposal and rendering tests sharing Skia's process-wide state.
-[Collection(nameof(TerminalFontPresentationCollection))]
 public sealed class TerminalFontPresentationTests
 {
     [Theory]
@@ -136,11 +131,20 @@ public sealed class TerminalFontPresentationTests
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
         Matcher matcher = new();
         using TerminalFontResolver resolver = new(matcher);
-        for (int i = 0; i < 100; i++) _ = resolver.ResolveTypeface(primary, "\U0001F600\uFE0F", CultureInfo.InvariantCulture);
+        // Warm the same isolated measurement loop, including runtime tiering,
+        // before asserting. Keep xUnit/JIT assertion setup outside the counter.
+        for (int i = 0; i < 10; i++) _ = MeasureWarmPresentation(resolver, primary);
+        long allocated = MeasureWarmPresentation(resolver, primary);
+        Assert.Equal(0, allocated);
+        Assert.Single(matcher.Requests);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long MeasureWarmPresentation(TerminalFontResolver resolver, SKTypeface primary)
+    {
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++) _ = resolver.ResolveTypeface(primary, "\U0001F600\uFE0F", CultureInfo.InvariantCulture);
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.Single(matcher.Requests);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     [Fact]
