@@ -13,6 +13,18 @@ namespace RoyalTerminal.Terminal;
 /// </summary>
 public sealed record TerminalFontFamilySettings
 {
+    /// <summary>Creates default font settings with synthesis enabled for all styles.</summary>
+    public TerminalFontFamilySettings() : this(true, true, true) { }
+
+    /// <summary>Creates font settings, preserving enabled synthesis when JSON omits the optional toggles.</summary>
+    [JsonConstructor]
+    public TerminalFontFamilySettings(bool syntheticBold = true, bool syntheticItalic = true, bool syntheticBoldItalic = true)
+    {
+        SyntheticBold = syntheticBold;
+        SyntheticItalic = syntheticItalic;
+        SyntheticBoldItalic = syntheticBoldItalic;
+    }
+
     /// <summary>Immutable empty configuration, preserving legacy font selection.</summary>
     public static TerminalFontFamilySettings Default { get; } = new();
 

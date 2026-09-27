@@ -42,7 +42,7 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             else control.ScrollToBottom();
             Dispatcher.UIThread.RunJobs();
             Point point = await GetCellInteractionPointAsync(control, window, 2, 1);
-            RaiseMousePressReleaseSequence(control, window, point, clickCount);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: clickCount);
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal((0, atTop ? 0 : -3), control.Renderer!.SelectionStart!.Value);

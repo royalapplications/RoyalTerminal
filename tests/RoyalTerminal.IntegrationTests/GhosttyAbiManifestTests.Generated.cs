@@ -723,7 +723,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyRenderStateData", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyRenderStateData>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(21, values.EnumerateObject().Count());
+        Assert.Equal(23, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Cols, values.GetProperty("COLS").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Rows, values.GetProperty("ROWS").GetInt64());
@@ -744,6 +744,8 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.CursorViewportWideTail, values.GetProperty("CURSOR_VIEWPORT_WIDE_TAIL").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Cursor, values.GetProperty("CURSOR").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Colors, values.GetProperty("COLORS").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.Overscan, values.GetProperty("OVERSCAN").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateData.OverscanRequest, values.GetProperty("OVERSCAN_REQUEST").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -766,8 +768,9 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyRenderStateOption", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyRenderStateOption>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(2, values.EnumerateObject().Count());
+        Assert.Equal(3, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateOption.Dirty, values.GetProperty("DIRTY").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateOption.Overscan, values.GetProperty("OVERSCAN").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -797,13 +800,15 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyRenderStateRowData", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyRenderStateRowData>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(7, values.EnumerateObject().Count());
+        Assert.Equal(9, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Dirty, values.GetProperty("DIRTY").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Raw, values.GetProperty("RAW").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Cells, values.GetProperty("CELLS").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Selection, values.GetProperty("SELECTION").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.CellsRaw, values.GetProperty("CELLS_RAW").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.ViewportY, values.GetProperty("VIEWPORT_Y").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyRenderStateRowData.Id, values.GetProperty("ID").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1834,6 +1839,29 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     }
 
     [GhosttyNativeFact]
+    public unsafe void GhosttyRenderStateOverscan()
+    {
+        JsonElement type = Type("GhosttyRenderStateOverscan", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyRenderStateOverscan>(type);
+        GhosttyVtNative.GhosttyRenderStateOverscan value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Equal(2, fields.EnumerateObject().Count());
+        CheckField(fields, "above", (byte*)(&value.Above) - (byte*)&value, sizeof(ushort));
+        CheckField(fields, "below", (byte*)(&value.Below) - (byte*)&value, sizeof(ushort));
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyRenderStateRowId()
+    {
+        JsonElement type = Type("GhosttyRenderStateRowId", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyRenderStateRowId>(type);
+        GhosttyVtNative.GhosttyRenderStateRowId value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Single(fields.EnumerateObject());
+        CheckField(fields, "bits", (byte*)(value.Bits) - (byte*)&value, sizeof(ulong) * (2));
+    }
+
+    [GhosttyNativeFact]
     public unsafe void GhosttyRenderStateRowSelection()
     {
         JsonElement type = Type("GhosttyRenderStateRowSelection", "struct");
@@ -2421,7 +2449,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     {
         _manifest ??= JsonDocument.Parse(GhosttyVtHelpers.GetTypeMetadataJson());
         JsonElement types = _manifest.RootElement.GetProperty("types");
-        Assert.Equal(159, types.EnumerateObject().Count());
+        Assert.Equal(161, types.EnumerateObject().Count());
         JsonElement type = types.GetProperty(name);
         Assert.Equal(kind, type.GetProperty("kind").GetString());
         return type;

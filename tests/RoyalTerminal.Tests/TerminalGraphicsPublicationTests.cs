@@ -200,7 +200,7 @@ public sealed class TerminalGraphicsPublicationTests(ITestOutputHelper output)
         if (native && !GhosttyVtProcessor.IsAvailable()) { output.WriteLine("Native image publication comparison unavailable."); return; }
         TerminalScreen screen = new(8, 2);
         using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
-        processor.ResizeScreen(8, 2, 80, 20);
+        processor.NotifyResize(8, 2, 80, 20);
         Write(processor, "\u001b_Ga=T,f=32,i=1,p=1,s=1,v=1,C=1;/wAA/w==\u001b\\");
         Write(processor, "\u001b_Ga=f,f=32,i=1,s=1,v=1;AAD//w==\u001b\\");
         Assert.True(screen.TryGetKittyImageSource(1, out TerminalKittyImageSource? old));

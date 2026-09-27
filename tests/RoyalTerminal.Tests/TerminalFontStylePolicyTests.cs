@@ -55,6 +55,29 @@ public sealed class TerminalFontStylePolicyTests
         Assert.Equal(settings.BoldItalicStyle, roundTrip.BoldItalicStyle);
     }
 
+    [Theory]
+    [InlineData("{}", true, true, true)]
+    [InlineData("{\"syntheticBold\":false}", false, true, true)]
+    [InlineData("{\"syntheticItalic\":false}", true, false, true)]
+    [InlineData("{\"syntheticBoldItalic\":false}", true, true, false)]
+    [InlineData("{\"syntheticBold\":false,\"syntheticItalic\":false,\"syntheticBoldItalic\":false}", false, false, false)]
+    public void GeneratedJsonDistinguishesOmittedAndExplicitSynthesisToggles(string fonts,
+        bool bold, bool italic, bool combined)
+    {
+        string json = "{\"profiles\":[{\"id\":\"font\",\"appearance\":{\"fontFamilies\":" + fonts + "}}]}";
+        TerminalSessionProfilesDocument document = TerminalSessionProfileSerializer.FromJson(json);
+        AssertToggles(document);
+        AssertToggles(TerminalSessionProfileSerializer.FromJson(TerminalSessionProfileSerializer.ToJson(document)));
+
+        void AssertToggles(TerminalSessionProfilesDocument value)
+        {
+            TerminalFontFamilySettings settings = Assert.Single(value.Profiles).Appearance.FontFamilies;
+            Assert.Equal(bold, settings.SyntheticBold);
+            Assert.Equal(italic, settings.SyntheticItalic);
+            Assert.Equal(combined, settings.SyntheticBoldItalic);
+        }
+    }
+
     [Fact]
     public void AdvertisedNameOverridesLogicalStyleAndMissingNameDoesNotSubstitute()
     {

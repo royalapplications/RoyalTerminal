@@ -95,7 +95,14 @@ public sealed class ManagedSnapshotReflowMetadataTests
             {
                 TerminalRow actualRow = rows[index++];
                 GhosttySnapshotPageCapacity capacity = actualRow.SnapshotAllocation!.Capacity;
-                Assert.Equal(page.Capacity, capacity);
+                // Ghostty snapshot/page.zig Header.init writes size.rows, not
+                // capacity.rows. Compare the wire's logical page extent and
+                // all four metadata hints; reserved rows are not serialized.
+                int logicalRows = 0;
+                foreach (TerminalRow member in rows)
+                    if (ReferenceEquals(member.SnapshotAllocation, actualRow.SnapshotAllocation)) logicalRows++;
+                Assert.InRange(logicalRows, 1, capacity.Rows);
+                Assert.Equal(page.Capacity, capacity with { Rows = checked((ushort)logicalRows) });
                 Assert.False(actualRow.SnapshotAllocation.MetadataOverflow);
                 for (int column = 0; column < columns; column++)
                 {

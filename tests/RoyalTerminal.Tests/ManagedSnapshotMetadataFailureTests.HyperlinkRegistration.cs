@@ -98,7 +98,7 @@ public sealed partial class ManagedSnapshotMetadataFailureTests
     [Fact]
     public void ThrownMetadataPreparationAlsoDiscardsThePendingRegistration()
     {
-        TerminalScreen screen = Screen(8, 4096, new(8, 1, 16, 192, 1024, 2048));
+        TerminalScreen screen = Screen(8, 4096, new GhosttySnapshotPageCapacity(8, 1, 16, 192, 1024, 2048));
         using BasicVtProcessor processor = new(screen);
         Process(processor, "A");
         screen.GetViewportRow(0)[1].Attributes = CellAttributes.Bold;

@@ -5,6 +5,7 @@ using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Snapshots;
+using RoyalTerminal.Terminal.Theming;
 using Xunit;
 
 namespace RoyalTerminal.Tests;

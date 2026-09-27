@@ -6,6 +6,7 @@ using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.GhosttySharp;
 using RoyalTerminal.GhosttySharp.Native;
+using GhosttySelection = RoyalTerminal.GhosttySharp.GhosttySelection;
 
 namespace RoyalTerminal.Terminal;
 

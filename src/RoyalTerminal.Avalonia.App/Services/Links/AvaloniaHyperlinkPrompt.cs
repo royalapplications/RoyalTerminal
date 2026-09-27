@@ -5,6 +5,7 @@ using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.App.ViewModels;
 using RoyalTerminal.Avalonia.App.Views;

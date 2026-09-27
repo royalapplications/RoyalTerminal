@@ -4808,6 +4808,13 @@ public sealed partial class TerminalControlHeadlessInteractionTests
 
     private sealed class LinkActivationProbeTerminalControl : TerminalControl
     {
+        public LinkActivationProbeTerminalControl()
+            : base(new TerminalSessionService(), new DefaultTerminalInputAdapter(),
+                new DefaultTerminalSelectionService(), new DefaultTerminalScrollService(),
+                new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), new DefaultPtyFactory())
+        {
+        }
+
         public List<Uri> ActivatedLinks { get; } = [];
 
         protected override bool TryActivateHyperlink(Uri uri)

@@ -153,7 +153,10 @@ public sealed class ManagedSearchPrependTests
     [Fact]
     public void IncrementalSnapshotHistoryRestoreResumesCompletedSearch()
     {
-        TerminalScreen source = Filled();
+        // Like Ghostty's restore-search regression, require several history
+        // pages. At 32 columns one managed page holds 1,280 rows; 1,024 rows
+        // only restores once over the four-row READY viewport (no cached tail).
+        TerminalScreen source = Filled(3072);
         using BasicVtProcessor writer = new(source);
         using GhosttySnapshotStateReader reader = new(writer.GetBinarySnapshot(), new());
         TerminalScreen screen = GhosttySnapshotLiveScreen.Stage(reader.ReadReady(), TerminalTheme.Dark, 4096);
@@ -162,23 +165,28 @@ public sealed class ManagedSearchPrependTests
         List<TerminalSearchMatch> actual = [];
         search.Populate(capture, "suffix\nneedle", actual);
         bool reused = false;
+        int restoredPages = 0;
         while (reader.ReadNextHistoryPage() is { } history)
         {
             int added = screen.PrependSnapshotHistory(history.Key, history.Page);
+            ManagedSearchSnapshot previous = capture;
             capture = ManagedSearchSnapshot.Capture(screen, capture);
+            Assert.Equal(added, capture.PrependedRows(previous, default));
             search.Populate(capture, "suffix\nneedle", actual);
             AssertFresh(capture, "suffix\nneedle", actual);
+            restoredPages++;
             reused |= search.RowsScannedLastSearch < capture.Rows.Length && capture.Rows.Length > added + 128;
         }
+        Assert.True(restoredPages >= 2);
         Assert.True(reused);
     }
 
-    private static TerminalScreen Filled()
+    private static TerminalScreen Filled(int rows = 1024)
     {
         TerminalScreen screen = new(32, 4, 4096);
         using BasicVtProcessor writer = new(screen);
         byte[] line = Encoding.UTF8.GetBytes("needle aaa 界e\u0301 🦊 suffix\r\n");
-        for (int row = 0; row < 1024; row++) writer.Process(line);
+        for (int row = 0; row < rows; row++) writer.Process(line);
         return screen;
     }
 

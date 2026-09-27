@@ -34,7 +34,7 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             SetPixelPosition(control, 1.5);
             Point point = await GetCellInteractionPointAsync(control, window, 2, control.Rows - 1);
             point = new(point.X, point.Y + control.Renderer!.CellHeight * 0.3);
-            RaiseMousePressReleaseSequence(control, window, point, clicks);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: clicks);
             Dispatcher.UIThread.RunJobs();
             Assert.Contains(control.Renderer.GetSelectionSpans().ToArray(), span => span.Row == control.Rows);
             await control.CopySelectionAsync();
