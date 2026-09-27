@@ -24,7 +24,11 @@ public sealed class TerminalDisplayRenderingTests
     {
         using SkiaTerminalRenderer renderer = CreateRenderer();
         renderer.EnableTextShaping = pipeline != 0;
-        if (pipeline == 2) renderer.SetCellSize(renderer.CellWidth * 4, renderer.CellHeight);
+        // Pretext measures a family descriptor through the OS font manager.
+        // Force unsafe geometry for its wide-cell case, independent of the
+        // substitute font's U+FFFD advance on each platform.
+        if (pipeline == 2 || (pipeline == 3 && width == 2))
+            renderer.SetCellSize(renderer.CellWidth * 4, renderer.CellHeight);
         if (pipeline == 3)
         {
             renderer.TextRenderPipeline = TerminalTextRenderPipeline.Pretext;
@@ -47,8 +51,8 @@ public sealed class TerminalDisplayRenderingTests
             TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
             Assert.True(diagnostics.PretextRuns > 0);
             Assert.Equal(0, diagnostics.ShapedRuns);
-            // A single replacement glyph in a double-width cell must retain
-            // the pipeline's cell-anchored fallback instead of stretching it.
+            // The oversized wide-cell case uses cell-anchored fallback;
+            // the ordinary single-cell case stays on natural placement.
             if (width == 2) Assert.True(diagnostics.PretextFallbackRuns > 0);
             else Assert.Equal(0, diagnostics.PretextFallbackRuns);
         }
