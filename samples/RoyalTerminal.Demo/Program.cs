@@ -13,6 +13,9 @@ public static class Program
     public static void Main(string[] args)
     {
         if (RoyalTerminal.Avalonia.App.Services.TerminalNotificationLaunch.IsInertActivation(args)) return;
+        // This self-contained, non-faulting task overlaps the macOS font query
+        // with Avalonia startup. No UI/native-renderer resources escape it.
+        _ = RoyalTerminal.Avalonia.Rendering.TerminalFontWarmup.StartAsync();
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
     }

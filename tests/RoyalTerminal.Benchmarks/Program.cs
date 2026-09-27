@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--font-discovery", StringComparer.Ordinal))
+{
+    FontDiscoveryBenchmark.Run(args.Contains("--warm-font-registry", StringComparer.Ordinal));
+    return;
+}
+
 if (args.Contains("--managed-snapshot-encode", StringComparer.Ordinal))
 {
     ManagedSnapshotEncodeBenchmark.Run();

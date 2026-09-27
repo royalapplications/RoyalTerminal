@@ -11,8 +11,18 @@ internal interface ITerminalFontMatcher
     SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint);
 }
 
-internal sealed class SkiaTerminalFontMatcher(SKFontManager manager) : ITerminalFontMatcher
+/// <summary>Looks up a known family without character-fallback discovery.</summary>
+internal interface ITerminalFontFamilyMatcher
 {
+    SKTypeface? MatchFamily(string familyName);
+}
+
+internal sealed class SkiaTerminalFontMatcher(SKFontManager manager) : ITerminalFontMatcher, ITerminalFontFamilyMatcher
+{
+    internal const string AppleColorEmojiFamily = "Apple Color Emoji";
+
     public SKTypeface? MatchCharacter(string? familyName, SKFontStyle style, string[]? languageTags, int codepoint)
         => manager.MatchCharacter(familyName, style, languageTags, codepoint);
+
+    public SKTypeface? MatchFamily(string familyName) => manager.MatchFamily(familyName, SKFontStyle.Normal);
 }

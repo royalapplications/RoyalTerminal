@@ -35,6 +35,9 @@ public sealed class TerminalFontResolver : IDisposable
     private readonly SKFontManager? _fontManager;
     private readonly ITerminalFontMatcher _fontMatcher;
     private readonly bool _ownsFontManager;
+    private readonly string? _preferredEmojiFamily;
+    private SKTypeface? _preferredEmojiTypeface;
+    private bool _preferredEmojiResolved;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
     private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
     private readonly object _sync = new();
@@ -60,12 +63,14 @@ public sealed class TerminalFontResolver : IDisposable
         _fontManager = fontManager ?? SKFontManager.CreateDefault();
         _ownsFontManager = fontManager is null;
         _fontMatcher = new SkiaTerminalFontMatcher(_fontManager);
+        _preferredEmojiFamily = OperatingSystem.IsMacOS() ? SkiaTerminalFontMatcher.AppleColorEmojiFamily : null;
     }
 
-    internal TerminalFontResolver(ITerminalFontMatcher fontMatcher)
+    internal TerminalFontResolver(ITerminalFontMatcher fontMatcher, string? preferredEmojiFamily = null)
     {
         ArgumentNullException.ThrowIfNull(fontMatcher);
         _fontMatcher = fontMatcher;
+        _preferredEmojiFamily = preferredEmojiFamily;
     }
 
     /// <summary>
@@ -269,6 +274,8 @@ public sealed class TerminalFontResolver : IDisposable
             }
 
             _fallbackCache.Clear();
+            if (_preferredEmojiTypeface is { } preferred && disposedTypefaces.Add(preferred)) preferred.Dispose();
+            _preferredEmojiTypeface = null;
         }
 
         if (_ownsFontManager)
@@ -283,6 +290,38 @@ public sealed class TerminalFontResolver : IDisposable
         CultureInfo culture,
         bool preferEmojiPresentation)
     {
+        // Ghostty explicitly prefers the system Apple emoji family on macOS.
+        // Resolve it once, in its regular style, and verify the actual family:
+        // a missing named font must not silently turn into a system substitute.
+        // This method is called under _sync, including the negative cache.
+        if (preferEmojiPresentation && _preferredEmojiFamily is not null &&
+            _fontMatcher is ITerminalFontFamilyMatcher familyMatcher)
+        {
+            if (!_preferredEmojiResolved)
+            {
+                SKTypeface? candidate = familyMatcher.MatchFamily(_preferredEmojiFamily);
+                if (ReferenceEquals(candidate, primaryTypeface))
+                {
+                    // A matcher can return the caller's object. Never retain
+                    // or dispose it as an owned fallback; the per-primary
+                    // result cache still avoids repeating this query.
+                    if (string.Equals(primaryTypeface.FamilyName, _preferredEmojiFamily, StringComparison.Ordinal) &&
+                        ContainsGlyph(primaryTypeface, codepoint)) return FontFallbackCacheEntry.NoFallback;
+                    _preferredEmojiResolved = true;
+                }
+                else
+                {
+                    if (candidate is not null && string.Equals(candidate.FamilyName, _preferredEmojiFamily, StringComparison.Ordinal))
+                        _preferredEmojiTypeface = candidate;
+                    else candidate?.Dispose();
+                    _preferredEmojiResolved = true;
+                }
+            }
+
+            if (_preferredEmojiTypeface is { } preferred && ContainsGlyph(preferred, codepoint))
+                return preferred.Handle == primaryTypeface.Handle ? FontFallbackCacheEntry.NoFallback : new(preferred);
+        }
+
         string[]? languageTags = GetLanguageTags(culture, preferEmojiPresentation);
         string? familyName = preferEmojiPresentation
             ? null

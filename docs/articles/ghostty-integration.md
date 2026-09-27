@@ -13,6 +13,41 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Font discovery and startup
+
+The shared Skia renderer follows Ghostty's
+[known-family emoji lookup](https://github.com/ghostty-org/ghostty/commit/afc79b8ccf4098ba15659578d0fc666c74fb61bd)
+and [background font warmup](https://github.com/ghostty-org/ghostty/commit/c454a3bf47cd72945b7f4db3b53f8af332e167c9).
+On macOS each resolver lazily matches `Apple Color Emoji` once, in regular style,
+through its own Skia font manager. It verifies the returned family and individual
+glyph coverage before using the candidate. Missing/substituted families and
+unsupported glyphs retain general character discovery; text presentation and
+other platforms retain their existing paths. Whole-grapheme coverage and lazy
+component candidates still apply. This is a named Skia lookup, not an additional
+native CoreText-to-Skia bridge or a copy of Ghostty's complete font collection.
+Both VT engines use this renderer behavior.
+
+`TerminalFontWarmup.StartAsync()` is a best-effort, one-shot macOS startup query.
+The demo starts it before Avalonia initialization, after rejecting inert toast
+activation. Embedders can call it at the same point in their composition root.
+The returned task owns its temporary font-manager resources, never touches UI
+or renderer objects, and reports unsupported platforms/query failure as false.
+Rendering does not await it; ordinary font discovery remains available if it
+fails or has not finished. No process-global task or renderer-owned cache is
+introduced. GPU warmup is separate and is not claimed here.
+
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/renderer/atlas/AtlasEngine.cpp)
+initializes DirectWrite fallback in its renderer, while
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-webgl/src/TextureAtlas.ts)
+warms ASCII atlas entries through idle callbacks. Neither defines macOS font
+registry behavior; this port follows Ghostty while retaining Skia's public APIs
+and ownership rules. Tests use deterministic font fixtures for family mismatch,
+coverage, primary ownership, negative caching and whole-grapheme fallback.
+`--font-discovery` measures fresh-resolver emoji discovery; adding
+`--warm-font-registry` reports background query time separately from subsequent
+foreground font initialization. These are isolated font timings, not a
+first-window or end-to-end rendering speedup claim.
+
 ## Managed snapshot record scratch
 
 The managed binary snapshot encoder follows Ghostty's
