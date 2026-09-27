@@ -11,6 +11,7 @@ public sealed partial class BasicVtProcessor
     private long _animationTickTimestamp;
     private bool _kittyPublicationPending;
     internal Action<ManagedKittyParserAllocation>? KittyParserAllocationCheckpoint { get; set; }
+    internal Action<ManagedKittyImageAllocation>? KittyImageAllocationCheckpoint { get; set; }
 
     private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
@@ -37,7 +38,7 @@ public sealed partial class BasicVtProcessor
                     if (command.ImageId == 0) respond = false;
                     else if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                                  _options.KittyGraphicsMaxImageBytes, out ManagedKittyImageLoader? query,
-                                 out error, _options.KittyGraphicsMediumReader)) { }
+                                 out error, _options.KittyGraphicsMediumReader, KittyImageAllocationCheckpoint)) { }
                     else if (!query.TryComplete(out _, out error)) { }
                     break;
                 case 't':
@@ -120,7 +121,7 @@ public sealed partial class BasicVtProcessor
                 _kittyStore.DeleteById(_screen, command.ImageId, 0, deleteUnused: true);
             if (!ManagedKittyImageLoader.TryCreate(command, _options.KittyGraphicsPngDecoder,
                     _options.KittyGraphicsMaxImageBytes, out loader, out error,
-                    _options.KittyGraphicsMediumReader)) return false;
+                    _options.KittyGraphicsMediumReader, KittyImageAllocationCheckpoint)) return false;
             if (command.Action is 't' or 'T')
                 _kittyStore.LoadingImageId = command.ImageId != 0 ? command.ImageId
                     : _kittyStore.AllocateImageId(command.ImageNumber != 0);

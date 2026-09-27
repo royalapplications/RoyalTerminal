@@ -14,21 +14,41 @@ internal sealed class ManagedKittyImageLoader
     private ManagedKittyImageBuffer _buffer;
     private readonly IKittyGraphicsPngDecoder? _pngDecoder;
     private readonly int _limit;
+    private readonly Action<ManagedKittyImageAllocation>? _allocationCheckpoint;
 
-    private ManagedKittyImageLoader(ManagedKittyGraphicsCommand command, IKittyGraphicsPngDecoder? pngDecoder, int limit, ReadOnlyMemory<byte> data)
+    private ManagedKittyImageLoader(ManagedKittyGraphicsCommand command, IKittyGraphicsPngDecoder? pngDecoder,
+        int limit, ReadOnlyMemory<byte> data, Action<ManagedKittyImageAllocation>? allocationCheckpoint)
     {
         InitialCommand = command;
         Quiet = command.Quiet;
         _pngDecoder = pngDecoder;
         _limit = limit;
-        _buffer = new ManagedKittyImageBuffer(limit, data);
+        _allocationCheckpoint = allocationCheckpoint;
+        _buffer = new ManagedKittyImageBuffer(limit, data, allocationCheckpoint);
     }
 
     internal ManagedKittyGraphicsCommand InitialCommand { get; }
     internal int Quiet { get; private set; }
 
     internal static bool TryCreate(ManagedKittyGraphicsCommand command, IKittyGraphicsPngDecoder? pngDecoder, int maxBytes,
-        [NotNullWhen(true)] out ManagedKittyImageLoader? loader, out string error, IKittyGraphicsMediumReader? mediumReader = null)
+        [NotNullWhen(true)] out ManagedKittyImageLoader? loader, out string error,
+        IKittyGraphicsMediumReader? mediumReader = null, Action<ManagedKittyImageAllocation>? allocationCheckpoint = null)
+    {
+        try
+        {
+            return TryCreateCore(command, pngDecoder, maxBytes, out loader, out error, mediumReader, allocationCheckpoint);
+        }
+        catch (OutOfMemoryException)
+        {
+            loader = null;
+            error = "ENOMEM: out of memory";
+            return false;
+        }
+    }
+
+    private static bool TryCreateCore(ManagedKittyGraphicsCommand command, IKittyGraphicsPngDecoder? pngDecoder, int maxBytes,
+        [NotNullWhen(true)] out ManagedKittyImageLoader? loader, out string error,
+        IKittyGraphicsMediumReader? mediumReader, Action<ManagedKittyImageAllocation>? allocationCheckpoint)
     {
         loader = null;
         error = "EINVAL: unsupported format";
@@ -66,7 +86,8 @@ internal sealed class ManagedKittyImageLoader
             if (externalData.Length > maxBytes) return false;
             data = externalData;
         }
-        loader = new ManagedKittyImageLoader(command, pngDecoder, maxBytes, data);
+        allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.Loader);
+        loader = new ManagedKittyImageLoader(command, pngDecoder, maxBytes, data, allocationCheckpoint);
         error = "OK";
         return true;
     }
@@ -76,12 +97,39 @@ internal sealed class ManagedKittyImageLoader
         // Metadata belongs to the initial command. Only nonzero quiet values
         // override its response policy while subsequent chunks are received.
         if (continuation.Quiet > 0) Quiet = continuation.Quiet;
-        bool success = _buffer.TryAppend(continuation.Data.Span);
-        error = success ? "OK" : "EINVAL: invalid data";
-        return success;
+        try
+        {
+            bool success = _buffer.TryAppend(continuation.Data.Span, _allocationCheckpoint);
+            error = success ? "OK" : "EINVAL: invalid data";
+            return success;
+        }
+        catch (OutOfMemoryException)
+        {
+            // Capacity is reserved before mutation, so the client may retry
+            // this chunk. Ghostty retains a nonzero quiet override on failure.
+            error = "ENOMEM: out of memory";
+            return false;
+        }
     }
 
     internal bool TryComplete([NotNullWhen(true)] out ManagedKittyImagePixels? image, out string error)
+    {
+        try
+        {
+            return TryCompleteCore(out image, out error);
+        }
+        catch (OutOfMemoryException)
+        {
+            // The executor consumes a final loader before decoding. Only
+            // loader/decoder failures become protocol errors, not publication
+            // or response-observer exceptions outside this boundary.
+            image = null;
+            error = "ENOMEM: out of memory";
+            return false;
+        }
+    }
+
+    private bool TryCompleteCore([NotNullWhen(true)] out ManagedKittyImagePixels? image, out string error)
     {
         image = null;
         if (InitialCommand.Get('o') == 'z' && !TryInflate())
@@ -100,6 +148,7 @@ internal sealed class ManagedKittyImageLoader
             // Enforce bounds even for an injected decoder with weaker limits.
             if (decoded is null || decoded.Width > 10000 || decoded.Height > 10000 || decoded.Rgba.Length > _limit)
                 return false;
+            _allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.Pixels);
             image = new(decoded);
             error = "OK";
             return true;
@@ -122,7 +171,8 @@ internal sealed class ManagedKittyImageLoader
 
         // Keep native RGB storage until publication/composition needs RGBA.
         // The per-image safety limit above still bounds the largest view.
-        byte[] pixels = _buffer.Take(expected);
+        byte[] pixels = _buffer.Take(expected, _allocationCheckpoint);
+        _allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.Pixels);
         image = channels == 3
             ? ManagedKittyImagePixels.FromRgb((int)width, (int)height, pixels)
             : new(new KittyGraphicsDecodedImage((int)width, (int)height, pixels));
@@ -133,15 +183,17 @@ internal sealed class ManagedKittyImageLoader
     private bool TryInflate()
     {
         if (!MemoryMarshal.TryGetArray(_buffer.Data, out ArraySegment<byte> source) || source.Array is null) return false;
+        _allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.InflateStream);
         using MemoryStream input = new(source.Array, source.Offset, source.Count, writable: false);
         using ZLibStream decompressor = new(input, CompressionMode.Decompress);
         ManagedKittyImageBuffer decoded = new(_limit);
+        _allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.InflateScratch);
         byte[] scratch = ArrayPool<byte>.Shared.Rent(16384);
         try
         {
             int count;
             while ((count = decompressor.Read(scratch)) > 0)
-                if (!decoded.TryAppend(scratch.AsSpan(0, count))) return false;
+                if (!decoded.TryAppend(scratch.AsSpan(0, count), _allocationCheckpoint)) return false;
             _buffer = decoded;
             return true;
         }

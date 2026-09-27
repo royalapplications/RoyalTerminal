@@ -1562,6 +1562,32 @@ accepted chunked image nor change its quiet policy. Normal APC exit/cancellation
 reset and parser-continuation behavior are preserved. Focused split-input, resource
 and ownership tests are added; allocation measurements and execution remain pending.
 
+Image-loader allocation failures now follow
+[Ghostty's execution error and transfer lifecycle](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_exec.zig)
+and [reserve-before-append loading](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_image.zig).
+Loader creation, owned-buffer copies/growth, bounded inflation, host medium/PNG
+loading and final pixel wrappers report `ENOMEM: out of memory`. Failed appends
+preserve accumulated bytes and retain a nonzero quiet override, including failed
+final chunks; clients can retry. Final decoding consumes the pending image/frame
+before it can fail. Queries do not consume a pending transmission, while explicit
+image retransmission still retires the previous image and placements at its start.
+Unrelated exceptions and response-observer failures are not swallowed. This is a
+loader-only error boundary, not a guarantee for later store/animation mutations
+or graphics publication.
+
+The accumulation buffer is stored inline in its single-owner loader, eliminating
+one buffer-wrapper object per load and another during inflation. Payload adoption,
+bounded geometric growth, exact-size transfer, RGB retention and scratch-pool
+cleanup remain unchanged. Active buffer values must not be copied except to move
+ownership. The closest
+[xterm.js image store](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-image/src/ImageStorage.ts)
+and [Windows Terminal image slices](https://github.com/microsoft/terminal/blob/main/src/buffer/out/ImageSlice.cpp)
+do not define Ghostty's pending Kitty transfer/quiet/error contract; we follow the
+pinned native implementation here. Sixty-two new failure/ownership cases and six
+`--kitty-image-loader` workloads are authored but unrun. The identical loader
+harness can run against `317610d3` for before/after profiling in final validation;
+reduced object churn is expected, not a measured throughput or working-set claim.
+
 Kitty parser state is now stored by value in the processor, removing a separate
 heap parser owner for each APC while retaining one independently owned command.
 Active parser values must not be copied; helper calls take them by reference.

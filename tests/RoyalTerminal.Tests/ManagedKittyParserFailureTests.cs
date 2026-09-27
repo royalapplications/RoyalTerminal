@@ -97,7 +97,7 @@ public sealed class ManagedKittyParserFailureTests
         Assert.True(processor.IsParserGround);
         processor.KittyParserAllocationCheckpoint = null;
         Send(processor, "m=0;/w==");
-        if (quiet == 0) Assert.Equal("\u001b_Gi=73;OK\u001b\\", Assert.Single(replies));
+        if (quiet == 0) Assert.Equal("\u001b_Gi=73,p=1;OK\u001b\\", Assert.Single(replies));
         else Assert.Empty(replies);
         Assert.True(screen.TryGetKittyImageSource(73, out TerminalKittyImageSource? image));
         Assert.Equal(new byte[] { 255, 0, 0, 255 }, image!.RgbaPixels);
