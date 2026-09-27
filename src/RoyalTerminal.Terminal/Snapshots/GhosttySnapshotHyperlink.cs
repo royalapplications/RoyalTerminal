@@ -46,6 +46,13 @@ internal readonly ref struct GhosttySnapshotHyperlink(
     internal void WriteTo(Stream destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
+        GhosttySnapshotStreamWriter writer = new(destination);
+        WriteTo(ref writer);
+    }
+
+    internal void WriteTo<TWriter>(ref TWriter destination)
+        where TWriter : IGhosttySnapshotWriter, allows ref struct
+    {
         if (!IsValid) throw new InvalidDataException("Snapshot hyperlink strings must be non-empty.");
         Span<byte> prefix = stackalloc byte[5];
         prefix[0] = HasExplicitId ? (byte)2 : (byte)1;

@@ -194,6 +194,13 @@ internal sealed class GhosttySnapshotPage
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite) throw new ArgumentException("Snapshot destination is not writable.", nameof(destination));
+        GhosttySnapshotStreamWriter writer = new(destination);
+        WritePayloadTo(ref writer);
+    }
+
+    internal void WritePayloadTo<TWriter>(ref TWriter destination)
+        where TWriter : IGhosttySnapshotWriter, allows ref struct
+    {
         Span<byte> buffer = stackalloc byte[20];
         _header.CopyTo(buffer);
         BinaryPrimitives.WriteUInt16LittleEndian(buffer[4..], (ushort)_styles.Count);
@@ -211,6 +218,6 @@ internal sealed class GhosttySnapshotPage
             destination.Write(buffer[..2]);
             destination.Write(hyperlink);
         }
-        Grid.WriteTo(destination);
+        Grid.WriteTo(ref destination);
     }
 }

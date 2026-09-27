@@ -13,6 +13,30 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Managed snapshot record scratch
+
+The managed binary snapshot encoder follows Ghostty's
+[bounded record-scratch change](https://github.com/ghostty-org/ghostty/commit/ee8095d37d9813669688cf2f666756e607b84713):
+one reusable record buffer starts with 512 bytes on the stack and rents a larger
+buffer only when required. Larger records reuse that rental; retired buffers are
+returned with clearing on growth, success or failure. C# ref-struct lifetime rules
+and constrained generic codec sinks prevent boxing or escaping stack pointers.
+The existing Stream codec entry points use an allocation-free value-type adapter.
+
+Record and cumulative payload bounds are checked before scratch writes/growth.
+The buffer does not change record framing, CRC32C, page order, continuation,
+snapshot ownership or caller stream lifetime. Source-page capture still owns
+managed objects; this is not an allocation-free whole-snapshot claim. The
+`--managed-snapshot-encode` benchmark measures full encode to `Stream.Null`, with
+terminal setup and returned byte-array ownership excluded, to compare allocation
+and throughput before/after this change.
+
+[Windows Terminal's text/VT export](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
+and [xterm.js's SerializeAddon](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-serialize/src/SerializeAddon.ts)
+were checked; they do not define this binary record format. Ghostty remains the
+wire-format reference. Golden codec, native round-trip, stack/pool boundary,
+failure cleanup, zero-allocation small-record and exact-limit tests cover the port.
+
 ## Host visibility reports
 
 Both VT processors implement `ITerminalVisibilityState`, following

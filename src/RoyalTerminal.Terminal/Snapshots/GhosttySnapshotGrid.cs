@@ -151,6 +151,13 @@ internal sealed class GhosttySnapshotGrid
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite) throw new ArgumentException("Snapshot destination is not writable.", nameof(destination));
+        GhosttySnapshotStreamWriter writer = new(destination);
+        WriteTo(ref writer);
+    }
+
+    internal void WriteTo<TWriter>(ref TWriter destination)
+        where TWriter : IGhosttySnapshotWriter, allows ref struct
+    {
         Span<byte> scratch = stackalloc byte[4096];
         for (int row = 0; row < Rows; row++)
         {

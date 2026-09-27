@@ -25,7 +25,9 @@ public sealed partial class BasicVtProcessor
     /// <summary>
     /// Streams a Ghostty v1 snapshot without buffering the entire history. The caller serializes
     /// all terminal access for the duration; the destination is left open. Only row references,
-    /// page ranges and one encoded page are staged. Bounds apply to the same logical records as
+    /// page ranges and one encoded page are staged. Record scratch starts on the stack and
+    /// rents cleared-on-return storage for larger records. Bounds apply before scratch growth to
+    /// the same logical records as
     /// decode. On failure the destination may contain an incomplete prefix without FINISH;
     /// continuation failures emit no bytes. No VT replay or buffer switching is performed.
     /// </summary>
@@ -47,50 +49,54 @@ public sealed partial class BasicVtProcessor
         int pages = 0;
         GhosttySnapshotPagePlan primary = new(_screen, 0, limits, ref cells, ref pages);
         GhosttySnapshotPagePlan? alternate = alternateExists ? new(_screen, 1, limits, ref cells, ref pages) : null;
-        using MemoryStream payload = new();
         long totalPayloadBytes = 0;
-        GhosttySnapshotFraming.WriteEnvelope(destination);
-        CaptureSnapshotTerminal(payload, alternateExists); Emit(GhosttySnapshotRecordTag.Terminal);
-        WriteScreen(0, primary);
-        if (alternate is not null) WriteScreen(1, alternate);
-        payload.Write(continuation); Emit(GhosttySnapshotRecordTag.Continuation);
-        Emit(GhosttySnapshotRecordTag.Ready);
-        WriteHistory(0, primary);
-        if (alternate is not null) WriteHistory(1, alternate);
-        Emit(GhosttySnapshotRecordTag.Finish);
-
-        void WriteScreen(int key, GhosttySnapshotPagePlan plan)
+        GhosttySnapshotRecordBuffer payload = new(stackalloc byte[512], RecordLimit());
+        try
         {
-            CaptureSnapshotScreen(payload, key, plan.Resident.Count, plan.HistoryRows, limits.MaximumStringBytesPerRecord);
+            GhosttySnapshotFraming.WriteEnvelope(destination);
+            CaptureSnapshotTerminal(ref payload, alternateExists); Emit(ref payload, GhosttySnapshotRecordTag.Terminal);
+            WriteScreen(ref payload, 0, primary);
+            if (alternate is not null) WriteScreen(ref payload, 1, alternate);
+            payload.Write(continuation); Emit(ref payload, GhosttySnapshotRecordTag.Continuation);
+            Emit(ref payload, GhosttySnapshotRecordTag.Ready);
+            WriteHistory(ref payload, 0, primary);
+            if (alternate is not null) WriteHistory(ref payload, 1, alternate);
+            Emit(ref payload, GhosttySnapshotRecordTag.Finish);
+        }
+        finally { payload.Dispose(); }
+
+        void WriteScreen(ref GhosttySnapshotRecordBuffer payload, int key, GhosttySnapshotPagePlan plan)
+        {
+            CaptureSnapshotScreen(ref payload, key, plan.Resident.Count, plan.HistoryRows, limits.MaximumStringBytesPerRecord);
             // Cursor links have their own per-record string bound.
-            _ = GhosttySnapshotScreenState.Read(payload.GetBuffer().AsSpan(0, (int)payload.Length), limits.MaximumPages, limits.MaximumStringBytesPerRecord);
-            Emit(GhosttySnapshotRecordTag.Screen);
-            foreach (GhosttySnapshotPagePlan.Range range in plan.Resident) WritePage(plan, range);
+            _ = GhosttySnapshotScreenState.Read(payload.WrittenSpan, limits.MaximumPages, limits.MaximumStringBytesPerRecord);
+            Emit(ref payload, GhosttySnapshotRecordTag.Screen);
+            foreach (GhosttySnapshotPagePlan.Range range in plan.Resident) WritePage(ref payload, plan, range);
         }
 
-        void WriteHistory(int key, GhosttySnapshotPagePlan plan)
+        void WriteHistory(ref GhosttySnapshotRecordBuffer payload, int key, GhosttySnapshotPagePlan plan)
         {
             Span<byte> header = stackalloc byte[6];
             BinaryPrimitives.WriteUInt16LittleEndian(header, (ushort)key);
             BinaryPrimitives.WriteUInt32LittleEndian(header[2..], (uint)plan.History.Count);
-            payload.Write(header); Emit(GhosttySnapshotRecordTag.History);
-            for (int i = plan.History.Count - 1; i >= 0; i--) WritePage(plan, plan.History[i]);
+            payload.Write(header); Emit(ref payload, GhosttySnapshotRecordTag.History);
+            for (int i = plan.History.Count - 1; i >= 0; i--) WritePage(ref payload, plan, plan.History[i]);
         }
 
-        void WritePage(GhosttySnapshotPagePlan plan, GhosttySnapshotPagePlan.Range range)
+        void WritePage(ref GhosttySnapshotRecordBuffer payload, GhosttySnapshotPagePlan plan, GhosttySnapshotPagePlan.Range range)
         {
             GhosttySnapshotPage page = GhosttySnapshotLivePage.Capture(plan.Rows.AsSpan(range.Start, range.Count), _screen, limits.MaximumCells);
-            page.WritePayloadTo(payload);
-            Emit(GhosttySnapshotRecordTag.Page);
+            page.WritePayloadTo(ref payload);
+            Emit(ref payload, GhosttySnapshotRecordTag.Page);
         }
 
-        void Emit(GhosttySnapshotRecordTag tag)
+        int RecordLimit() => (int)Math.Min(limits.MaximumPayloadBytes, limits.MaximumTotalPayloadBytes - totalPayloadBytes);
+
+        void Emit(ref GhosttySnapshotRecordBuffer payload, GhosttySnapshotRecordTag tag)
         {
-            if (payload.Length > limits.MaximumPayloadBytes || payload.Length > limits.MaximumTotalPayloadBytes - totalPayloadBytes)
-                throw new InvalidDataException("Snapshot exceeds the payload byte limit.");
-            totalPayloadBytes += payload.Length;
-            GhosttySnapshotFraming.WriteRecord(destination, tag, payload.GetBuffer().AsSpan(0, checked((int)payload.Length)));
-            payload.SetLength(0); payload.Position = 0;
+            totalPayloadBytes += payload.WrittenSpan.Length;
+            GhosttySnapshotFraming.WriteRecord(destination, tag, payload.WrittenSpan);
+            payload.Reset(RecordLimit());
         }
     }
 }

@@ -48,7 +48,7 @@ public sealed partial class BasicVtProcessor
         return GhosttySnapshotLivePage.EncodeStyle(cell);
     }
 
-    private void CaptureSnapshotTerminal(Stream output, bool alternateExists)
+    private void CaptureSnapshotTerminal(ref GhosttySnapshotRecordBuffer output, bool alternateExists)
     {
         Span<byte> header = stackalloc byte[GhosttySnapshotTerminalHeader.Length];
         header.Clear();
@@ -91,10 +91,10 @@ public sealed partial class BasicVtProcessor
         output.Write(mask);
         for (int i = 0; i < 256; i++)
             if (_colors.HasPaletteOverride(i)) { Rgb(rgb, _colors.GetPalette(i)); output.Write(rgb); }
-        WriteSnapshotString(output, _workingDirectory.Bytes); WriteSnapshotString(output, _title.Bytes);
+        WriteSnapshotString(ref output, _workingDirectory.Bytes); WriteSnapshotString(ref output, _title.Bytes);
     }
 
-    private void CaptureSnapshotScreen(Stream output, int key, int pages, int historyRows, int maximumStringBytes)
+    private void CaptureSnapshotScreen(ref GhosttySnapshotRecordBuffer output, int key, int pages, int historyRows, int maximumStringBytes)
     {
         ApplySnapshotCursorStyleDrops();
         bool active = (key == 1) == _inAltScreen;
@@ -143,7 +143,7 @@ public sealed partial class BasicVtProcessor
         {
             if ((long)link!.UriBytes.Length + link.ExplicitId.Length > maximumStringBytes)
                 throw new InvalidDataException("Snapshot cursor hyperlink exceeds the string limit.");
-            new GhosttySnapshotHyperlink(link!.IsExplicit, link.ImplicitId, link.ExplicitId, link.UriBytes).WriteTo(output);
+            new GhosttySnapshotHyperlink(link!.IsExplicit, link.ImplicitId, link.ExplicitId, link.UriBytes).WriteTo(ref output);
         }
         else output.WriteByte(0);
     }
@@ -158,7 +158,7 @@ public sealed partial class BasicVtProcessor
         if (color.Default is { } value) { bytes[0] = 1; Rgb(bytes[1..], value); }
         if (color.Override is { } changed) { bytes[4] = 1; Rgb(bytes[5..], changed); }
     }
-    private static void WriteSnapshotString(Stream output, ReadOnlySpan<byte> value)
+    private static void WriteSnapshotString(ref GhosttySnapshotRecordBuffer output, ReadOnlySpan<byte> value)
     {
         Span<byte> length = stackalloc byte[4]; BinaryPrimitives.WriteUInt32LittleEndian(length, (uint)value.Length);
         output.Write(length); output.Write(value);
