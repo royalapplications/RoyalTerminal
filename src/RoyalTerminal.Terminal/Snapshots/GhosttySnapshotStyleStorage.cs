@@ -1,6 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Buffers;
+
 namespace RoyalTerminal.Terminal.Snapshots;
 
 // Logical style allocator for a native PAGE. It retains dead slots and cell/cursor
@@ -206,36 +208,55 @@ internal sealed class GhosttySnapshotStyleStorage
     {
         if (ReferenceEquals(this, source)) throw new InvalidOperationException("Reflow copies require separate source storage.");
         ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfNegative(destination);
+        if (count > 0) { _ = checked(index + (count - 1)); _ = checked(destination + (count - 1)); }
         copied = 0;
         while (copied < count)
         {
-            int sourceId = source.CellId(checked(index + copied));
-            int run = 1;
-            while (run < count - copied && source.CellId(checked(index + copied + run)) == sourceId) run++;
-            if (sourceId != 0)
+            int current = index + copied;
+            int offsetInChunk = current & (ChunkSize - 1);
+            int length = Math.Min(count - copied, ChunkSize - offsetInChunk);
+            // One source dictionary lookup per chunk, not per cell. Absent
+            // chunks are entirely default; bound every span to the caller's
+            // actual range, independently of the logical PAGE capacity.
+            if (!source._cells.TryGetValue(current >> ChunkShift, out CellChunk? chunk))
             {
-                int id;
-                if (ReferenceEquals(cache.Source, source) && ReferenceEquals(cache.Destination, this) && cache.SourceId == sourceId)
-                {
-                    id = cache.DestinationId;
-                    _styles.UseMultiple(id, run);
-                }
-                else
-                {
-                    GhosttySnapshotSetAddResult result = _styles.TryAddWithId(source._styles.Get(sourceId), sourceId, out id);
-                    if (result != GhosttySnapshotSetAddResult.Success) return result;
-                    _styles.UseMultiple(id, run - 1);
-                    cache = new() { Source = source, Destination = this, SourceId = sourceId, DestinationId = id };
-                }
-                for (int offset = 0; offset < run; offset++)
-                {
-                    int target = checked(destination + copied + offset);
-                    StoreCell(target, id);
-                    if (source.InlineStyle(checked(index + copied + offset)) is { } observed)
-                        (_observedInlineStyles ??= [])[target] = observed;
-                }
+                copied += length;
+                continue;
             }
-            copied += run;
+            ReadOnlySpan<ushort> ids = chunk.Ids.AsSpan(offsetInChunk, length);
+            while (!ids.IsEmpty)
+            {
+                int sourceId = ids[0];
+                int run = ids.IndexOfAnyExcept((ushort)sourceId);
+                if (run < 0) run = ids.Length;
+                if (sourceId != 0)
+                {
+                    int id;
+                    if (ReferenceEquals(cache.Source, source) && ReferenceEquals(cache.Destination, this) && cache.SourceId == sourceId)
+                    {
+                        id = cache.DestinationId;
+                        _styles.UseMultiple(id, run);
+                    }
+                    else
+                    {
+                        GhosttySnapshotSetAddResult result = _styles.TryAddWithId(source._styles.Get(sourceId), sourceId, out id);
+                        if (result != GhosttySnapshotSetAddResult.Success) return result;
+                        _styles.UseMultiple(id, run - 1);
+                        cache = new() { Source = source, Destination = this, SourceId = sourceId, DestinationId = id };
+                    }
+                    StoreCells(destination + copied, run, id);
+                    if (source._observedInlineStyles is { } inline)
+                    {
+                        for (int offset = 0; offset < run; offset++)
+                            if (inline.TryGetValue(index + copied + offset, out GhosttySnapshotStyle observed))
+                                (_observedInlineStyles ??= [])[destination + copied + offset] = observed;
+                    }
+                }
+                copied += run;
+                ids = ids[run..];
+            }
         }
         return GhosttySnapshotSetAddResult.Success;
     }
@@ -329,6 +350,31 @@ internal sealed class GhosttySnapshotStyleStorage
         _cellCount++;
     }
 
+    private void StoreCells(int index, int count, int id)
+    {
+        ushort value = checked((ushort)id);
+        for (int copied = 0; copied < count;)
+        {
+            int current = index + copied;
+            int key = current >> ChunkShift;
+            if (!_cells.TryGetValue(key, out CellChunk? chunk))
+            {
+                chunk = _spareChunk ?? new();
+                _spareChunk = null;
+                _cells.Add(key, chunk);
+            }
+            int offset = current & (ChunkSize - 1);
+            int length = Math.Min(count - copied, ChunkSize - offset);
+            Span<ushort> target = chunk.Ids.AsSpan(offset, length);
+            if (target.IndexOfAnyExcept((ushort)0) >= 0)
+                throw new InvalidOperationException("Style cells already own references.");
+            target.Fill(value);
+            chunk.Count += length;
+            _cellCount += length;
+            copied += length;
+        }
+    }
+
     // A native page rebuild drops dead entries and copies cell references in
     // logical row/column order, preserving IDs where possible. The cursor is
     // owned by Screen, so the caller reinstalls it after successful replacement.
@@ -337,6 +383,7 @@ internal sealed class GhosttySnapshotStyleStorage
         GhosttySnapshotPageRemap? remap = null)
     {
         GhosttySnapshotStyleStorage candidate = new(capacity);
+        CopyCache cache = default;
         if (remap is not null)
         {
             // Visit compact chunks within each retained row, not a per-cell
@@ -348,15 +395,11 @@ internal sealed class GhosttySnapshotStyleStorage
                 {
                     int chunkIndex = index >> ChunkShift;
                     int next = (int)Math.Min((long)end, ((long)chunkIndex + 1) << ChunkShift);
-                    if (_cells.TryGetValue(chunkIndex, out CellChunk? chunk))
+                    if (_cells.ContainsKey(chunkIndex))
                     {
-                        for (int cell = index; cell < next; cell++)
-                        {
-                            if (chunk.Ids[cell & (ChunkSize - 1)] == 0) continue;
-                            GhosttySnapshotSetAddResult result = candidate.CopyCellFrom(
-                                checked(row.Destination + (cell - row.Source)), this, cell);
-                            if (result != GhosttySnapshotSetAddResult.Success) { rebuilt = null; return result; }
-                        }
+                        GhosttySnapshotSetAddResult result = candidate.CopyCellsFrom(
+                            checked(row.Destination + (index - row.Source)), this, index, next - index, ref cache, out _);
+                        if (result != GhosttySnapshotSetAddResult.Success) { rebuilt = null; return result; }
                     }
                     index = next;
                 }
@@ -364,24 +407,25 @@ internal sealed class GhosttySnapshotStyleStorage
             rebuilt = candidate;
             return GhosttySnapshotSetAddResult.Success;
         }
-        int[] indices = new int[_cells.Count];
-        _cells.Keys.CopyTo(indices, 0);
-        Array.Sort(indices);
-        foreach (int chunkIndex in indices)
+        // Scratch follows occupied chunks, never a PAGE's hinted dimensions.
+        // Most pages fit on the stack; exceptional sparse/dense maps borrow a
+        // temporary integer buffer and return it even on clone failure.
+        int[]? rented = null;
+        Span<int> indices = _cells.Count <= 128 ? stackalloc int[_cells.Count]
+            : (rented = ArrayPool<int>.Shared.Rent(_cells.Count)).AsSpan(0, _cells.Count);
+        try
         {
-            ReadOnlySpan<ushort> cells = _cells[chunkIndex].Ids;
-            for (int offset = 0; offset < cells.Length; offset++)
+            int written = 0;
+            foreach (int key in _cells.Keys) indices[written++] = key;
+            indices.Sort();
+            foreach (int chunkIndex in indices)
             {
-                int previous = cells[offset];
-                if (previous == 0) continue;
-                GhosttySnapshotSetAddResult result = candidate._styles.TryAddWithId(_styles.Get(previous), previous, out int id);
+                int index = chunkIndex << ChunkShift;
+                GhosttySnapshotSetAddResult result = candidate.CopyCellsFrom(index, this, index, ChunkSize, ref cache, out _);
                 if (result != GhosttySnapshotSetAddResult.Success) { rebuilt = null; return result; }
-                candidate.StoreCell((chunkIndex << ChunkShift) + offset, id);
-                int index = (chunkIndex << ChunkShift) + offset;
-                if (_observedInlineStyles is not null && _observedInlineStyles.TryGetValue(index, out GhosttySnapshotStyle observed))
-                    (candidate._observedInlineStyles ??= []).Add(index, observed);
             }
         }
+        finally { if (rented is not null) ArrayPool<int>.Shared.Return(rented); }
         rebuilt = candidate;
         return GhosttySnapshotSetAddResult.Success;
     }

@@ -538,6 +538,20 @@ filtering, row-clone rollback with anchors, and bounded adversarial set retries.
 Sparse logical capacities avoid allocating four-GiB pages in these cases.
 These changes and tests have not yet been executed or profiled.
 
+Managed style copy now looks up each occupied source chunk once, scans equal-ID
+runs with bounded span operations and fills destination chunks in bulk. Grouped
+reference increments retain preferred-ID insertion order and exact accepted
+prefixes on failure. Page rebuild uses the same run-copy path, including logical
+row remaps and inline background observations. Sorting scratch for physical
+rebuilds uses at most 128 stack integers, otherwise a returned pooled integer
+buffer sized to occupied chunks, never the PAGE dimensions. This extends
+Ghostty's reflow style-run optimization to managed page rebuilds; it does not
+change the wire layout or native capacity/probe rules. Sixteen additional
+scalar-oracle, boundary, sparse/pool, remap, reference-release and failure cases
+are authored. `--managed-snapshot-style-rebuild` adds uniform, alternating,
+rotated-inline and sparse workloads for the final before/after measurements.
+No test execution, allocation measurement or throughput improvement is claimed.
+
 Non-reflow widening also rejects a zero-progress row clone instead of retaining
 its payload with an overflow marker. An already-valid source table may become
 unclonable in row order when 32 colliding styles precede another style that was

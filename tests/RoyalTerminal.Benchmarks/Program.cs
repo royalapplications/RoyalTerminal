@@ -41,6 +41,12 @@ if (args.Contains("--managed-snapshot-reflow", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-snapshot-style-rebuild", StringComparer.Ordinal))
+{
+    ManagedSnapshotStyleRebuildBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-print", StringComparer.Ordinal))
 {
     ManagedPrintBenchmark.Run();
