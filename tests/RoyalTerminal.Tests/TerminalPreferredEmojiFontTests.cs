@@ -222,8 +222,7 @@ public sealed class TerminalPreferredEmojiFontTests
     }
 
     private static SKTypeface Load(string name)
-        => SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", name))
-           ?? throw new InvalidOperationException(name);
+        => FontPresentationTestFonts.Load(name);
 
     private sealed class Matcher(Func<SKTypeface?> family, Func<SKTypeface?>? character = null)
         : ITerminalFontMatcher, ITerminalFontFamilyMatcher

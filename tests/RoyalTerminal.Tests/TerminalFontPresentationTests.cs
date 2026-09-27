@@ -154,26 +154,28 @@ public sealed class TerminalFontPresentationTests
             Assert.Equal(tableGlyph, streamGlyph);
             GC.Collect();
             GC.WaitForPendingFinalizers();
-            nint first = HarfBuzzColorApi.ReferencePng(tables.Font.Handle, tableGlyph);
-            nint second = HarfBuzzColorApi.ReferencePng(stream.Font.Handle, streamGlyph);
-            try
-            {
-                Assert.True(HarfBuzzColorApi.BlobLength(first) > 0);
-                Assert.Equal(HarfBuzzColorApi.BlobLength(first), HarfBuzzColorApi.BlobLength(second));
-            }
-            finally
-            {
-                HarfBuzzColorApi.DestroyBlob(first);
-                HarfBuzzColorApi.DestroyBlob(second);
-            }
+            Assert.Equal(1u, HarfBuzzColorApi.GetLayerCount(tables.Face.Handle, tableGlyph, 0, 0, 0));
+            Assert.Equal(1u, HarfBuzzColorApi.GetLayerCount(stream.Face.Handle, streamGlyph, 0, 0, 0));
         }
         Assert.NotEqual(nint.Zero, primary.Handle);
         Assert.True(primary.ContainsGlyph(0x1F600));
     }
 
     private static SKTypeface Load(string name)
-        => SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", name))
-           ?? throw new InvalidOperationException(name);
+        => FontPresentationTestFonts.Load(name);
+
+    [Fact]
+    public void BitmapGlyphApiReadsPinnedNotoColorDataWithoutRequiringCoreTextToLoadIt()
+    {
+        using HarfBuzzSharp.Blob data = HarfBuzzSharp.Blob.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", "NotoColorEmoji.ttf"));
+        using HarfBuzzSharp.Face face = new(data, 0);
+        using HarfBuzzSharp.Font font = new(face);
+        font.SetFunctionsOpenType();
+        Assert.True(font.TryGetNominalGlyph(0x1F600, out uint glyph));
+        nint blob = HarfBuzzColorApi.ReferencePng(font.Handle, glyph);
+        try { Assert.True(HarfBuzzColorApi.BlobLength(blob) > 0); }
+        finally { HarfBuzzColorApi.DestroyBlob(blob); }
+    }
 
     private sealed class Matcher(bool returnColor = true) : ITerminalFontMatcher
     {
