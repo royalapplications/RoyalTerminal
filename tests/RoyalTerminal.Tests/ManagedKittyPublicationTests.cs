@@ -34,8 +34,9 @@ public sealed class ManagedKittyPublicationTests(ITestOutputHelper output)
         double milliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         output.WriteLine($"virtual={virtualPlacement}, placements={count}, frames={iterations}, allocated={allocated}, ms={milliseconds:F3}");
-        // One immutable image-source wrapper is expected for each changed frame.
-        Assert.InRange(allocated, 1, iterations * 64);
+        // Warmed immutable frames retain their image-source wrapper as well as
+        // sharing unchanged geometry. Playback allocates neither on a revisit.
+        Assert.Equal(0, allocated);
 
         void PublishFrame(int frame)
         {

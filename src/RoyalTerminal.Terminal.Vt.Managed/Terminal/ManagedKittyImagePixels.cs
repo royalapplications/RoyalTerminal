@@ -1,6 +1,8 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using RoyalTerminal.Avalonia.Rendering;
+
 namespace RoyalTerminal.Terminal;
 
 /// <summary>
@@ -12,6 +14,7 @@ internal sealed class ManagedKittyImagePixels
 {
     private readonly byte[] _pixels;
     private KittyGraphicsDecodedImage? _rgba;
+    private TerminalKittyImageSource? _source;
 
     internal ManagedKittyImagePixels(KittyGraphicsDecodedImage rgba)
     {
@@ -62,5 +65,24 @@ internal sealed class ManagedKittyImagePixels
         return _rgba = new(Width, Height, rgba);
     }
 
-    internal ManagedKittyImagePixels AsRgba() => IsRgba ? this : new(GetRgbaImage());
+    /// <summary>
+    /// Gets an immutable render source for these pixels. A frame's fingerprint is
+    /// reused when animation playback returns to the same image ID. Keep only
+    /// one ID-specific wrapper; sharing pixels under another image ID must not
+    /// return the wrong identity or build an unbounded per-ID cache.
+    /// </summary>
+    internal TerminalKittyImageSource GetSource(int imageId)
+    {
+        ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
+        TerminalKittyImageSource? source = _source;
+        if (source is null || source.ImageId != imageId)
+        {
+            KittyGraphicsDecodedImage rgba = GetRgbaImage();
+            source = new(imageId, rgba.Width, rgba.Height, rgba.Rgba);
+            _source = source;
+        }
+        return source;
+    }
+
+    internal ManagedKittyImagePixels AsRgba() => IsRgba ? this : new(GetRgbaImage()) { _source = _source };
 }

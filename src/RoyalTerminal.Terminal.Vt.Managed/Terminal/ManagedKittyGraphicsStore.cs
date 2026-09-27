@@ -290,8 +290,6 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     internal sealed class Image(uint id, uint number, ManagedKittyImagePixels decoded, long quotaBytes, bool transient, ulong generation,
         ManagedKittyAnimation? animation = null)
     {
-        private KittyGraphicsDecodedImage? _published;
-        private TerminalKittyImageSource? _source;
         internal uint Id { get; } = id;
         internal uint Number { get; } = number;
         internal ulong Generation { get; set; } = generation;
@@ -302,22 +300,8 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         internal Image CreateStateCopy() => new(Id, Number, Animation.CurrentPixels, QuotaBytes, transient, Generation, Animation.CreateStateCopy())
         {
             PlacementCount = PlacementCount,
-            _published = _published,
-            _source = _source,
         };
-        internal TerminalKittyImageSource Source
-        {
-            get
-            {
-                KittyGraphicsDecodedImage current = Animation.CurrentImage;
-                if (!ReferenceEquals(current, _published))
-                {
-                    _published = current;
-                    _source = new(unchecked((int)Id), current.Width, current.Height, current.Rgba);
-                }
-                return _source!;
-            }
-        }
+        internal TerminalKittyImageSource Source => Animation.CurrentPixels.GetSource(unchecked((int)Id));
     }
 
     internal readonly record struct PlacementKey(uint ImageId, uint Id, bool Internal)
