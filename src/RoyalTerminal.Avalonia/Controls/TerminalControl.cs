@@ -3905,42 +3905,13 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return new SelectionExtent(column, absoluteRow, column + 1, absoluteRow);
         }
 
-        TerminalRow row = _screen.GetViewportRow(viewportRow);
-        if (!TryBuildRowTextColumnMap(row, out int rowTextLength))
+        if (!TerminalWordSelection.TryResolve(_screen, new(column, viewportRow),
+            DefaultWordSelectionDelimiters, out TerminalWordExtent extent))
         {
             return new SelectionExtent(column, absoluteRow, Math.Min(column + 1, Math.Max(1, _screen.Columns)), absoluteRow);
         }
-
-        int textIndex = FindRowTextIndexForColumn(row, column, rowTextLength);
-        if (textIndex < 0)
-        {
-            int clampedColumn = Math.Clamp(column, 0, Math.Max(0, _screen.Columns - 1));
-            return new SelectionExtent(clampedColumn, absoluteRow, Math.Min(clampedColumn + 1, _screen.Columns), absoluteRow);
-        }
-
-        ReadOnlySpan<char> rowText = _rowTextScratch.AsSpan(0, rowTextLength);
-        if (IsWordSelectionDelimiter(rowText[textIndex]))
-        {
-            int delimiterColumn = _rowColumnMapScratch[textIndex];
-            return new SelectionExtent(delimiterColumn, absoluteRow, delimiterColumn + 1, absoluteRow);
-        }
-
-        int startTextIndex = textIndex;
-        while (startTextIndex > 0 && !IsWordSelectionDelimiter(rowText[startTextIndex - 1]))
-        {
-            startTextIndex--;
-        }
-
-        int endTextIndexExclusive = textIndex + 1;
-        while (endTextIndexExclusive < rowTextLength &&
-               !IsWordSelectionDelimiter(rowText[endTextIndexExclusive]))
-        {
-            endTextIndexExclusive++;
-        }
-
-        int startColumn = _rowColumnMapScratch[startTextIndex];
-        int endColumnExclusive = _rowColumnMapScratch[endTextIndexExclusive - 1] + 1;
-        return new SelectionExtent(startColumn, absoluteRow, endColumnExclusive, absoluteRow);
+        return new SelectionExtent(extent.Start.Column, topRow + extent.Start.Row,
+            extent.End.Column, topRow + extent.End.Row);
     }
 
     private SelectionExtent ResolveLogicalLineExtentLocked(int absoluteRow, int topRow)
@@ -4004,58 +3975,6 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         return Math.Min(1, cells.Length);
-    }
-
-    private int FindRowTextIndexForColumn(TerminalRow row, int column, int rowTextLength)
-    {
-        for (int i = 0; i < rowTextLength; i++)
-        {
-            if (_rowColumnMapScratch[i] == column)
-            {
-                return i;
-            }
-        }
-
-        ReadOnlySpan<TerminalCell> cells = row.ReadOnlyCells;
-        if ((uint)column >= (uint)cells.Length ||
-            cells[column].Width != 0)
-        {
-            return -1;
-        }
-
-        for (int previousColumn = column - 1; previousColumn >= 0; previousColumn--)
-        {
-            ref readonly TerminalCell cell = ref cells[previousColumn];
-            if (cell.Width == 0)
-            {
-                continue;
-            }
-
-            if ((cell.Attributes & CellAttributes.Hidden) != 0 ||
-                !cell.HasContent ||
-                previousColumn + Math.Max(1, (int)cell.Width) <= column)
-            {
-                return -1;
-            }
-
-            for (int i = rowTextLength - 1; i >= 0; i--)
-            {
-                if (_rowColumnMapScratch[i] == previousColumn)
-                {
-                    return i;
-                }
-            }
-
-            return -1;
-        }
-
-        return -1;
-    }
-
-    private static bool IsWordSelectionDelimiter(char value)
-    {
-        return char.IsWhiteSpace(value) ||
-            DefaultWordSelectionDelimiters.AsSpan().IndexOf(value) >= 0;
     }
 
     private TerminalHighlightSpan[] CreateSelectionSpansBetweenExtents(

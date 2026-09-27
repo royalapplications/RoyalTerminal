@@ -1236,6 +1236,63 @@ public sealed partial class TerminalControlHeadlessInteractionTests
     }
 
     [AvaloniaFact]
+    public async Task Headless_MouseSelection_DoubleClick_SelectsSoftWrappedWideWord()
+    {
+        TerminalControl control = await CreateTextSelectionControlAsync(string.Empty);
+        Window window = Assert.IsType<Window>(TopLevel.GetTopLevel(control));
+        try
+        {
+            int columns = control.Columns;
+            control.WriteOutput(Encoding.UTF8.GetBytes(new string('A', columns - 1) + "界z"));
+            Dispatcher.UIThread.RunJobs();
+            // Click the wide spacer at the end of the first row.
+            Point point = await GetCellInteractionPointAsync(control, window, column: columns - 1, row: 0);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: 2);
+            Dispatcher.UIThread.RunJobs();
+            TerminalHighlightSpan[] spans = control.Renderer!.GetSelectionSpans().ToArray();
+            Assert.Equal(2, spans.Length);
+            Assert.Equal(new TerminalHighlightSpan(0, 0, columns - 1, TerminalHighlightKind.Selection), spans[0]);
+            Assert.Equal(new TerminalHighlightSpan(1, 0, 2, TerminalHighlightKind.Selection), spans[1]);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseSelection_DoubleClickAtRightEdge_DoesNotCrossHardBreak()
+    {
+        TerminalControl control = await CreateTextSelectionControlAsync(string.Empty);
+        Window window = Assert.IsType<Window>(TopLevel.GetTopLevel(control));
+        try
+        {
+            int columns = control.Columns;
+            control.WriteOutput(Encoding.ASCII.GetBytes(new string('A', columns) + "\r\nBBB"));
+            Dispatcher.UIThread.RunJobs();
+            Point point = await GetCellInteractionPointAsync(control, window, column: columns - 1, row: 0);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: 2);
+            Dispatcher.UIThread.RunJobs();
+            TerminalHighlightSpan span = Assert.Single(control.Renderer!.GetSelectionSpans().ToArray());
+            Assert.Equal(new TerminalHighlightSpan(0, 0, columns - 1, TerminalHighlightKind.Selection), span);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
+    public async Task Headless_MouseSelection_DoubleClick_SelectsDelimiterRun()
+    {
+        TerminalControl control = await CreateTextSelectionControlAsync("alpha., beta");
+        Window window = Assert.IsType<Window>(TopLevel.GetTopLevel(control));
+        try
+        {
+            Point point = await GetCellInteractionPointAsync(control, window, column: 6, row: 0);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: 2);
+            Dispatcher.UIThread.RunJobs();
+            TerminalHighlightSpan span = Assert.Single(control.Renderer!.GetSelectionSpans().ToArray());
+            Assert.Equal(new TerminalHighlightSpan(0, 5, 7, TerminalHighlightKind.Selection), span);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaFact]
     public async Task Headless_MouseSelection_DoubleClickTrailingBlank_SelectsOnlyBlankCell()
     {
         TerminalControl control = await CreateTextSelectionControlAsync("alpha");

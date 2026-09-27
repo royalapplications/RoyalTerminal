@@ -14,8 +14,8 @@ internal struct ManagedCharsetState
     public ManagedCharsetState() => _bits = 2 << 10; // UTF-8 sets; GL=G0, GR=G2.
     internal readonly ushort Bits => _bits;
 
-    internal readonly bool IsPrintIdentity => (_bits >> 12) == 0 &&
-        ((_bits >> (((_bits >> 8) & 3) * 2)) & 3) <= 1;
+    internal readonly bool HasSingleShift => (_bits >> 12) != 0;
+    internal readonly int GlSet => (_bits >> (((_bits >> 8) & 3) * 2)) & 3;
 
     internal static ManagedCharsetState FromSnapshot(Snapshots.GhosttySnapshotCharset state)
         => new() { _bits = state.Bits };
@@ -46,6 +46,11 @@ internal struct ManagedCharsetState
         }
         else slot = (_bits >> 8) & 3;
         int set = (_bits >> (slot * 2)) & 3;
+        return MapCodepoint(codepoint, set);
+    }
+
+    internal static int MapCodepoint(int codepoint, int set)
+    {
         // Current Ghostty maps through GL even for UTF-8 input; GR is retained
         // state but not yet consulted by its printer. Width is determined first.
         if (set <= 1) return codepoint;

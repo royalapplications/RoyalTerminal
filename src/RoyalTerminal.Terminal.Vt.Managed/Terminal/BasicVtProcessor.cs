@@ -1144,8 +1144,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 0x08: // BS — Backspace
-                ResetDelayedWrap();
-                _cursorCol = Math.Max(0, _cursorCol - 1);
+                CursorBackward(1);
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
@@ -3203,7 +3202,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'D': // CUB — Cursor Back
-                _cursorCol = Math.Max(0, _cursorCol - Math.Max(1, p0));
+                CursorBackward(Math.Max(1, p0));
                 break;
 
             case 'E': // CNL — Cursor Next Line
@@ -3431,7 +3430,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'A': // CUU
             case 'B': // CUD
             case 'C': // CUF
-            case 'D': // CUB
             case 'E': // CNL
             case 'F': // CPL
             case 'G': // CHA

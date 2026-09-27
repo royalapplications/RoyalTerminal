@@ -19,14 +19,16 @@ public sealed partial class BasicVtProcessor
     private void PrintSlice<T>(ReadOnlySpan<T> codepoints) where T : unmanaged, IBinaryInteger<T>
     {
         if (codepoints.Length < 2 || _statusDisplay != 0 || _insertMode || !_autoWrap ||
-            !_charsets.IsPrintIdentity || _currentHyperlinkId != 0)
+            _currentHyperlinkId != 0)
         {
             foreach (T codepoint in codepoints) PutChar(int.CreateTruncating(codepoint));
             return;
         }
         for (int index = 0; index < codepoints.Length;)
         {
-            int consumed = TryPrintSlice(codepoints[index..]);
+            // A single shift affects one graphic only. Resume batching in the
+            // same input span once the scalar printer consumes it (#14356).
+            int consumed = _charsets.HasSingleShift ? 0 : TryPrintSlice(codepoints[index..]);
             if (consumed == 0) PutChar(int.CreateTruncating(codepoints[index++]));
             else index += consumed;
         }
@@ -75,6 +77,11 @@ public sealed partial class BasicVtProcessor
         ClampCursor();
 
         int first = int.CreateTruncating(codepoints[0]);
+        int charset = _charsets.GlSet;
+        bool mapCharset = charset > 1;
+        // Non-identity charsets retain the scalar Unicode/grapheme behavior:
+        // width is calculated before mapping, and single shifts consume there.
+        if (mapCharset && first > 255) return 0;
         int width = first <= 255 ? 1 : TerminalCellWidthCalculator.GetCodepointWidth(first);
         if (width is not (1 or 2) || first == 0x10EEEE) return 0;
         bool clusters = _extendedDecModes.Contains(ManagedDecModeFlag.GraphemeClusters);
@@ -106,6 +113,7 @@ public sealed partial class BasicVtProcessor
         for (; count < limit; count++)
         {
             int codepoint = int.CreateTruncating(codepoints[count]);
+            if (mapCharset && codepoint > 255) break;
             if (typeof(T) != typeof(byte) && count != 0)
             {
                 int nextWidth = codepoint <= 255 ? 1 : TerminalCellWidthCalculator.GetCodepointWidth(codepoint);
@@ -131,10 +139,21 @@ public sealed partial class BasicVtProcessor
         metadata.WriteSimpleCursorRun(_cursorCol, count * width);
         if (width == 1)
         {
-            for (int index = 0; index < count; index++)
+            if (mapCharset)
             {
-                template.Codepoint = int.CreateTruncating(codepoints[index]);
-                destination[index] = template;
+                for (int index = 0; index < count; index++)
+                {
+                    template.Codepoint = ManagedCharsetState.MapCodepoint(int.CreateTruncating(codepoints[index]), charset);
+                    destination[index] = template;
+                }
+            }
+            else
+            {
+                for (int index = 0; index < count; index++)
+                {
+                    template.Codepoint = int.CreateTruncating(codepoints[index]);
+                    destination[index] = template;
+                }
             }
         }
         else
