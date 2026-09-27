@@ -60,7 +60,7 @@ public class TerminalFontGraphemeTests
     }
 
     [Fact]
-    public void MissingWholeClusterFontPreservesBestEffortNonNullContract()
+    public void MissingWholeClusterFontSelectsOneReplacementGlyph()
     {
         using SKTypeface primary = LoadFont("JetBrainsMono-Regular.ttf");
         FixtureFontMatcher matcher = new();
@@ -70,6 +70,7 @@ public class TerminalFontGraphemeTests
 
         Assert.Same(primary, result.Typeface);
         Assert.False(result.UsedFallback);
+        Assert.Equal(0xFFFD, result.ReplacementCodepoint);
     }
 
     [Fact]

@@ -13,9 +13,17 @@ using SkiaSharp;
 namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>
-/// Result of resolving a typeface for a codepoint.
+/// Result of resolving a typeface and display text for a codepoint or grapheme.
 /// </summary>
-public readonly record struct TerminalFontResolution(SKTypeface Typeface, bool UsedFallback);
+public readonly record struct TerminalFontResolution(SKTypeface Typeface, bool UsedFallback)
+{
+    /// <summary>
+    /// Gets the scalar to display instead of the entire unsupported input cluster:
+    /// U+FFFD, or a space when no replacement glyph is available. Zero preserves
+    /// the input. This is a display decision; never replace stored terminal text.
+    /// </summary>
+    public int ReplacementCodepoint { get; init; }
+}
 
 /// <summary>
 /// Resolves primary/fallback typefaces for terminal text rendering.
@@ -71,6 +79,7 @@ public sealed class TerminalFontResolver : IDisposable
     /// <summary>
     /// Resolves a typeface for a single Unicode codepoint.
     /// </summary>
+    /// <exception cref="InvalidOperationException">No available face can render the input, U+FFFD or a space.</exception>
     public TerminalFontResolution ResolveTypeface(
         SKTypeface primaryTypeface,
         int codepoint,
@@ -84,12 +93,15 @@ public sealed class TerminalFontResolver : IDisposable
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
 
-        return ResolveTypefaceCore(primaryTypeface, codepoint, culture, explicitEmojiPresentation: null);
+        return TryResolveTypefaceCore(primaryTypeface, codepoint, culture, null, out TerminalFontResolution result)
+            ? result
+            : ResolveReplacement(primaryTypeface, culture, null);
     }
 
     /// <summary>
     /// Resolves a typeface for a UTF-16 text segment.
     /// </summary>
+    /// <exception cref="InvalidOperationException">No available face can render the input cluster, U+FFFD or a space.</exception>
     public TerminalFontResolution ResolveTypeface(
         SKTypeface primaryTypeface,
         ReadOnlySpan<char> text,
@@ -98,18 +110,20 @@ public sealed class TerminalFontResolver : IDisposable
         ArgumentNullException.ThrowIfNull(primaryTypeface);
         ThrowIfDisposed();
 
-        if (text.IsEmpty ||
-            Rune.DecodeFromUtf16(text, out Rune firstRune, out int charsConsumed) != OperationStatus.Done)
+        if (text.IsEmpty)
         {
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
+        if (Rune.DecodeFromUtf16(text, out Rune firstRune, out int charsConsumed) != OperationStatus.Done)
+            return ResolveReplacement(primaryTypeface, culture, null);
 
         // Ghostty only accepts a selector immediately after the base scalar.
         // A later selector, keycap, modifier or tag cannot change that request.
         bool? explicitEmojiPresentation = GetExplicitPresentation(text[charsConsumed..]);
 
-        TerminalFontResolution primary = ResolveTypefaceCore(
-            primaryTypeface, firstRune.Value, culture, explicitEmojiPresentation);
+        if (!TryResolveTypefaceCore(primaryTypeface, firstRune.Value, culture, explicitEmojiPresentation,
+            out TerminalFontResolution primary))
+            return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation);
         if (charsConsumed == text.Length || ContainsGrapheme(primary.Typeface, text, explicitEmojiPresentation))
         {
             return primary;
@@ -133,8 +147,8 @@ public sealed class TerminalFontResolver : IDisposable
             // Discover components with their own Unicode default, not the
             // base's explicit presentation. Whole-cluster validation below
             // permits either presentation for these additional components.
-            TerminalFontResolution candidate = ResolveTypefaceCore(
-                primaryTypeface, component.Value, culture, explicitEmojiPresentation: null);
+            if (!TryResolveTypefaceCore(primaryTypeface, component.Value, culture, null,
+                out TerminalFontResolution candidate)) break;
             if (candidate.Typeface.Handle != primary.Typeface.Handle &&
                 ContainsGrapheme(candidate.Typeface, text, explicitEmojiPresentation))
             {
@@ -142,14 +156,13 @@ public sealed class TerminalFontResolver : IDisposable
             }
         }
 
-        // Preserve this API's non-null best-effort fallback when no single
-        // available font covers the cluster; missing components remain .notdef.
-        return primary;
+        return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation);
     }
 
     /// <summary>
     /// Resolves a typeface for a UTF-16 string segment.
     /// </summary>
+    /// <exception cref="InvalidOperationException">No available face can render the input cluster, U+FFFD or a space.</exception>
     public TerminalFontResolution ResolveTypeface(
         SKTypeface primaryTypeface,
         string text,
@@ -159,21 +172,38 @@ public sealed class TerminalFontResolver : IDisposable
         return ResolveTypeface(primaryTypeface, text.AsSpan(), culture);
     }
 
-    private TerminalFontResolution ResolveTypefaceCore(
+    private bool TryResolveTypefaceCore(
         SKTypeface primaryTypeface,
         int codepoint,
         CultureInfo? culture,
-        bool? explicitEmojiPresentation)
+        bool? explicitEmojiPresentation,
+        out TerminalFontResolution resolution)
     {
         // A configured font is authoritative without an explicit selector,
         // including a deliberately chosen monochrome emoji font.
         if (ContainsGlyph(primaryTypeface, codepoint, explicitEmojiPresentation))
         {
-            return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
+            resolution = new TerminalFontResolution(primaryTypeface, UsedFallback: false);
+            return true;
         }
 
         bool preferEmojiPresentation = explicitEmojiPresentation ?? new Codepoint((uint)codepoint).IsEmojiPresentation;
-        return ResolveCachedFallback(primaryTypeface, codepoint, culture, preferEmojiPresentation);
+        resolution = ResolveCachedFallback(primaryTypeface, codepoint, culture, preferEmojiPresentation);
+        // Ghostty's final collection lookup accepts any presentation in an
+        // already configured face; a discovered wrong-presentation face is not
+        // admitted to the collection by that last-resort lookup.
+        return resolution.UsedFallback || ContainsGlyph(primaryTypeface, codepoint);
+    }
+
+    private TerminalFontResolution ResolveReplacement(SKTypeface primaryTypeface, CultureInfo? culture, bool? presentation)
+    {
+        // RunIterator replaces the whole unsupported cell, never just the
+        // missing component. Preserve the original cell width in the renderer.
+        if (TryResolveTypefaceCore(primaryTypeface, 0xFFFD, culture, presentation, out TerminalFontResolution replacement))
+            return replacement with { ReplacementCodepoint = 0xFFFD };
+        if (TryResolveTypefaceCore(primaryTypeface, ' ', culture, presentation, out replacement))
+            return replacement with { ReplacementCodepoint = ' ' };
+        throw new InvalidOperationException("No available terminal font can render a replacement character or space.");
     }
 
     private TerminalFontResolution ResolveCachedFallback(
@@ -326,7 +356,8 @@ public sealed class TerminalFontResolver : IDisposable
                 family, primaryTypeface.FontStyle, languageTags, codepoint);
             if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
                 return FontFallbackCacheEntry.NoFallback;
-            if (fallbackTypeface.Handle != primaryTypeface.Handle && ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
+            if (fallbackTypeface.Handle != primaryTypeface.Handle && !TerminalFontCoverage.IsLastResort(fallbackTypeface) &&
+                ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
                 return new FontFallbackCacheEntry(fallbackTypeface);
 
             // System matchers can return an object already retained for a

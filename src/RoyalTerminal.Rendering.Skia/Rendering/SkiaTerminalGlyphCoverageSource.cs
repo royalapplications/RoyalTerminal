@@ -64,24 +64,14 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
                 _resolver = next;
                 _coverage.Clear();
             }
-            SKTypeface typeface = _resolver.ResolveTypeface(_fonts.RegularTypeface, (int)codepoint,
-                CultureInfo.InvariantCulture).Typeface;
+            TerminalFontResolution resolution = _resolver.ResolveTypeface(_fonts.RegularTypeface, (int)codepoint,
+                CultureInfo.InvariantCulture);
+            SKTypeface typeface = resolution.Typeface;
             using SKFont font = GlyphCache.CreateFont(typeface, 12);
-            found = !IsLastResort(typeface) && font.ContainsGlyph((int)codepoint);
+            found = resolution.ReplacementCodepoint == 0 && !TerminalFontCoverage.IsLastResort(typeface) && font.ContainsGlyph((int)codepoint);
             _coverage.Add(codepoint, found);
             return found;
         }
-    }
-
-    private static unsafe bool IsLastResort(SKTypeface typeface)
-    {
-        // OpenType head.flags bit 14 denotes generic range placeholders, not
-        // real coverage. Ghostty also rejects Apple's LastResort by name.
-        byte* flags = stackalloc byte[2];
-        flags[0] = flags[1] = 0;
-        if (typeface.TryGetTableData(0x68656164, 16, 2, (nint)flags) && (flags[0] & 0x40) != 0)
-            return true;
-        return typeface.FamilyName is "LastResort" or ".LastResort";
     }
 
     /// <summary>Releases owned font resources after any active query completes; safe to repeat.</summary>

@@ -47,10 +47,26 @@ resolver, and rejected candidates do not dispose fonts retained by another
 cache entry. Where Skia exposes a mapped font stream, a HarfBuzz blob borrows it
 with an owned release callback, avoiding a managed copy of large bitmap tables.
 This checks available color data, not an interactive guarantee for every font
-format/backend. Missing-whole-cluster replacement rendering and ordering across
-multiple configured faces remain separate parity work; the current public
-resolver still returns its non-null best-effort candidate for an uncovered
-cluster.
+format/backend. Ordering across multiple configured faces remains separate
+parity work.
+
+Unsupported cells now carry an explicit `TerminalFontResolution.ReplacementCodepoint`:
+the entire cluster becomes U+FFFD, falling back to a space if that glyph is
+unavailable. Like Ghostty's run iterator, absence of even a space is a font
+configuration error. The final configured-face lookup permits any presentation
+after presentation-specific discovery fails. Render-only copies preserve the
+original width and metadata while stripping suffix VS15/VS16 after font
+selection; ZWJ and other shaping controls remain. Shaped text, optional Pretext,
+cell-anchored fallback, thickening, IME preview/caret and block-cursor text all
+consume this same projection, so text hashes and cluster/grid offsets agree.
+Stored cells, copy/search text and snapshots retain the original characters.
+Selector-normalization caching is bounded by both entry count and retained UTF-16
+characters; warmed projection reuses its buffers. Generic LastResort range
+placeholders are rejected during discovery. Glyph-coverage queries do not
+advertise replacement glyphs as coverage, and the password indicator retains its
+geometric fallback. Windows Terminal's DirectWrite mapping and xterm.js's canvas
+delegate fallback to their platform font stacks; this shared Skia layer follows
+Ghostty's explicit replacement/selector policy instead.
 
 `TerminalFontWarmup.StartAsync()` is a best-effort, one-shot macOS startup query.
 The demo starts it before Avalonia initialization, after rejecting inert toast

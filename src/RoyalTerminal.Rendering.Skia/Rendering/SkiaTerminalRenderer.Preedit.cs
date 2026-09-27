@@ -24,8 +24,19 @@ public sealed partial class SkiaTerminalRenderer
 
     private void RenderPreedit(SKCanvas canvas, uint foreground, float y, TerminalPreeditRange range)
     {
-        TerminalPreedit preedit = Preedit!;
-        ReadOnlySpan<TerminalCell> cells = preedit.RenderCells;
+        _preeditDisplayCells.Clear();
+        try
+        {
+            foreach (ref readonly TerminalCell cell in Preedit!.RenderCells)
+                _preeditDisplayCells.Add(in cell, ResolveFontForCell(_glyphCache.RegularTypeface, in cell));
+            RenderPreeditDisplay(canvas, foreground, y, range, _preeditDisplayCells.Cells, _preeditDisplayCells.Fonts);
+        }
+        finally { _preeditDisplayCells.Clear(); }
+    }
+
+    private void RenderPreeditDisplay(SKCanvas canvas, uint foreground, float y, TerminalPreeditRange range,
+        ReadOnlySpan<TerminalCell> cells, ReadOnlySpan<TerminalFontResolution> fonts)
+    {
         int column = range.Start;
         for (int i = 0; i < range.Offset; i++) column -= cells[i].Width;
         int caretOffset = 0, caretLength = 0, caretColumn = 0;
@@ -33,7 +44,7 @@ public sealed partial class SkiaTerminalRenderer
         SKRect textClip = new(range.Start * _cellWidth, y, (range.End + 1) * _cellWidth, y + _cellHeight);
         for (int offset = 0; offset < range.Limit;)
         {
-            SKTypeface typeface = ResolveTypefaceForCell(_glyphCache.RegularTypeface, in cells[offset]);
+            SKTypeface typeface = fonts[offset].Typeface;
             Script script = GetPreeditScript(in cells[offset]);
             int limit = offset + 1;
             int width = cells[offset].Width;
@@ -42,7 +53,7 @@ public sealed partial class SkiaTerminalRenderer
                 Script nextScript = GetPreeditScript(in cells[limit]);
                 if (!IsNeutralPreeditScript(script) && !IsNeutralPreeditScript(nextScript) && script != nextScript)
                     break;
-                if (ResolveTypefaceForCell(_glyphCache.RegularTypeface, in cells[limit]).Handle != typeface.Handle)
+                if (fonts[limit].Typeface.Handle != typeface.Handle)
                     break;
                 if (IsNeutralPreeditScript(script)) script = nextScript;
                 width += cells[limit++].Width;
@@ -105,6 +116,8 @@ public sealed partial class SkiaTerminalRenderer
 
     private static Script GetPreeditScript(ref readonly TerminalCell cell)
     {
+        if (string.IsNullOrEmpty(cell.Grapheme) && Rune.IsValid(cell.Codepoint))
+            return UnicodeFunctions.Default.GetScript(cell.Codepoint);
         foreach (Rune rune in cell.Grapheme.AsSpan().EnumerateRunes())
         {
             Script script = UnicodeFunctions.Default.GetScript(rune.Value);

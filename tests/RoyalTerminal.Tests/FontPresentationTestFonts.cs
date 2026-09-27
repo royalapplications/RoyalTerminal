@@ -18,7 +18,7 @@ internal static class FontPresentationTestFonts
 {
     internal static SKTypeface Load(string name)
     {
-        if (name is not ("NotoColorEmoji.ttf" or "ColorEmojiV1.ttf" or "SvgEmoji.ttf"))
+        if (name is not ("NotoColorEmoji.ttf" or "ColorEmojiV1.ttf" or "SvgEmoji.ttf" or "LastResort.ttf"))
             return SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", name))
                    ?? throw new InvalidOperationException(name);
 
@@ -84,6 +84,11 @@ internal static class FontPresentationTestFonts
             tables[0x53564720] = svg;
         }
         tables[0x6E616D65] = Rename(tables[0x6E616D65]);
+        if (name == "LastResort.ttf")
+        {
+            byte[] headTable = tables[0x68656164];
+            Put16(headTable, 16, BinaryPrimitives.ReadUInt16BigEndian(headTable.AsSpan(16)) | 0x4000);
+        }
         Put32(tables[0x68656164], 8, 0);
 
         int size = 12 + tables.Count * 16;

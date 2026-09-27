@@ -122,7 +122,7 @@ public sealed class TerminalFontPresentationTests
         Matcher matcher = new(returnColor: false);
         using TerminalFontResolver resolver = new(matcher);
         _ = resolver.ResolveTypeface(primary, "#\uFE0F\u20E3", CultureInfo.InvariantCulture);
-        Assert.Equal(new[] { ((int)'#', true), (0x20E3, false) }, matcher.Requests);
+        Assert.Equal(new[] { ((int)'#', true), (0x20E3, false), (0xFFFD, true) }, matcher.Requests);
     }
 
     [Fact]

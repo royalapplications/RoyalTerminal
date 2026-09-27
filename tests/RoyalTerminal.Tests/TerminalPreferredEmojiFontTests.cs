@@ -174,8 +174,9 @@ public sealed class TerminalPreferredEmojiFontTests
         Matcher matcher = new(() => preferred);
         using TerminalFontResolver resolver = new(matcher, preferred.FamilyName);
         TerminalFontResolution result = resolver.ResolveTypeface(primary, "#\uFE0F\u0301");
-        Assert.Same(preferred, result.Typeface);
-        Assert.True(result.UsedFallback);
+        Assert.Same(primary, result.Typeface);
+        Assert.False(result.UsedFallback);
+        Assert.Equal(0xFFFD, result.ReplacementCodepoint);
         Assert.Single(matcher.Families);
     }
 

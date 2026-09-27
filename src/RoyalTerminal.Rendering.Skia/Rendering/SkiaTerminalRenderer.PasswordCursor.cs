@@ -11,10 +11,12 @@ public sealed partial class SkiaTerminalRenderer
     {
         // Ghostty uses the Nerd Font lock (U+F023). Unlike Ghostty, hosts need not
         // bundle Nerd Fonts; a geometric fallback keeps the indicator meaningful.
-        SKTypeface typeface = _fontResolver.ResolveTypeface(_glyphCache.RegularTypeface, 0xF023, s_renderCulture).Typeface;
+        TerminalFontResolution resolution = _fontResolver.ResolveTypeface(_glyphCache.RegularTypeface, 0xF023, s_renderCulture);
+        SKTypeface typeface = resolution.Typeface;
         _cursorPaint.Style = SKPaintStyle.Fill;
         _cursorPaint.BlendMode = SKBlendMode.SrcOver;
-        if (_singleGlyphIdCache.TryGetOrCreate(new SingleGlyphIdCacheKey(0xF023, typeface.Handle), typeface, out _))
+        if (resolution.ReplacementCodepoint == 0 &&
+            _singleGlyphIdCache.TryGetOrCreate(new SingleGlyphIdCacheKey(0xF023, typeface.Handle), typeface, out _))
         {
             SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             font.MeasureText("\uF023", out SKRect bounds);

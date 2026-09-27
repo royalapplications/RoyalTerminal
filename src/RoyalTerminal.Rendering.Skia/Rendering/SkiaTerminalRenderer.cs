@@ -59,6 +59,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
     private readonly GlyphCache _glyphCache;
     private readonly HarfBuzzTextShaper _textShaper;
     private readonly TerminalFontResolver _fontResolver;
+    private readonly TerminalDisplayCellBuffer _displayCells = new();
+    private readonly TerminalDisplayCellBuffer _preeditDisplayCells = new();
     private readonly ShapedRunCache _shapedRunCache;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private readonly PretextRunCache _pretextRunCache;
@@ -426,6 +428,15 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             Style = SKPaintStyle.Fill,
         };
         _spritePath = new SKPath();
+    }
+
+    // Test composition seam: the renderer owns the supplied resolver, just as
+    // it owns the default one. No process-wide font installation is needed.
+    internal SkiaTerminalRenderer(TerminalFontResolver fontResolver, string fontFilePath, float fontSize = 14f)
+        : this(fontSize: fontSize, fontSource: TerminalFontSource.File, fontFilePath: fontFilePath)
+    {
+        _fontResolver.Dispose();
+        _fontResolver = fontResolver;
     }
 
     /// <summary>
@@ -976,9 +987,12 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 in firstCell,
                 rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
-            SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
-            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell) &&
-                !(_enableLigatures && IsProgrammingLigatureCharCell(in firstCell));
+            TerminalFontResolution firstFont = ResolveFontForCell(primaryTypeface, in firstCell);
+            SKTypeface runTypeface = firstFont.Typeface;
+            _displayCells.Clear();
+            _displayCells.Add(in firstCell, firstFont);
+            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in _displayCells.Cells[0]) &&
+                !(_enableLigatures && IsProgrammingLigatureCharCell(in _displayCells.Cells[0]));
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
@@ -1006,14 +1020,17 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                if (IsSymbolGlyphClipCandidate(in nextCell) &&
-                    !(_enableLigatures && IsProgrammingLigatureCharCell(in nextCell)))
+                TerminalFontResolution nextFont = ResolveFontForCell(primaryTypeface, in nextCell);
+                TerminalCell nextDisplay = _displayCells.Project(in nextCell, nextFont);
+                if (IsSymbolGlyphClipCandidate(in nextDisplay) &&
+                    !(_enableLigatures && IsProgrammingLigatureCharCell(in nextDisplay)))
                 {
                     break;
                 }
 
                 bool preserveLigatureCandidate = _enableLigatures &&
-                    WouldSplitProgrammingLigatureCandidate(cells, runEnd);
+                    IsProgrammingLigatureCharCell(in _displayCells.Cells[^1]) &&
+                    IsProgrammingLigatureCharCell(in nextDisplay);
 
                 bool nextBold = (nextCell.Attributes & CellAttributes.Bold) != 0;
                 bool nextItalic = (nextCell.Attributes & CellAttributes.Italic) != 0;
@@ -1031,41 +1048,27 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                SKTypeface nextTypeface = ResolveTypefaceForCell(primaryTypeface, in nextCell);
-
-                if (nextTypeface.Handle != runTypeface.Handle && !preserveLigatureCandidate)
+                // Even programming ligatures cannot cross a resolved font
+                // boundary: a replacement glyph may use a different face.
+                if (nextFont.Typeface.Handle != runTypeface.Handle)
                 {
                     break;
                 }
 
+                _displayCells.AddProjected(in nextDisplay, nextFont);
                 runEnd++;
             }
 
-            if (EnableTextShaping)
+            try
             {
+                DrawDisplayTextRun(canvas, _displayCells.Cells, col, runTypeface, runColor, y,
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-                if (!usePretextPipeline ||
-                    !TryDrawPretextTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y))
-                {
-                    DrawShapedTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y);
-                }
+                    usePretextPipeline);
 #else
-                DrawShapedTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y);
+                    usePretextPipeline: false);
 #endif
             }
-            else
-            {
-                float runWidth = ComputeRunWidth(cells, col, runEnd);
-                DrawCellAnchoredFallbackRun(
-                    canvas,
-                    cells,
-                    col,
-                    runEnd,
-                    runTypeface,
-                    runColor,
-                    y,
-                    runWidth);
-            }
+            finally { _displayCells.Clear(); }
 
             DrawRunDecorations(
                 canvas,
@@ -3215,7 +3218,9 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             bool bold = (cell.Attributes & CellAttributes.Bold) != 0;
             bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
             SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
-            SKTypeface typeface = ResolveTypefaceForCell(primaryTypeface, in cell);
+            TerminalFontResolution resolution = ResolveFontForCell(primaryTypeface, in cell);
+            if (resolution.ReplacementCodepoint != 0) return false;
+            SKTypeface typeface = resolution.Typeface;
             if (!_singleGlyphIdCache.TryGetOrCreate(
                 new SingleGlyphIdCacheKey(
                     cell.Codepoint,
@@ -4619,7 +4624,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private SKTypeface ResolveTypefaceForCell(SKTypeface primaryTypeface, ref readonly TerminalCell cell)
+    private TerminalFontResolution ResolveFontForCell(SKTypeface primaryTypeface, ref readonly TerminalCell cell)
     {
         TerminalFontResolution resolution = string.IsNullOrEmpty(cell.Grapheme)
             ? _fontResolver.ResolveTypeface(
@@ -4636,7 +4641,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             RecordFallbackFontHit();
         }
 
-        return resolution.Typeface;
+        return resolution;
     }
 
     private float ComputeRunWidth(ReadOnlySpan<TerminalCell> cells, int startCol, int endCol)
@@ -5891,24 +5896,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
             DrawRegisteredGlyph(canvas, (uint)GetCellPrimaryCodepoint(in cell), registeredGlyph, column, y, cell.Width, CursorTextColor);
             return;
         }
-        float x = column * _cellWidth;
-        float baselineY = GetTextBaselineY(y);
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
-        {
-            using SKFont font = _glyphCache.CreateFont(_fontSize);
-            if (TryDrawThickenedText(canvas, _glyphCache.RegularTypeface, font, cell.Grapheme, x, baselineY)) return;
-            canvas.DrawText(cell.Grapheme, x, baselineY, font, _fgPaint);
-            return;
-        }
-
-        if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
-        {
-            using SKFont font = _glyphCache.CreateFont(_fontSize);
-            string text = GetCodepointText(cell.Codepoint);
-            if (!TryDrawThickenedText(canvas, _glyphCache.RegularTypeface, font, text, x, baselineY))
-                canvas.DrawText(text, x, baselineY, font, _fgPaint);
-        }
+        DrawCursorDisplayCell(canvas, in cell, column, y);
     }
 
     private static bool TryResolveCursorCellPlacement(
@@ -6461,6 +6449,8 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         _spritePaint.Dispose();
         _symbolPaint.Dispose();
         _spritePath.Dispose();
+        _displayCells.Dispose();
+        _preeditDisplayCells.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
         ClearTextRenderCaches();
