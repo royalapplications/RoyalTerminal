@@ -36,9 +36,8 @@ public sealed partial class BasicVtProcessor
     private void ScrollRectangle(int top, int bottom, int count, bool down)
     {
         try { ScrollRectangleCore(top, bottom, count, down); }
-        catch (OutOfMemoryException failure)
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure))
         {
-            _screen.RecordSnapshotMutationFailure(failure);
             throw;
         }
     }

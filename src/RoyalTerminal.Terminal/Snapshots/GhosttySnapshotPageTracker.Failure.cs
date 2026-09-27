@@ -11,13 +11,18 @@ internal sealed partial class GhosttySnapshotPageTracker
     // caller has already shifted rows/anchors. The embedded managed engine
     // faults this terminal owner instead of terminating the host process.
     // The failure is owner-local, including across COW publication/rollback.
-    private ExceptionDispatchInfo? _mutationFailure;
+    private Exception? _mutationFailure;
 
     internal bool MutationFailed => _mutationFailure is not null;
-    internal void ThrowIfMutationFailed() => _mutationFailure?.Throw();
+    internal Exception? MutationFailure => _mutationFailure;
+    internal void ThrowIfMutationFailed()
+    {
+        if (_mutationFailure is { } failure) ExceptionDispatchInfo.Throw(failure);
+    }
 
     internal void RecordMutationFailure(Exception failure)
-        => _mutationFailure ??= ExceptionDispatchInfo.Capture(failure);
+        // Latching a CLR allocation failure must not itself allocate an EDI.
+        => _mutationFailure ??= failure;
 
     private static InvalidOperationException RowCopyFailed()
         => new("Terminal row metadata copy exhausted page capacity. " +

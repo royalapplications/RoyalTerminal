@@ -104,6 +104,12 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
 
     private void ClearPromptForRedraw()
     {
+        try { ClearPromptForRedrawCore(); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearPromptForRedrawCore()
+    {
         if (_inAltScreen || _promptRedraw == TerminalPromptRedraw.None ||
             CurrentSemanticPen.Content == TerminalSemanticContent.Output) return;
         int first = _screen.GetAbsoluteRowForViewportRow(_cursorRow);
@@ -123,8 +129,9 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
             // Native resize temporarily detaches the cursor pen before this
             // clear, so prompt blanks use default colors, not the active SGR.
             using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+            Span<TerminalCell> cells = row.Cells;
             styles.Clear(0, row.Columns);
-            row.Cells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
+            cells.Fill(TerminalCell.Empty(_screen.DefaultForeground, _screen.DefaultBackground));
             row.IsDirty = true;
         }
     }

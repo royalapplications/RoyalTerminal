@@ -64,6 +64,12 @@ public sealed partial class BasicVtProcessor
 
     private int TryPrintSlice<T>(ReadOnlySpan<T> codepoints) where T : unmanaged, IBinaryInteger<T>
     {
+        try { return TryPrintSliceCore<T>(codepoints); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private int TryPrintSliceCore<T>(ReadOnlySpan<T> codepoints) where T : unmanaged, IBinaryInteger<T>
+    {
         if (codepoints.Length < 2) return 0;
         if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
         ClampCursor();
@@ -119,8 +125,10 @@ public sealed partial class BasicVtProcessor
         ApplySnapshotCursorStyleDrops();
         TerminalCell template = default;
         WriteCellFromPen(ref template, 0, (byte)width);
-        metadata.WriteSimpleCursorRun(_cursorCol, count * width);
+        // Detach COW storage before committing allocator references. This is
+        // the same single destination allocation the write already required.
         Span<TerminalCell> destination = row.Cells.Slice(_cursorCol, count * width);
+        metadata.WriteSimpleCursorRun(_cursorCol, count * width);
         if (width == 1)
         {
             for (int index = 0; index < count; index++)

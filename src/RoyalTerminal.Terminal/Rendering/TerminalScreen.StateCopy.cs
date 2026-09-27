@@ -104,6 +104,8 @@ public sealed partial class TerminalScreen
         destination._snapshotRowGeometry = _snapshotRowGeometry;
         destination._snapshotAlternateLineLimit = _snapshotAlternateLineLimit;
         destination._snapshotScrollbackQuota = _snapshotScrollbackQuota;
+        destination._snapshotMutationFailure = _snapshotMutationFailure;
+        destination.MutationCheckpoint = MutationCheckpoint;
     }
 
     private TerminalRowBuffer CopyRows(TerminalRowBuffer rows)

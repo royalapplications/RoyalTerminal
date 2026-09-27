@@ -642,8 +642,39 @@ published by timeout or disposal. Cursor accounting skips exception unwinding;
 the existing output worker propagates the failure and stops its drain. Successful
 capacity growth still retries the copy. Twenty-four full-width/rectangular,
 grapheme/style/link-map/string-pressure, COW, lifecycle, held-publication and worker
-regression cases are authored but unrun. Generic CLR allocation failures before
-the row-copy boundary and other mutation paths still require the broader audit.
+regression cases are authored but unrun.
+
+CLR allocation failures in scalar/batched printing, grapheme append/transfer,
+character shifts, row/cell erasure, hidden-cell retirement, raster text clearing,
+prompt redraw and cursor/row metadata coordination now latch the affected owner
+before exception cleanup. The latch stores the original exception without
+allocating a tracker or `ExceptionDispatchInfo`; retained COW owners remain
+independent, and copying a failed owner preserves its failure. Exception filters
+run before row-revision stamping and cursor restoration, so cleanup cannot mark
+partially updated metadata synchronized or hide the first failure. Native logical
+capacity refusals still retain their existing retry/degradation behavior. This
+is failure containment, not a promise of successful recovery from process OOM.
+
+These are internal mutation boundaries, not a catch around arbitrary input:
+title/bell/response observers may fail after a valid mutation, and a failed staged
+resize must still roll back to its usable original owner. Instance-local
+allocation tripwires cover partial metadata edits, held-output nonpublication,
+revision cleanup, copied failures and resize rollback; those new tests are
+authored, not yet executed. Wider allocator/publication failure auditing remains.
+
+Character insertion/deletion now reuse one writable span per row, avoiding
+repeated COW checks and metadata revision increments per shifted cell. Printing,
+erasure and raster clears detach writable cell storage before committing metadata
+where no full-row ownership swap is needed. Full clears retain their no-copy
+replacement path. There are no per-cell journals, delegates or rollback snapshots
+on the normal path. This ordering follows the prepare-before-install approach in
+[Windows Terminal `ROW::_resizeChars`](https://github.com/microsoft/terminal/blob/main/src/buffer/out/Row.cpp)
+and the separate cell/combined-string storage in
+[xterm.js `BufferLine`](https://github.com/xtermjs/xterm.js/blob/master/src/common/buffer/BufferLine.ts),
+while preserving Ghostty's page pressure and partial-append semantics. The
+`--managed-print` benchmark now includes tracked/untracked character shifts,
+tracked erase and grapheme append for final before/after measurement. No measured
+speedup or current-head CI result is claimed in this implementation phase.
 
 Full-width IL/DL now clamp the count to the affected rows and traverse once in
 the native direction, copying directly from the requested distance. In-place

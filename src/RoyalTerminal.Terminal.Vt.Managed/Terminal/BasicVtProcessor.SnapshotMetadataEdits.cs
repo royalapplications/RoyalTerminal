@@ -10,6 +10,12 @@ public sealed partial class BasicVtProcessor
 {
     private void ClearRow(TerminalRow row, uint foreground, uint background, TerminalColorIdentity backgroundIdentity = default)
     {
+        try { ClearRowCore(row, foreground, background, backgroundIdentity); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearRowCore(TerminalRow row, uint foreground, uint background, TerminalColorIdentity backgroundIdentity = default)
+    {
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
         styles.Clear(0, row.PreservedColumns);
         row.Clear(foreground, background, backgroundIdentity);
@@ -17,17 +23,31 @@ public sealed partial class BasicVtProcessor
 
     private void EraseCells(TerminalRow row, int start, int count)
     {
+        try { EraseCellsCore(row, start, count); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void EraseCellsCore(TerminalRow row, int start, int count)
+    {
         if (count <= 0) return;
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        Span<TerminalCell> destination = row.Cells.Slice(start, count);
         styles.Clear(start, count);
-        row.Cells.Slice(start, count).Fill(CreateErasedCell());
+        destination.Fill(CreateErasedCell());
     }
 
     private void EraseCell(TerminalRow row, int column, TerminalCell blank)
     {
+        try { EraseCellCore(row, column, blank); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void EraseCellCore(TerminalRow row, int column, TerminalCell blank)
+    {
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        ref TerminalCell destination = ref row[column];
         styles.Clear(column, 1);
-        row[column] = blank;
+        destination = blank;
     }
 
     private void WriteCellFromPen(TerminalRow row, int column, int codepoint, byte width)
@@ -39,6 +59,7 @@ public sealed partial class BasicVtProcessor
             pen = RecordSnapshotCursorStyle(CaptureSnapshotPen());
         }
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        ref TerminalCell destination = ref row[column];
         if ((ApplySnapshotCursorStyleDrops() & (_inAltScreen ? 2 : 1)) != 0) pen = default;
         // Native writes the cell's style before hyperlink map growth. That
         // growth may drop the pen for later cells, not restyle this cell.
@@ -55,14 +76,15 @@ public sealed partial class BasicVtProcessor
             _currentHyperlinkId = _screen.SnapshotCursorHyperlinkToken(_inAltScreen ? 1 : 0, _currentHyperlinkId);
         }
         cell.HyperlinkId = cellHyperlink;
-        row[column] = cell;
+        destination = cell;
         ApplySnapshotCursorStyleDrops();
     }
 
     private void WriteStyledCell(TerminalRow row, int column, in TerminalCell cell)
     {
         using GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row);
+        ref TerminalCell destination = ref row[column];
         if (_screen.TracksSnapshotMetadata) styles.WriteCell(column, in cell);
-        row[column] = cell;
+        destination = cell;
     }
 }

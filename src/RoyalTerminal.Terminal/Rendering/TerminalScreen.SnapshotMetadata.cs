@@ -16,11 +16,6 @@ public sealed partial class TerminalScreen
 
     internal bool TracksSnapshotMetadata => _snapshotScrollbackQuota is not null || _snapshotRowGeometry;
 
-    internal bool SnapshotMutationFailed => _snapshotPageTracker?.MutationFailed == true;
-    internal void ThrowIfSnapshotMutationFailed() => _snapshotPageTracker?.ThrowIfMutationFailed();
-    internal void RecordSnapshotMutationFailure(Exception failure)
-        => (_snapshotPageTracker ??= new()).RecordMutationFailure(failure);
-
     internal byte TakeSnapshotCursorStyleDrops() => _snapshotPageTracker?.TakeCursorStyleDrops() ?? 0;
 
     internal void AcknowledgeSnapshotCursorStyle(int key) => _snapshotPageTracker?.AcknowledgeCursorStyle(key);
@@ -41,6 +36,13 @@ public sealed partial class TerminalScreen
 
     internal bool SnapshotStyleChanged(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current, ref uint hyperlinkCounter)
     {
+        try { return SnapshotStyleChangedCore(key, cursorRow, previous, current, ref hyperlinkCounter); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private bool SnapshotStyleChangedCore(int key, int cursorRow, GhosttySnapshotStyle previous, GhosttySnapshotStyle current, ref uint hyperlinkCounter)
+    {
+        ThrowIfSnapshotMutationFailed();
         if (!TracksSnapshotMetadata) return true;
         TerminalRowBuffer? rows = GetSnapshotRows(key);
         if (rows is null || (uint)cursorRow >= (uint)ViewportRows || rows.Count < ViewportRows) return true;
@@ -56,6 +58,13 @@ public sealed partial class TerminalScreen
 
     internal GhosttySnapshotPageTracker.RowEdit EditSnapshotRowMetadata(TerminalRow row)
     {
+        try { return EditSnapshotRowMetadataCore(row); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private GhosttySnapshotPageTracker.RowEdit EditSnapshotRowMetadataCore(TerminalRow row)
+    {
+        ThrowIfSnapshotMutationFailed();
         if (!TracksSnapshotMetadata) return default;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
@@ -76,6 +85,13 @@ public sealed partial class TerminalScreen
     }
 
     internal int SnapshotHyperlinkChanged(int key, int cursorRow, GhosttySnapshotStyle pen,
+        int token, ref uint counter, bool restart = false)
+    {
+        try { return SnapshotHyperlinkChangedCore(key, cursorRow, pen, token, ref counter, restart); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private int SnapshotHyperlinkChangedCore(int key, int cursorRow, GhosttySnapshotStyle pen,
         int token, ref uint counter, bool restart = false)
     {
         if (!TracksSnapshotMetadata) return token;
@@ -170,6 +186,12 @@ public sealed partial class TerminalScreen
     }
 
     private void ClearRow(TerminalRow row)
+    {
+        try { ClearRowCore(row); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearRowCore(TerminalRow row)
     {
         using GhosttySnapshotPageTracker.RowEdit styles = row.SnapshotAllocation is null ? default : EditSnapshotRowMetadata(row);
         styles.Clear(0, row.PreservedColumns);

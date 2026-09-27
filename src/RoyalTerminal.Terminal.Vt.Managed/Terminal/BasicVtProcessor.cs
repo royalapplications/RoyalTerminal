@@ -1249,6 +1249,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void PutChar(int codepoint)
     {
+        try { PutCharCore(codepoint); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void PutCharCore(int codepoint)
+    {
         if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
         // Ghostty currently suppresses printable output to the unsupported
         // status line; controls and parser state still advance normally.
@@ -1569,6 +1575,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ClearCellAndWideArtifacts(TerminalRow row, int column)
     {
+        try { ClearCellAndWideArtifactsCore(row, column); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearCellAndWideArtifactsCore(TerminalRow row, int column)
+    {
         if (column < 0 || column >= row.Columns)
         {
             return;
@@ -1740,9 +1752,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
             else ShiftFullWidthRows(_scrollTop, _scrollBottom, count, down);
         }
-        catch (OutOfMemoryException failure)
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure))
         {
-            _screen.RecordSnapshotMutationFailure(failure);
             throw;
         }
         finally
@@ -1759,9 +1770,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 // A fatal copy already latched its failure: do not allocate
                 // or mask that exception while restoring cursor coordinates.
                 try { RecordSnapshotCursorStyle(); }
-                catch (OutOfMemoryException failure)
+                catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure))
                 {
-                    _screen.RecordSnapshotMutationFailure(failure);
                     throw;
                 }
             }
@@ -1813,9 +1823,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void CopyRow(TerminalRow src, TerminalRow dst, bool preserveWrap = false)
     {
         try { CopyRowCore(src, dst, preserveWrap); }
-        catch (OutOfMemoryException failure)
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure))
         {
-            _screen.RecordSnapshotMutationFailure(failure);
             throw;
         }
     }
@@ -4417,6 +4426,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void InsertCharacters(int count)
     {
+        try { InsertCharactersCore(count); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void InsertCharactersCore(int count)
+    {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
         if (!CursorInsideHorizontalMargins) return;
@@ -4435,13 +4450,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             EraseCells(row, _cursorCol + shifted - 1, 2);
         using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
+            // One writable span detaches COW storage once, before changing
+            // metadata, and avoids repeated mutation bookkeeping per cell.
+            Span<TerminalCell> cells = row.Cells;
             for (var c = RightMargin; c >= _cursorCol + count; c--)
             {
                 styles.Swap(c, c - count);
-                row[c] = row[c - count];
+                cells[c] = cells[c - count];
             }
             styles.Clear(_cursorCol, count);
-            row.Cells.Slice(_cursorCol, count).Fill(CreateErasedCell());
+            cells.Slice(_cursorCol, count).Fill(CreateErasedCell());
         }
         NormalizeRowWideCells(row);
         row.IsDirty = true;
@@ -4453,6 +4471,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private void DeleteCharacters(int count)
+    {
+        try { DeleteCharactersCore(count); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void DeleteCharactersCore(int count)
     {
         ClampCursor();
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
@@ -4466,14 +4490,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         SplitCharacterEditBoundary(row, RightMargin + 1);
         using (GhosttySnapshotPageTracker.RowEdit styles = _screen.EditSnapshotRowMetadata(row))
         {
+            Span<TerminalCell> cells = row.Cells;
             for (var c = _cursorCol; c + count <= RightMargin; c++)
             {
                 styles.Swap(c, c + count);
-                row[c] = row[c + count];
+                cells[c] = cells[c + count];
             }
             int start = Math.Max(_cursorCol, RightMargin + 1 - count);
             styles.Clear(start, RightMargin + 1 - start);
-            row.Cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
+            cells.Slice(start, RightMargin + 1 - start).Fill(CreateErasedCell());
         }
         ResetCursorRowSoftWrap(row);
         ResetDelayedWrap();
@@ -4515,6 +4540,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private void ClearPreservedCellsForMutation(TerminalRow row)
+    {
+        try { ClearPreservedCellsForMutationCore(row); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearPreservedCellsForMutationCore(TerminalRow row)
     {
         row.MarkContentMutation();
 

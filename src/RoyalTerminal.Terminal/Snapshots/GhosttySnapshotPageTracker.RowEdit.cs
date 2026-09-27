@@ -39,6 +39,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             if (owner is null || count <= 0) return;
             state.Storage.Graphemes.ClearCells(checked(Offset + start), count);
+            screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.MetadataClear);
             state.Storage.Hyperlinks.ClearCells(checked(Offset + start), count);
             state.Storage.Styles.ClearCells(checked(Offset + start), count);
         }
@@ -52,7 +53,9 @@ internal sealed partial class GhosttySnapshotPageTracker
         // metadata and installed the accepted cursor pen before opening the edit.
         internal void WriteSimpleCursorRun(int start, int count)
         {
-            if (owner is not null) state.Storage.Styles.WriteCursorToCells(checked(Offset + start), count);
+            if (owner is null) return;
+            state.Storage.Styles.WriteCursorToCells(checked(Offset + start), count);
+            screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.MetadataWrite);
         }
 
         internal void Write(int column, GhosttySnapshotStyle style)
@@ -60,6 +63,7 @@ internal sealed partial class GhosttySnapshotPageTracker
             if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return;
             state.Storage.Graphemes.Clear(checked(Offset + column));
             GhosttySnapshotSetAddResult result = state.Storage.Styles.ChangeCell(checked(Offset + column), style);
+            screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.MetadataWrite);
             if (result == GhosttySnapshotSetAddResult.Success) return;
             List<TerminalRow> group = Group(rows, page);
             if (owner.Grow(ref page, state, group, result, layout) &&
@@ -112,6 +116,13 @@ internal sealed partial class GhosttySnapshotPageTracker
         }
 
         internal bool TryAppendGrapheme(int column)
+        {
+            bool accepted = TryAppendGraphemeCore(column);
+            if (accepted) screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.GraphemeAppend);
+            return accepted;
+        }
+
+        private bool TryAppendGraphemeCore(int column)
         {
             if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return true;
             if (state.Storage.Graphemes.Append(checked(Offset + column)) == GhosttySnapshotGraphemeAddResult.Success) return true;
@@ -168,9 +179,8 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             owner?.ThrowIfMutationFailed();
             try { return ShiftFromCore(source, start, count, wholeRow); }
-            catch (Exception failure) when (failure is OutOfMemoryException or InvalidOperationException)
+            catch (Exception failure) when ((failure is OutOfMemoryException or InvalidOperationException) && RecordFailure(failure))
             {
-                owner?.RecordMutationFailure(failure);
                 throw;
             }
         }
@@ -234,7 +244,19 @@ internal sealed partial class GhosttySnapshotPageTracker
 
         public void Dispose()
         {
-            if (owner is { MutationFailed: false }) state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
+            if (owner is not { MutationFailed: false }) return;
+            try
+            {
+                screen?.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.Revision);
+                state.Revisions[row.SnapshotAllocationRow] = row.SnapshotMetadataRevision;
+            }
+            catch (OutOfMemoryException failure) when (RecordFailure(failure)) { throw; }
+        }
+
+        private bool RecordFailure(Exception failure)
+        {
+            owner?.RecordMutationFailure(failure);
+            return screen?.RecordSnapshotMutationFailure(failure) ?? true;
         }
     }
 }

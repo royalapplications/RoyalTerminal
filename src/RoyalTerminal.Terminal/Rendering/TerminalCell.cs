@@ -1739,6 +1739,13 @@ public sealed partial class TerminalScreen
     /// </summary>
     public void DiscardHiddenCells()
     {
+        try { DiscardHiddenCellsCore(); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void DiscardHiddenCellsCore()
+    {
+        ThrowIfSnapshotMutationFailed();
         for (int i = 0; i < _rows.Count; i++)
         {
             TerminalRow row = _rows[i];
@@ -1976,6 +1983,12 @@ public sealed partial class TerminalScreen
 
     private void ClearTextContentUnderRasterPlacement(TerminalRasterImagePlacement placement)
     {
+        try { ClearTextContentUnderRasterPlacementCore(placement); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ClearTextContentUnderRasterPlacementCore(TerminalRasterImagePlacement placement)
+    {
         int startAbsRow = Math.Max(0, GetRasterPlacementStartRow(placement));
         int endAbsRow = Math.Min(_rows.Count - 1, GetRasterPlacementEndRow(placement));
         if (startAbsRow > endAbsRow)
@@ -2011,10 +2024,11 @@ public sealed partial class TerminalScreen
             }
 
             using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
+            Span<TerminalCell> cells = row.Cells;
             styles.Clear(rowStart, rowEnd - rowStart + 1);
             for (int column = rowStart; column <= rowEnd; column++)
             {
-                ClearCellTextPreservingColors(ref row[column]);
+                ClearCellTextPreservingColors(ref cells[column]);
             }
 
             row.IsDirty = true;
