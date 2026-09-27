@@ -1,7 +1,7 @@
 Snapshot native-storage compatibility algorithms
 ==============================================
 
-The snapshot bitmap, reference-counted set and metadata hash implementations
+The snapshot bitmap, reference-counted set, metadata hash and software CRC32C implementations
 adapt algorithms from Ghostty (622b4eecd7d2ce1a10930537c17f0d61abdba817) and
 Zig 0.16.0. Their upstream notices follow.
 

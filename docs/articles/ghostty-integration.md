@@ -446,6 +446,31 @@ styled, linked, wide and dense/sparse-grapheme grids. Before/after measurements,
 hardware-disabled execution, native golden/round-trip tests and the full suite
 remain deferred; no measured speedup or cross-platform sign-off is claimed.
 
+## Managed snapshot software checksum
+
+The managed framing checksum now ports Ghostty's
+[slicing-by-16 CRC32C](https://github.com/ghostty-org/ghostty/commit/36d8e3f77779939a4413ddcd72c05ab08aeae57d)
+and [three-stream interleaving](https://github.com/ghostty-org/ghostty/commit/eb09bf82918de51f22b805dc705ed67b2968b984).
+SSE4.2 and ARM CRC hosts retain the existing `BitOperations.Crc32C` word loop.
+Without those instructions, spans use 16-byte slicing, with three independent
+CRC chains for inputs of at least 4096 bytes. GF(2) zero shifts combine the
+chains without changing initial/final XOR, little-endian framing or streaming
+boundaries. Private, immutable-after-initialization polynomial tables use 16 KiB;
+the separately initialized even-power matrices use 2 KiB, sufficient for every
+int-sized span. Hardware-only use does not need these software tables. Warm
+updates require no per-call allocations.
+
+The expected benefit is reduced dependency-chain latency on non-CRC hosts;
+hardware throughput is intended to stay unchanged. No measured gain is claimed.
+The `--managed-snapshot-checksum` harness pairs the previous runtime word loop,
+forced software and automatic selection over eleven payload sizes. Run it both
+normally and with `DOTNET_EnableHWIntrinsic=0` in the final validation phase.
+New bitwise-oracle, high-power matrix, alignment/tail, 4096-byte threshold,
+streaming, golden-record, corruption, concurrency and warm-allocation tests are
+authored but unrun. Full-suite, native round-trip and platform sign-off remain
+deferred. Windows Terminal text export and xterm.js SerializeAddon, linked above,
+have no equivalent binary checksum format; Ghostty remains the wire reference.
+
 ## Managed snapshot record scratch
 
 The managed binary snapshot encoder follows Ghostty's

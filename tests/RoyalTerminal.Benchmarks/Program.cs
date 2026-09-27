@@ -41,6 +41,12 @@ if (args.Contains("--managed-snapshot-grid", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-snapshot-checksum", StringComparer.Ordinal))
+{
+    ManagedSnapshotChecksumBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-snapshot-reflow", StringComparer.Ordinal))
 {
     ManagedSnapshotReflowBenchmark.Run();

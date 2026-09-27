@@ -4,6 +4,8 @@
 
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 
 namespace RoyalTerminal.Terminal.Snapshots;
 
@@ -52,8 +54,11 @@ internal static class GhosttySnapshotFraming
 
     private static uint AppendCrc32C(uint crc, ReadOnlySpan<byte> bytes)
     {
-        // BitOperations uses CRC32C hardware instructions where available and a
-        // portable optimized fallback otherwise, matching upstream's CRC policy.
+        // Keep the runtime's CRC instructions where available. On other hosts,
+        // use Ghostty's sliced/interleaved span algorithm instead of repeatedly
+        // entering the runtime fallback a word at a time.
+        if (!Sse42.IsSupported && !Crc32.IsSupported)
+            return GhosttySnapshotSoftwareCrc32C.Append(crc, bytes);
         while (bytes.Length >= sizeof(ulong))
         {
             crc = BitOperations.Crc32C(crc, BinaryPrimitives.ReadUInt64LittleEndian(bytes));
