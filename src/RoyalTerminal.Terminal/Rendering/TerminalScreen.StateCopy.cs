@@ -22,6 +22,7 @@ public sealed partial class TerminalScreen
         copy._primaryRasterPlacements = CopyOptionalPlacements(_primaryRasterPlacements);
         copy._alternateRasterPlacements = CopyOptionalPlacements(_alternateRasterPlacements);
         CopyScalarStateTo(copy);
+        CopyExternalRenderRowsTo(copy);
         CopyRegistry(_hyperlinksById, copy._hyperlinksById);
         CopyRegistry(_hyperlinkIdsByUrl, copy._hyperlinkIdsByUrl);
         copy._hyperlinkIdentities.CopyFrom(_hyperlinkIdentities);
@@ -71,6 +72,8 @@ public sealed partial class TerminalScreen
         _primaryRasterPlacements = source._primaryRasterPlacements;
         _alternateRasterPlacements = source._alternateRasterPlacements;
         source.CopyScalarStateTo(this);
+        ExternalRenderRows = source.ExternalRenderRows;
+        ExternalRenderAbove = source.ExternalRenderAbove;
         _hyperlinksById = source._hyperlinksById;
         _hyperlinkIdsByUrl = source._hyperlinkIdsByUrl;
         _hyperlinkIdentities = source._hyperlinkIdentities;

@@ -1442,6 +1442,7 @@ public sealed partial class TerminalScreen
     private TerminalRow AddRowCore(int maxRows, GhosttySnapshotScrollbackQuota? growthQuota = null)
     {
         ThrowIfSnapshotMutationFailed();
+        ClearExternalRenderRows();
         try { return AddRowAndTrim(maxRows, growthQuota); }
         catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
     }
@@ -1508,6 +1509,7 @@ public sealed partial class TerminalScreen
     private void SwitchToAlternateBufferCore(bool clear, TerminalRowBuffer rows,
         Dictionary<int, TerminalRasterImageSource> images, List<TerminalRasterImagePlacement> placements)
     {
+        ClearExternalRenderRows();
         if (_alternateBufferActive)
         {
             ScrollOffset = 0;
@@ -1566,6 +1568,7 @@ public sealed partial class TerminalScreen
     private void SwitchToPrimaryBufferCore(TerminalRowBuffer rows,
         Dictionary<int, TerminalRasterImageSource> images, List<TerminalRasterImagePlacement> placements)
     {
+        ClearExternalRenderRows();
         _alternateRows = _rows;
         _alternateRasterImagesById = _rasterImagesById;
         _alternateRasterPlacements = _rasterPlacements;
@@ -1731,6 +1734,7 @@ public sealed partial class TerminalScreen
 
     private void ClearAllCore(TerminalRowBuffer rows)
     {
+        ClearExternalRenderRows();
         // A reset replaces both buffers; do not resize/clear the dormant one
         // only to discard it. Replacement rows are prepared before selection.
         _rows = rows;
@@ -2317,6 +2321,7 @@ public sealed partial class TerminalScreen
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
+        ClearExternalRenderRows();
         int oldColumns = Columns;
         int oldViewportRows = ViewportRows;
         bool preserveLiveViewportTop =
@@ -3309,6 +3314,8 @@ public sealed partial class TerminalScreen
     private void InvalidateAllCore()
     {
         for (int i = 0; i < _rows.Count; i++) _rows[i].IsDirty = true;
+        if (ExternalRenderRows is { } captured)
+            foreach (TerminalRow row in captured) row.IsDirty = true;
     }
 
     /// <summary>

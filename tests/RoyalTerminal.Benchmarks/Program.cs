@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--native-render-overscan", StringComparer.Ordinal))
+{
+    NativeRenderOverscanBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--render-row-identity", StringComparer.Ordinal))
 {
     RenderRowIdentityBenchmark.Run();

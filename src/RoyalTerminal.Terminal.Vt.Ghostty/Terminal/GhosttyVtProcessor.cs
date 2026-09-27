@@ -38,6 +38,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalPointerButtonStateSink,
     ITerminalSessionHistoryController,
     ITerminalViewportScrollSource,
+    ITerminalRenderOverscanSink,
     ITerminalSelectionExportSource,
     ITerminalWordSelectionSource,
     ITerminalLineSelectionSource,
@@ -1456,6 +1457,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
         AdvanceKittyAnimations();
         SyncGlyphGlossaryFromNative();
+        PrepareRenderOverscan();
         _renderState.Update(_terminal);
         RefreshStateFromNative();
         SyncScreenFromNative();
@@ -1526,6 +1528,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 // even if its control command and DECSET arrive in one write.
                 AdvanceKittyAnimations();
                 SyncGlyphGlossaryFromNative();
+                PrepareRenderOverscan();
                 _renderState.Update(_terminal);
                 // A single write may finish a frame before starting the hold.
                 // Publish it now, while hyperlinks and graphics still refer to
@@ -1665,6 +1668,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ResetManagedState()
     {
+        ReleaseRenderMirror();
         _cursorCol = 0;
         _cursorRow = 0;
         _cursorVisible = true;
@@ -1694,6 +1698,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ResetSessionInputState()
     {
+        ReleaseRenderMirror();
         _win32InputModeTracker.Reset();
         _unsupportedWindowsSequenceSanitizer.Reset();
         _forceFullScreenSyncAfterResize = false;
@@ -1703,6 +1708,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SyncScreenFromNative()
     {
+        _renderViewportTop = _scrollbar.Offset;
         int nativeColumns = _renderState.GetColumns();
         int nativeRows = _renderState.GetRows();
         bool gridChanged = nativeColumns != _screen.Columns || nativeRows != _screen.ViewportRows;
@@ -1714,7 +1720,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
         GhosttyVtNative.GhosttyRenderStateDirty dirty = _renderState.GetDirty();
         bool forceFullScreenSyncAfterResize = _forceFullScreenSyncAfterResize;
-        bool fullRefresh = gridChanged || forceFullScreenSyncAfterResize ||
+        bool fullRefresh = gridChanged || forceFullScreenSyncAfterResize || _renderOverscanRequestChanged ||
+            (_renderOverscan != default && (_renderMirrorRows is null ||
+                !ReferenceEquals(_screen.ExternalRenderRows, _renderMirrorRows))) ||
             dirty == GhosttyVtNative.GhosttyRenderStateDirty.Full ||
             _renderState.GetColumns() != _screen.Columns ||
             _renderState.GetRows() != _screen.ViewportRows;
@@ -1736,37 +1744,38 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _screen.DefaultForeground = GhosttyTerminal.ToArgb(colors.Foreground);
         _screen.DefaultBackground = GhosttyTerminal.ToArgb(colors.Background);
 
-        int rows = _renderState.GetRows();
-        _renderState.BeginRows();
-
-        int renderedRows = Math.Min(rows, _screen.ViewportRows);
-        if (fullRefresh)
+        if (_renderOverscan != default)
         {
-            int rowIndex = 0;
-            while (rowIndex < renderedRows && _renderState.MoveNextRow())
-            {
-                PopulateCurrentRenderRow(rowIndex, colors, palette);
-                rowIndex++;
-            }
-
-            for (; rowIndex < _screen.ViewportRows; rowIndex++)
-            {
-                _screen.GetViewportRow(rowIndex).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
-            }
+            SyncOverscanRenderRows(fullRefresh, colors, palette);
         }
         else
         {
-            while (_renderState.MoveNextDirtyRow(out ushort dirtyRow))
+            ReleaseRenderMirror();
+            int renderedRows = Math.Min(_renderState.GetRows(), _screen.ViewportRows);
+            _renderState.BeginRows();
+            if (fullRefresh)
             {
-                if (dirtyRow < renderedRows)
+                int rowIndex = 0;
+                while (rowIndex < renderedRows && _renderState.MoveNextRow())
                 {
-                    PopulateCurrentRenderRow(dirtyRow, colors, palette);
+                    PopulateCurrentRenderRow(_screen.GetViewportRow(rowIndex), rowIndex, colors, palette);
+                    rowIndex++;
                 }
+
+                for (; rowIndex < _screen.ViewportRows; rowIndex++)
+                    _screen.GetViewportRow(rowIndex).Clear(_screen.DefaultForeground, _screen.DefaultBackground);
+            }
+            else
+            {
+                while (_renderState.MoveNextDirtyRow(out ushort dirtyRow))
+                    if (dirtyRow < renderedRows)
+                        PopulateCurrentRenderRow(_screen.GetViewportRow(dirtyRow), dirtyRow, colors, palette);
             }
         }
 
         SyncKittyGraphicsFromNative(fullRefresh || dirty != GhosttyVtNative.GhosttyRenderStateDirty.False);
         _renderState.Clean();
+        _renderOverscanRequestChanged = false;
         if (forceFullScreenSyncAfterResize)
         {
             _forceFullScreenSyncAfterResize = false;
@@ -1774,11 +1783,11 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     }
 
     private unsafe void PopulateCurrentRenderRow(
+        TerminalRow row,
         int rowIndex,
         in GhosttyVtNative.GhosttyRenderStateColors colors,
         ReadOnlySpan<GhosttyVtNative.GhosttyColorRgb> palette)
     {
-        TerminalRow row = _screen.GetViewportRow(rowIndex);
         row.WrapsToNext = _renderState.GetCurrentRowWrap();
         PopulateRowSemantics(row, _renderState.GetCurrentRowRaw());
         ReadOnlySpan<ulong> rawCells = _renderState.GetCurrentRowRawCells();
@@ -2100,8 +2109,11 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             return 0;
         }
 
-        if (!_terminal.TryGetGridReference(
-                GhosttyVtNative.GhosttyPoint.Viewport((ushort)columnIndex, checked((uint)rowIndex)),
+        // Overscan Y is signed. Resolve against the same completed capture's
+        // native viewport top, not Viewport(uint) or later held input state.
+        long absoluteRow = checked((long)_renderViewportTop + rowIndex);
+        if (absoluteRow < 0 || absoluteRow > uint.MaxValue || !_terminal.TryGetGridReference(
+                GhosttyVtNative.GhosttyPoint.Screen((ushort)columnIndex, (uint)absoluteRow),
                 out GhosttyVtNative.GhosttyGridRef reference))
         {
             return 0;

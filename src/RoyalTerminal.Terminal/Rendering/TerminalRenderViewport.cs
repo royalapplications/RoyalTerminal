@@ -54,6 +54,8 @@ public readonly ref struct TerminalRenderViewport
 {
     private readonly TerminalScreen? _screen;
     private readonly int _firstAbsoluteRow;
+    private readonly TerminalRow[]? _externalRows;
+    private readonly int _externalStart;
 
     internal TerminalRenderViewport(TerminalScreen screen, TerminalRenderOverscan request)
     {
@@ -61,10 +63,15 @@ public readonly ref struct TerminalRenderViewport
         Columns = screen.Columns;
         Rows = screen.ViewportRows;
         RequestedOverscan = request;
+        _externalRows = screen.ExternalRenderRows;
+        _externalStart = 0;
         int top = screen.ViewportTopAbsoluteRow;
         int firstAccessible = Math.Max(0, screen.TotalRows - Rows - screen.MaxScrollOffset);
-        int above = Math.Min(request.Above, Math.Max(0, top - firstAccessible));
-        int below = Math.Min(request.Below, Math.Max(0, screen.TotalRows - top - Rows));
+        int above = Math.Min(request.Above, _externalRows is null
+            ? Math.Max(0, top - firstAccessible) : screen.ExternalRenderAbove);
+        int below = Math.Min(request.Below, _externalRows is null
+            ? Math.Max(0, screen.TotalRows - top - Rows) : _externalRows.Length - screen.ExternalRenderAbove - Rows);
+        if (_externalRows is not null) _externalStart = screen.ExternalRenderAbove - above;
         CapturedOverscan = new((ushort)above, (ushort)below);
         _firstAbsoluteRow = top - above;
         Count = checked(Rows + above + below);
@@ -91,7 +98,9 @@ public readonly ref struct TerminalRenderViewport
         {
             if ((uint)index >= (uint)Count) throw new ArgumentOutOfRangeException(nameof(index));
             int viewportY = index - CapturedOverscan.Above;
-            return new(_screen!.GetRow(_firstAbsoluteRow + index), viewportY, RequestedOverscan.Above + viewportY);
+            TerminalRow row = _externalRows is null
+                ? _screen!.GetRow(_firstAbsoluteRow + index) : _externalRows[_externalStart + index];
+            return new(row, viewportY, RequestedOverscan.Above + viewportY);
         }
     }
 }
@@ -101,10 +110,63 @@ public sealed partial class TerminalScreen
     /// <summary>
     /// Borrows the viewport plus existing adjacent history rows without allocating
     /// or copying cells. The caller must keep this screen stable for the view's lifetime.
-    /// Native VT mirrors contain only rows mirrored by their adapter; this method
-    /// does not fetch native history or change any engine's overscan request.
+    /// Native VT mirrors expose only the last completed adapter capture; configure
+    /// its overscan sink separately. This method never fetches history or changes
+    /// an engine's request, and zero still returns just the visible rows.
     /// </summary>
     /// <param name="overscan">Requested rows outside the viewport; zero preserves ordinary rendering.</param>
     /// <returns>A lock-scoped view with actual counts, signed row positions and storage identities.</returns>
     public TerminalRenderViewport GetRenderViewport(TerminalRenderOverscan overscan = default) => new(this, overscan);
+
+    /// <summary>Checks dirty rows in the requested render range, including captured overscan.</summary>
+    /// <param name="overscan">The renderer's extra-row request; unavailable rows are ignored.</param>
+    /// <returns>Whether any available requested row needs repainting.</returns>
+    public bool HasDirtyRows(TerminalRenderOverscan overscan)
+    {
+        lock (SyncRoot)
+        {
+            TerminalRenderViewport view = GetRenderViewport(overscan);
+            for (int index = 0; index < view.Count; index++)
+                if (view[index].Row.IsDirty) return true;
+            return false;
+        }
+    }
+
+    internal TerminalRow[]? ExternalRenderRows { get; private set; }
+    internal ushort ExternalRenderAbove { get; private set; }
+
+    // Adapter-owned rows, not scrollback. Only the publishing adapter may mutate
+    // the mirror until it releases the capture; selection/snapshot coordinates
+    // and TotalRows must remain viewport-only. Callers hold the screen lock.
+    internal void PublishExternalRenderRows(TerminalRow[] rows, ushort above, ushort below)
+    {
+        if (TotalRows != ViewportRows || rows.Length != above + ViewportRows + below)
+            throw new ArgumentException("A render capture requires a viewport-only mirror and exact row counts.", nameof(rows));
+        foreach (TerminalRow row in rows)
+            if (row is null || row.Columns != Columns)
+                throw new ArgumentException("Render rows must match the mirror's column count.", nameof(rows));
+        for (int y = 0; y < ViewportRows; y++) _rows[y] = rows[above + y];
+        ExternalRenderRows = rows;
+        ExternalRenderAbove = above;
+    }
+
+    internal void ClearExternalRenderRows()
+    {
+        ExternalRenderRows = null;
+        ExternalRenderAbove = 0;
+    }
+
+    private void CopyExternalRenderRowsTo(TerminalScreen copy)
+    {
+        if (ExternalRenderRows is not { } source) return;
+        TerminalRow[] rows = new TerminalRow[source.Length];
+        for (int index = 0; index < rows.Length; index++)
+        {
+            int y = index - ExternalRenderAbove;
+            rows[index] = (uint)y < (uint)ViewportRows
+                ? copy.GetViewportRow(y) : source[index].CreateStateCopy();
+        }
+        copy.ExternalRenderRows = rows;
+        copy.ExternalRenderAbove = ExternalRenderAbove;
+    }
 }
