@@ -148,10 +148,18 @@ public sealed partial class TerminalScreen
 
     internal GhosttySnapshotPageAllocation SnapshotAllocationReplaced(GhosttySnapshotPageAllocation previous,
         GhosttySnapshotPageAllocation replacement, IReadOnlyList<TerminalRow> rows)
-        => (_snapshotPageTracker ??= new()).AllocationReplaced(previous, replacement, rows);
+    {
+        ThrowIfSnapshotMutationFailed();
+        try { return (_snapshotPageTracker ??= new()).AllocationReplaced(previous, replacement, rows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
 
     internal void SnapshotRowsObserved(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows)
-        => _snapshotPageTracker?.ObserveRowSlots(page, rows);
+    {
+        ThrowIfSnapshotMutationFailed();
+        try { _snapshotPageTracker?.ObserveRowSlots(page, rows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
 
     internal bool TryGetSnapshotStyleUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows, out int count)
     {
@@ -173,10 +181,18 @@ public sealed partial class TerminalScreen
         return _snapshotPageTracker?.TryGetHyperlinkUsage(page, rows, out links, out cells, out bytes) == true;
     }
 
-    private void RetireSnapshotRows(int start, int count)
+    private void RetireSnapshotRows(int start, int count, bool reuseNativeTailSlots = false)
     {
+        ThrowIfSnapshotMutationFailed();
         if (!TracksSnapshotMetadata || count == 0) return;
-        (_snapshotPageTracker ??= new()).RetireRows(_rows, start, count);
+        try
+        {
+            GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
+            if (reuseNativeTailSlots) tracker.RetireHistoryRows(_rows, count);
+            else tracker.RetireRows(_rows, start, count);
+            MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.RowRetirement);
+        }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
     }
 
     private void RemoveRows(int start, int count)

@@ -1516,9 +1516,7 @@ public sealed partial class TerminalScreen
             rows.Add(_rows[rowIndex]);
         }
 
-        if (reuseNativeTailSlots && TracksSnapshotMetadata)
-            (_snapshotPageTracker ??= new()).RetireHistoryRows(_rows, firstViewportRow);
-        else RetireSnapshotRows(0, firstViewportRow);
+        RetireSnapshotRows(0, firstViewportRow, reuseNativeTailSlots);
         _rows = rows;
         if (_alternateBufferActive) _alternateRows = rows;
         EnsureMinimumRows(ViewportRows);
@@ -3120,9 +3118,15 @@ public sealed partial class TerminalScreen
     {
         lock (SyncRoot)
         {
-            for (var i = 0; i < _rows.Count; i++)
-                _rows[i].IsDirty = true;
+            InvalidateAllCore();
         }
+    }
+
+    // Ownership-transfer callers already serialize access. Keep their commit
+    // tails free of nested monitor entry and any runtime lock allocation.
+    private void InvalidateAllCore()
+    {
+        for (int i = 0; i < _rows.Count; i++) _rows[i].IsDirty = true;
     }
 
     /// <summary>
@@ -3132,12 +3136,17 @@ public sealed partial class TerminalScreen
     {
         lock (SyncRoot)
         {
-            int viewportStart = Math.Max(0, TotalRows - ViewportRows - _viewportTop);
-            int viewportEnd = Math.Min(TotalRows, viewportStart + ViewportRows);
-            for (int rowIndex = viewportStart; rowIndex < viewportEnd; rowIndex++)
-            {
-                _rows[rowIndex].IsDirty = true;
-            }
+            InvalidateViewportCore();
+        }
+    }
+
+    private void InvalidateViewportCore()
+    {
+        int viewportStart = Math.Max(0, TotalRows - ViewportRows - _viewportTop);
+        int viewportEnd = Math.Min(TotalRows, viewportStart + ViewportRows);
+        for (int rowIndex = viewportStart; rowIndex < viewportEnd; rowIndex++)
+        {
+            _rows[rowIndex].IsDirty = true;
         }
     }
 

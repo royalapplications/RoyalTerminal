@@ -21,7 +21,17 @@ public sealed partial class TerminalScreen
     public GhosttySnapshotScrollbackQuota? SnapshotScrollbackQuota
     {
         get => _snapshotScrollbackQuota;
-        set { value?.Validate(); _snapshotScrollbackQuota = value; EnforceSnapshotQuotaChange(); }
+        set
+        {
+            value?.Validate();
+            ThrowIfSnapshotMutationFailed();
+            try
+            {
+                _snapshotScrollbackQuota = value;
+                EnforceSnapshotQuotaChange();
+            }
+            catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+        }
     }
 
     internal bool FitsSnapshotHistoryQuota(int key, GhosttySnapshotPage page)
@@ -155,6 +165,7 @@ public sealed partial class TerminalScreen
     internal int PrependSnapshotHistory(int key, GhosttySnapshotPage page)
     {
         ArgumentNullException.ThrowIfNull(page);
+        ThrowIfSnapshotMutationFailed();
         TerminalRowBuffer rows = GetSnapshotRows(key) ?? throw new InvalidOperationException("Snapshot screen no longer exists.");
         int added = page.Grid.Rows;
         _ = checked(rows.Count + added);
@@ -176,14 +187,17 @@ public sealed partial class TerminalScreen
 
         List<TerminalRasterImagePlacement>? placements = active ? _rasterPlacements
             : alternate ? _alternateRasterPlacements : _primaryRasterPlacements;
-        List<TerminalRasterImagePlacement>? moved = placements is null ? null : new(placements.Count);
-        if (placements is not null)
+        // Empty placements need no new list. Retain the owner's existing empty
+        // storage; nonempty lists must be staged before any anchor moves.
+        List<TerminalRasterImagePlacement>? moved = placements is { Count: > 0 } ? new(placements.Count) : placements;
+        if (placements is { Count: > 0 })
             foreach (TerminalRasterImagePlacement placement in placements)
                 moved!.Add(placement.WithAnchorRow(checked(placement.AnchorRow + added)));
         // Validate anchor arithmetic before committing any of the storage.
         foreach (TrackedCell anchor in _trackedAnchors.Values)
             if (anchor.Alternate == alternate && anchor.Row >= 0) _ = checked(anchor.Row + added);
 
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.HistoryPrepared);
         rows.PrependRange(decoded); // Capacity growth may throw; no mutation until it succeeds.
         _hyperlinksById = owner._hyperlinksById;
         _hyperlinkIdsByUrl = owner._hyperlinkIdsByUrl;
@@ -198,7 +212,7 @@ public sealed partial class TerminalScreen
         _anchorRevision++;
         // Bottom-relative scroll offsets stay unchanged: both the live viewport
         // and a scrolled-back viewport keep their original row identities.
-        if (active) InvalidateViewport();
+        if (active) InvalidateViewportCore();
         return added;
     }
 }

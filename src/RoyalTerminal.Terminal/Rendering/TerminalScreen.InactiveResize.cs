@@ -76,9 +76,16 @@ public sealed partial class TerminalScreen
             Available = inactive is not null;
             if (!Available) return;
 
+            // A throwing constructor has no Dispose. Prepare missing raster
+            // collections before changing any field on the live owner.
+            Dictionary<int, TerminalRasterImageSource> images =
+                (_alternate ? screen._primaryRasterImagesById : screen._alternateRasterImagesById) ?? [];
+            List<TerminalRasterImagePlacement> placements =
+                (_alternate ? screen._primaryRasterPlacements : screen._alternateRasterPlacements) ?? [];
+            screen.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.InactiveBufferPrepared);
             screen._rows = inactive!;
-            screen._rasterImagesById = (_alternate ? screen._primaryRasterImagesById : screen._alternateRasterImagesById) ?? [];
-            screen._rasterPlacements = (_alternate ? screen._primaryRasterPlacements : screen._alternateRasterPlacements) ?? [];
+            screen._rasterImagesById = images;
+            screen._rasterPlacements = placements;
             screen._alternateBufferActive = !_alternate;
             screen.Columns = oldColumns;
             screen.ViewportRows = oldRows;

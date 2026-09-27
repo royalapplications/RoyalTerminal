@@ -57,8 +57,9 @@ internal sealed class GhosttySnapshotHistoryApplication
                 _droppedKeys |= mask;
                 return new(history.Key, 0, history.Remaining, false);
             }
+            bool containsPrompt = ContainsPrompt(history.Page);
             int rows = current.PrependSnapshotHistory(history.Key, history.Page);
-            return new(history.Key, rows, history.Remaining, ContainsPrompt(history.Page));
+            return new(history.Key, rows, history.Remaining, containsPrompt);
         }
         catch { _failed = true; throw; }
     }

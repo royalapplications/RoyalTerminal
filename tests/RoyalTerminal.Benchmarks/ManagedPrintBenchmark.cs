@@ -12,7 +12,7 @@ internal static class ManagedPrintBenchmark
     {
         const int iterations = 25_000;
         Console.WriteLine("Managed print/state only; no renderer/PTY; median of 7 samples, 25,000 feeds; warmed, zero scrollback.");
-        foreach (string name in new[] { "ascii", "unicode", "wide", "rep", "styled", "snapshot-styled", "edit", "snapshot-edit", "snapshot-erase", "snapshot-grapheme", "dec-special", "save-restore" })
+        foreach (string name in new[] { "ascii", "unicode", "wide", "rep", "styled", "snapshot-styled", "edit", "snapshot-edit", "snapshot-erase", "snapshot-grapheme", "hold", "snapshot-hold", "dec-special", "save-restore" })
         {
             TerminalScreen screen = new(80, 24, 0);
             bool tracked = name.StartsWith("snapshot-", StringComparison.Ordinal);
@@ -31,6 +31,7 @@ internal static class ManagedPrintBenchmark
                 "edit" or "snapshot-edit" => new string('q', 79) + "\r\u001b[2@\u001b[2P\r",
                 "snapshot-erase" => new string('q', 79) + "\r\u001b[K",
                 "snapshot-grapheme" => "A\u0301\u0302\u0303\r",
+                "hold" or "snapshot-hold" => "\u001b[?2026h" + new string('q', 79) + "\r\u001b[?2026l",
                 "styled" or "snapshot-styled" => "\u001b[31;1m" + new string('q', 79) + "\r\u001b[32;3m" + new string('r', 79) + "\r",
                 _ => new string('q', 79) + "\r",
             });

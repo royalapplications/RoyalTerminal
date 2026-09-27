@@ -11,6 +11,9 @@ internal enum SnapshotMutationCheckpoint
     MetadataWrite,
     GraphemeAppend,
     Revision,
+    RowRetirement,
+    HistoryPrepared,
+    InactiveBufferPrepared,
 }
 
 public sealed partial class TerminalScreen

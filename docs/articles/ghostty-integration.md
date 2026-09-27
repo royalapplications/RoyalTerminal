@@ -676,6 +676,38 @@ while preserving Ghostty's page pressure and partial-append semantics. The
 tracked erase and grapheme append for final before/after measurement. No measured
 speedup or current-head CI result is claimed in this implementation phase.
 
+Synchronized-output preparation now stages the complete owner and deadline, and
+reserves mode-table capacity, before exposing either a held frame or enabled mode
+2026. Failed preparation retains the visible owner; failed pre-publication work
+retains the old hold/deadline and mode for retry. Timeout and protocol release use
+the same commit ordering. A source or destination with a latched mutation failure
+cannot participate in ownership transfer. Partial quota enforcement and native or
+host history retirement latch the affected owner before cleanup; a failed private
+quota update cannot publish on input, timeout or disposal. Dormant-buffer scopes
+prepare missing raster collections before changing live fields, since a throwing
+constructor would not run their restore logic.
+
+History prepend keeps all decoding, hyperlink registrations, anchor arithmetic
+and prompt inspection before row publication, like Ghostty
+`PageList.PageAllocation.prepend`. Empty raster lists are reused rather than
+allocated for every unlinked history page. State/history commit tails mark dirty
+rows under their existing serialized-access contract, without entering another
+monitor after ownership transfer. COW page forks and same-identity reflow tables
+use `ConditionalWeakTable.AddOrUpdate` instead of removing/re-adding weak entries;
+new page identities are registered before old entries are retired. Tail slot
+bookkeeping is reserved before consuming a free slot. These changes reduce
+unnecessary registry churn and commit-time work, not the required COW snapshots.
+
+The chosen visibility behavior follows Ghostty's renderer suspension and timer,
+[Windows Terminal's synchronized-output mode](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+and [xterm.js's buffered refresh/timeout](https://github.com/xtermjs/xterm.js/blob/master/src/browser/services/RenderService.ts).
+The managed host additionally needs explicit COW publication safety because its
+published rows are shared with independent readers. Twenty publication/quota/
+history/ownership failure and retry cases are authored but unrun. The
+`--managed-print` benchmark adds tracked/untracked hold cycles; final build, test,
+benchmark and CI execution remains deferred. This is not yet a completed audit
+of every allocator failure or platform path.
+
 Full-width IL/DL now clamp the count to the affected rows and traverse once in
 the native direction, copying directly from the requested distance. In-place
 SU/SD share this bounded movement; the primary top-origin history path still

@@ -49,8 +49,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         }
         // Non-reflow growth can keep the allocation identity while replacing
         // its COW-owned table (and retaining its existing cursor reference).
-        _pages.Remove(page);
-        _pages.Add(page, state);
+        _pages.AddOrUpdate(page, state);
     }
 
     internal bool TryGetStyleUsage(GhosttySnapshotPageAllocation page, IReadOnlyList<TerminalRow> rows, out int count)

@@ -3915,7 +3915,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 2026: // Synchronized output
-                SetExtendedDecMode(mode, set);
                 if (set) BeginRenderHold();
                 else EndRenderHold();
                 break;
@@ -5227,7 +5226,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))
         {
             TerminalModeState before = ModeState;
-            SetExtendedDecMode(2026, false);
             EndRenderHold();
             RaiseModeChangedIfNeeded(before);
             changed = true;
@@ -5256,23 +5254,38 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Publish the completed prefix of the current input chunk immediately,
         // then continue parsing into an isolated state. Queries and host effects
         // remain responsive while readers/renderers retain the completed frame.
-        _screen = _publishedScreen.CreateStateCopy();
-        _renderHold = new(
+        // Prepare every fallible component before changing the live owner or
+        // reporting mode 2026 as enabled. A failed clone/clock leaves the
+        // published prefix usable, not an invisible owner without a hold.
+        if (!_extendedDecModesEnabled.Contains(2026))
+            _extendedDecModesEnabled.EnsureCapacity(checked(_extendedDecModesEnabled.Count + 1));
+        RenderHoldState hold = new(
             _options.TimeProvider.GetTimestamp(),
             _cursorCol, _cursorRow, _cursorVisible, ActiveCursorStyle, _extendedDecModesEnabled.Contains(12), _inAltScreen);
+        TerminalScreen staged = _publishedScreen.CreateStateCopy();
+        PublicationCheckpoint?.Invoke(ManagedPublicationCheckpoint.HoldPrepared);
+        _screen = staged;
+        _renderHold = hold;
+        SetExtendedDecMode(2026, true); // Capacity was reserved before staging.
     }
 
     private bool EndRenderHold()
     {
-        if (_renderHold is null) return false;
+        if (_renderHold is null)
+        {
+            SetExtendedDecMode(2026, false);
+            return false;
+        }
         // A failed private mutation is never published by timeout or Dispose.
         // Retain its faulted owner so this processor cannot resume accidentally.
         if (_screen.SnapshotMutationFailed) return false;
         // Host admission policy can change while the terminal frame is frozen.
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
+        PublicationCheckpoint?.Invoke(ManagedPublicationCheckpoint.HoldPublishing);
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
         _renderHold = null;
+        SetExtendedDecMode(2026, false);
         if (AdvanceKittyAnimations()) PublishKittyGraphics();
         return true;
     }

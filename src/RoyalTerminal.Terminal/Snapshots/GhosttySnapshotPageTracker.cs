@@ -100,10 +100,12 @@ internal sealed partial class GhosttySnapshotPageTracker
             : Math.Max(state.NextRowSlot, rows[index - 1].SnapshotAllocationRow + 1);
         if (!previous.MetadataOverflow && previous.Capacity.Columns == row.PreservedColumns && slot < previous.Capacity.Rows)
         {
+            // Reserve the revision entry before consuming a reusable slot or
+            // assigning the new row; Dictionary growth is the fallible step.
+            state.ObserveSlot(slot);
             row.SnapshotAllocation = previous;
             row.SnapshotAllocationRow = slot;
             if (reuse) state.ReusableTailSlots!.Dequeue();
-            state.ObserveSlot(slot);
         }
         else
         {
@@ -168,8 +170,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         // Reconcile mutated rows before the next pen update. A checkpoint can
         // replace capacity after a bulk edit that has not yet reached an SGR.
         foreach (int slot in state.Revisions.Keys) state.Revisions[slot] = null;
-        _pages.Remove(previous);
-        _pages.Add(replacement, state);
+        ReplaceEntry(previous, replacement, state);
         ReplaceCursorIdentity(previous, replacement);
         return replacement;
     }
@@ -229,8 +230,9 @@ internal sealed partial class GhosttySnapshotPageTracker
     {
         if (!state.Shared) return state;
         State owned = state.Copy();
-        _pages.Remove(page);
-        _pages.Add(page, owned);
+        // Reuse the weak-table entry instead of allocating another dependent
+        // handle for the same page on every COW frame's first write.
+        _pages.AddOrUpdate(page, owned);
         return owned;
     }
 
@@ -402,11 +404,23 @@ internal sealed partial class GhosttySnapshotPageTracker
     private void Replace(ref GhosttySnapshotPageAllocation page, GhosttySnapshotPageAllocation replacement,
         State state, List<TerminalRow> group)
     {
-        _pages.Remove(page);
-        _pages.Add(replacement, state);
+        ReplaceEntry(page, replacement, state);
         foreach (TerminalRow row in group) row.SnapshotAllocation = replacement;
         ReplaceCursorIdentity(page, replacement);
         page = replacement;
+    }
+
+    private void ReplaceEntry(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement, State state)
+    {
+        if (ReferenceEquals(previous, replacement)) _pages.AddOrUpdate(previous, state);
+        else
+        {
+            // Register the new identity before retiring the old entry. OOM
+            // is still owner-fatal, but never deliberately drops the only
+            // registered state before the fallible weak-table insertion.
+            _pages.Add(replacement, state);
+            _pages.Remove(previous);
+        }
     }
 
     private void ReplaceCursorIdentity(GhosttySnapshotPageAllocation previous, GhosttySnapshotPageAllocation replacement)

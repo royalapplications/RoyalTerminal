@@ -57,6 +57,8 @@ public sealed partial class TerminalScreen
     internal void AdoptStateFrom(TerminalScreen source)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ThrowIfSnapshotMutationFailed();
+        source.ThrowIfSnapshotMutationFailed();
         if (ReferenceEquals(this, source)) return;
         _glyphGlossary = source._glyphGlossary;
         _rows = source._rows;
@@ -80,7 +82,7 @@ public sealed partial class TerminalScreen
         _kittyProjectionState = source._kittyProjectionState;
         _trackedAnchors = source._trackedAnchors;
         _snapshotPageTracker = source._snapshotPageTracker;
-        InvalidateAll();
+        InvalidateAllCore();
     }
 
     private void CopyScalarStateTo(TerminalScreen destination)
