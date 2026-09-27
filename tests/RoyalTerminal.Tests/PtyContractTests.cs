@@ -214,7 +214,7 @@ public class PtyContractTests
         pty.Write(UnixPtyTestCommands.PrintMarker(readyMarker));
         bool ready = sawReady.Wait(TimeSpan.FromSeconds(5));
         string readinessOutput;
-        lock (output) readinessOutput = output.ToString();
+        lock (sync) readinessOutput = output.ToString();
         Assert.True(ready, $"Did not observe Unix PTY readiness marker before starting busy loop. Output: {readinessOutput}");
 
         pty.Write("while :; do printf 'busy-%s\\n' output; done\n");
