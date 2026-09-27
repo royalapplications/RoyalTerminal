@@ -74,6 +74,11 @@ public sealed class TerminalFontFamilySettingsTests
         TerminalSessionProfile profile = Assert.Single(TerminalSessionProfileSerializer.FromJson(json).Profiles);
         Assert.True(profile.Appearance.FontFamilies.IsEmpty);
         Assert.Equal(TerminalFontSource.System, profile.Appearance.FontSource);
+        Assert.Equal(new TerminalSessionLayoutSettings(), profile.Layout);
+        Assert.Equal(new TerminalSessionBehaviorSettings(), profile.Behavior);
+        Assert.Equal(new TerminalSessionLoggingSettings(), profile.Logging);
+        Assert.Equal(new TerminalFontRenderingSettings(), profile.Appearance.FontRendering);
+        Assert.Equal(new TerminalSessionAppearanceSettings().FontSize, profile.Appearance.FontSize);
     }
 
     [Fact]

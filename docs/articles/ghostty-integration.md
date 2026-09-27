@@ -92,8 +92,9 @@ Configured face references are owned by each renderer/coverage source and
 disposed after their consumers; partial loading failures dispose all acquired
 references. Skia protects shared system faces from public disposal and may keep
 their native resources cached; this does not promise immediate OS-font reclamation.
-Profile JSON now uses generated metadata for the complete profile graph,
-including immutable family lists, rather than introducing reflected font models.
+Profile JSON uses generated metadata for the new immutable family-list model.
+The existing profile reader is retained so omitted fields in older documents
+keep their property-initializer defaults.
 
 Per-codepoint overrides, named and disabled/synthetic style policy and exhaustive
 platform fallback enumeration are still distinct

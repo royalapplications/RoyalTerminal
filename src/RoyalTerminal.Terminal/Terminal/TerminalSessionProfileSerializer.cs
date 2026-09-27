@@ -4,6 +4,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace RoyalTerminal.Terminal;
 
@@ -16,7 +17,11 @@ public static class TerminalSessionProfileSerializer
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
-        TypeInfoResolver = TerminalSessionProfileJsonContext.Default,
+        Converters =
+        {
+            new JsonStringEnumConverter(),
+            new TerminalFontFamilySettingsJsonConverter(),
+        },
     };
 
     /// <summary>
