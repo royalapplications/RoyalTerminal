@@ -487,6 +487,46 @@ expected gains are smaller storage, fewer lookup operations and removal of
 temporary export arrays; no measured speedup is claimed. Tests, before/after
 profiling and CI execution/inspection remain deferred to final validation.
 
+## Unknown APC policy and progress lifecycle
+
+Both VT adapters implement `ITerminalUnknownSequencePolicy`. Its
+`UnknownSequenceMaxBytes` property defaults to 4096 payload bytes, accepts zero
+to disable capture, rejects negatives and survives resets. Managed construction
+also accepts `BasicVtProcessorOptions.UnknownSequenceMaxBytes`. This connects the
+previously native-only configurable capture limit from
+[Ghostty #13702](https://github.com/ghostty-org/ghostty/pull/13702).
+
+The managed APC identifier state now matches the pinned native parser: empty
+APCs and unfinished `25a1` glyph prefixes produce no unknown callback. Complete
+recognized Kitty/glyph commands retain their independent limits and are not
+reclassified as unknown merely because their protocol is disabled or invalid.
+Unknown capture freezes its limit when it starts; policy changes can affect a
+still-unclassified identifier, but not an active capture or an ignored command.
+Small limits apply to the identifying prefix too, preserve the truncation flag
+and never reinterpret discarded payload as a new Kitty command. Captured arrays
+are callback-owned; CAN/SUB-aborted unknown commands remain silent. This policy
+is host configuration, not snapshot state.
+
+Managed OSC 9;4 now tracks active progress in the stream-effect layer, including
+when there is no callback. Protocol RIS sends a remove report only while active,
+then disarms the flag before callback delivery, following
+[Ghostty #13901](https://github.com/ghostty-org/ghostty/pull/13901). Explicit remove
+commands still deliver their reports. Soft reset, screen changes and snapshots
+do not invent progress effects. Programmatic terminal reset retains the handler
+flag, matching native `ghostty_terminal_reset`, which resets the terminal rather
+than dispatching protocol RIS. A newly restored snapshot starts without host
+progress state.
+
+[Windows Terminal's dispatch](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+was checked for unknown-sequence and ConEmu progress routing;
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
+provides embedder APC/OSC registration. Neither defines Ghostty's bounded raw
+capture contract, so the pinned Ghostty parser/effect lifecycle is the reference.
+Fifty-six new cases cover both adapters, identifier boundaries, mid-command
+policy changes, quotas, array ownership, reset persistence and progress effects;
+the earlier unconditional-RIS-removal expectation is corrected. Test execution
+and platform/CI validation remain deferred.
+
 ## Managed DCS reply formatting
 
 DECRQSS requests are decoded from their bounded two-byte parser payload without

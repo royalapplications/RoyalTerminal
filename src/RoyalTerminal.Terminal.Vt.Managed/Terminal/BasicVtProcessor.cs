@@ -53,6 +53,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     ITerminalEraseDisplayOptionsSink,
     ITerminalShellIntegrationEventSource,
     ITerminalEffectSource,
+    ITerminalUnknownSequencePolicy,
     ITerminalNotificationSource,
     ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
@@ -60,7 +61,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 {
     private const int MaxOscBufferBytes = 8 * 1024 * 1024;
     private const int MaxDcsQueryBytes = 1024 * 1024;
-    private const int MaxUnknownSequenceBytes = 4096;
     private static ReadOnlySpan<int> ExtendedDecModes => ManagedDecModeState.SupportedModes;
 
     private TerminalScreen _screen;
@@ -112,6 +112,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private ManagedKittyGraphicsParser? _apcKittyParser;
     private bool _glyphProtocolEnabled;
     private bool _apcGlyphRecognized;
+    private bool _apcUnknownRecognized;
+    private int _apcUnknownCaptureLimit;
     private bool _apcGlyphEnabled;
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
@@ -379,6 +381,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen = screen;
         _publishedScreen = screen;
         _options = options ?? BasicVtProcessorOptions.Default;
+        UnknownSequenceMaxBytes = _options.UnknownSequenceMaxBytes;
         TitleReportEnabled = _options.TitleReportEnabled;
         ArgumentNullException.ThrowIfNull(_options.TimeProvider);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.ClipboardWriteLimitBytes);
@@ -1058,6 +1061,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _apcKittyParser = null;
         _apcTruncated = false;
         _apcGlyphRecognized = false;
+        _apcUnknownRecognized = false;
+        _apcUnknownCaptureLimit = 0;
         _apcGlyphEnabled = false;
     }
 
@@ -1911,7 +1916,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             case (byte)'c': // RIS — Full reset
                 ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll);
-                ProgressReportCallback?.Invoke(new TerminalProgressReport(TerminalProgressState.Remove, null));
+                ClearActiveProgressReport();
                 _state = ParserState.Ground;
                 break;
 
@@ -2180,7 +2185,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (TryParseOsc9Progress(value, out TerminalProgressReport? report) &&
             report is not null)
         {
-            ProgressReportCallback?.Invoke(report);
+            PublishProgressReport(report);
             return;
         }
 
@@ -2622,7 +2627,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void AppendApcPayload(ReadOnlySpan<byte> payload)
     {
         if (payload.IsEmpty) return;
-        if (!_apcKittyRecognized && _apcBuffer.Count == 0 && payload[0] == (byte)'G')
+        if (!_apcUnknownRecognized && !_apcKittyRecognized && _apcBuffer.Count == 0 && payload[0] == (byte)'G')
         {
             _apcKittyRecognized = true;
             if (_kittyStore.Enabled) _apcKittyParser = new(_options.KittyGraphicsMaxApcBytes);
@@ -2634,25 +2639,39 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 _apcKittyParser = null;
             return;
         }
-        ReadOnlySpan<byte> glyphIdentifier = "25a1;"u8;
-        // Identify only the small prefix byte-by-byte, then retain bulk payload
-        // scanning. Unknown '2...' commands keep the existing 4 KiB capture cap.
-        while (_apcBuffer.Count < glyphIdentifier.Length && !payload.IsEmpty &&
-            CollectionsMarshal.AsSpan(_apcBuffer).SequenceEqual(glyphIdentifier[.._apcBuffer.Count]) &&
-            payload[0] == glyphIdentifier[_apcBuffer.Count])
+        ReadOnlySpan<byte> glyphIdentifier = "25a1"u8;
+        // Mirror Ghostty's four-byte identify state, including when capture is
+        // disabled. A mid-prefix policy change must not reinterpret previously
+        // buffered bytes or promote an already ignored command.
+        while (!_apcUnknownRecognized && !_apcGlyphRecognized && !payload.IsEmpty)
         {
-            _apcBuffer.Add(payload[0]);
-            payload = payload[1..];
-            if (_apcBuffer.Count == glyphIdentifier.Length)
+            byte value = payload[0];
+            if (value == (byte)';')
             {
-                _apcGlyphRecognized = true;
-                _apcGlyphEnabled = _glyphProtocolEnabled;
+                if (CollectionsMarshal.AsSpan(_apcBuffer).SequenceEqual(glyphIdentifier))
+                {
+                    _apcBuffer.Add(value);
+                    _apcGlyphRecognized = true;
+                    _apcGlyphEnabled = _glyphProtocolEnabled;
+                    payload = payload[1..];
+                }
+                else BeginUnknownApc();
+                break;
             }
+            if (_apcBuffer.Count >= glyphIdentifier.Length)
+            {
+                BeginUnknownApc();
+                break;
+            }
+            int index = _apcBuffer.Count;
+            _apcBuffer.Add(value);
+            payload = payload[1..];
+            if (UnknownSequenceMaxBytes > 0 && value != glyphIdentifier[index]) BeginUnknownApc();
         }
         if (payload.IsEmpty) return;
         int limit = _apcGlyphRecognized
             ? (_apcGlyphEnabled ? 1024 * 1024 + 5 : 5)
-            : MaxUnknownSequenceBytes;
+            : _apcUnknownCaptureLimit;
         int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
         if (count > 0)
         {
@@ -2662,6 +2681,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             payload[..count].CopyTo(CollectionsMarshal.AsSpan(_apcBuffer)[offset..]);
         }
         if (count < payload.Length) _apcTruncated = true;
+    }
+
+    private void BeginUnknownApc()
+    {
+        _apcUnknownRecognized = true;
+        _apcUnknownCaptureLimit = UnknownSequenceMaxBytes;
+        if (_apcBuffer.Count <= _apcUnknownCaptureLimit) return;
+        _apcBuffer.RemoveRange(_apcUnknownCaptureLimit, _apcBuffer.Count - _apcUnknownCaptureLimit);
+        _apcTruncated = true;
     }
 
     private void CompleteApc(bool terminated = true)
@@ -2681,7 +2709,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     _screen.NotifyGlyphGlossaryChanged();
                 return;
             }
-            if (terminated) UnknownSequenceCallback?.Invoke(
+            if (terminated && _apcUnknownRecognized && _apcUnknownCaptureLimit > 0) UnknownSequenceCallback?.Invoke(
                 new TerminalUnknownSequence(
                     TerminalUnknownSequenceType.Apc,
                     _apcBuffer.ToArray(),

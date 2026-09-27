@@ -52,7 +52,7 @@ public sealed class ManagedGhosttyRegressionTests
     }
 
     [Fact]
-    public void FullResetAlwaysRemovesHostProgress()
+    public void FullResetRemovesHostProgressOnlyWhileActive()
     {
         using BasicVtProcessor processor = new(new TerminalScreen(8, 2, 0));
         List<TerminalProgressReport> reports = [];
@@ -61,7 +61,6 @@ public sealed class ManagedGhosttyRegressionTests
         Assert.Equal(new[]
         {
             new TerminalProgressReport(TerminalProgressState.Set, 50),
-            new TerminalProgressReport(TerminalProgressState.Remove, null),
             new TerminalProgressReport(TerminalProgressState.Remove, null),
         }, reports);
     }

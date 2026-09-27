@@ -80,6 +80,13 @@ public sealed record BasicVtProcessorOptions
     /// </summary>
     public int ContinuationMaxBytes { get; init; } = 64 * 1024;
 
+    /// <summary>
+    /// Initial unknown-APC capture limit in payload bytes. Zero disables capture;
+    /// known Kitty/glyph protocols have separate limits. May be changed later
+    /// through <see cref="ITerminalUnknownSequencePolicy.UnknownSequenceMaxBytes"/>.
+    /// </summary>
+    public int UnknownSequenceMaxBytes { get; init; } = 4096;
+
     /// <summary>Gets the monotonic clock used to expire synchronized-output holds.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 

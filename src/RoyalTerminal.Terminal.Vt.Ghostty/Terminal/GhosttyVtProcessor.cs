@@ -46,6 +46,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     ITerminalSixelOptionsSink,
     ITerminalResizeReflowPolicySink,
     ITerminalEffectSource,
+    ITerminalUnknownSequencePolicy,
     ITerminalNotificationSource,
     ITerminalDragDropTarget,
     ITerminalUnicodeWidthProvider,
@@ -1397,7 +1398,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         _terminal.SetContinuationMaxBytes(64 * 1024);
         _terminal.SetTitleReport(_titleReportEnabled);
-        _terminal.SetUnknownSequenceMaxBytes(4 * 1024);
+        _terminal.SetUnknownSequenceMaxBytes((nuint)_unknownSequenceMaxBytes);
         _terminal.SetTerminfoName("xterm-ghostty");
         _terminal.SetClipboardWriteMaxBytes(16 * 1024 * 1024);
         _terminal.SetResizePullScrollback(OperatingSystem.IsWindows());
