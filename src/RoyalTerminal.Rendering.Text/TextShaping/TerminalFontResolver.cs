@@ -251,7 +251,7 @@ public sealed partial class TerminalFontResolver : IDisposable
                     codepoint,
                     usedCulture,
                     preferEmojiPresentation,
-                    discoveryStyle ?? primaryTypeface.FontStyle);
+                    discoveryStyle);
                 _fallbackCache.Add(key, entry);
             }
         }
@@ -321,7 +321,7 @@ public sealed partial class TerminalFontResolver : IDisposable
         int codepoint,
         CultureInfo culture,
         bool preferEmojiPresentation,
-        SKFontStyle requestedStyle)
+        SKFontStyle? discoveryStyle)
     {
         // Ghostty explicitly prefers the system Apple emoji family on macOS.
         // Resolve it once, in its regular style, and verify the actual family:
@@ -372,7 +372,7 @@ public sealed partial class TerminalFontResolver : IDisposable
         FontFallbackCacheEntry Match(string? family)
         {
             SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
-                family, requestedStyle, languageTags, codepoint);
+                family, discoveryStyle ?? primaryTypeface.FontStyle, languageTags, codepoint);
             if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
                 return FontFallbackCacheEntry.NoFallback;
             if (fallbackTypeface.Handle != primaryTypeface.Handle && !TerminalFontCoverage.IsLastResort(fallbackTypeface) &&
