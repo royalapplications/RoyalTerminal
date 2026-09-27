@@ -2933,15 +2933,16 @@ public sealed partial class TerminalScreen
                 }
 
                 // Cell payloads still copy in bulk. Snapshot-aware reflow also
-                // records native metadata allocation/copies before the payload;
-                // ordinary screens skip that bookkeeping entirely.
+                // records native metadata allocation/copies and filters any
+                // refused fields on the unpublished payload. Ordinary screens
+                // skip that bookkeeping entirely.
                 int runLength = GetReflowCopyRunLength(
                     logicalLine[sourceIndex..], semanticRows.IsEmpty ? columns - column
                         : Math.Min(columns - column, semanticRows[semanticIndex].End - sourceIndex));
                 if (runLength > 0)
                 {
-                    snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
                     logicalLine.Slice(sourceIndex, runLength).CopyTo(row.Cells[column..]);
+                    snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, runLength);
                     if (mappedPosition is null && trackedLogicalOffset >= 0 &&
                         trackedLogicalOffset <= sourceIndex + runLength)
                     {
@@ -2990,16 +2991,16 @@ public sealed partial class TerminalScreen
                 }
 
                 cell.Width = (byte)width;
-                snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
                 row[column] = cell;
+                snapshotAllocation?.CopyMetadata(row, column, snapshotSources, ref snapshotSourceIndex, sourceIndex, 1);
 
                 if (width == 2 && column + 1 < columns)
                 {
+                    row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
+                        ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                     snapshotAllocation?.CopyMetadata(row, column + 1, snapshotSources, ref snapshotSourceIndex,
                         sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]) ? sourceIndex + 1 : sourceIndex, 1,
                         includeGraphemes: sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1]));
-                    row[column + 1] = sourceStep == 2 && IsNormalizedWideSpacer(in logicalLine[sourceIndex + 1])
-                        ? logicalLine[sourceIndex + 1] : CreateWideSpacer(cell);
                 }
 
                 sourceIndex += sourceStep;

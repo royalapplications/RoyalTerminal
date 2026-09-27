@@ -515,9 +515,31 @@ resize comparisons. `--managed-snapshot-reflow` adds four snapshot-tracked
 workloads alongside the existing untracked reflow harness. Test execution,
 before/after profiling and CI remain deferred to the final validation phase.
 
+Reflow now handles the native page-growth ceiling without marking a representable
+destination as overflow. A later-row refusal clones the current row into a new
+source-capacity-derived page before removing its old ownership; the upper page
+retains its dead-ID/string history. A first-row refusal preserves the accepted
+grapheme/link/style prefix, drops only the rejected stage and subsequent metadata,
+and continues with following cells. A second set-insertion refusal after one
+growth/rehash drops only that set's field, matching native unsafe-build recovery;
+hyperlink failure does not prevent independent style copying. Screen payloads are
+copied before this filtering, including bulk runs and wide tails, so rejected
+metadata cannot be restored by a subsequent raw copy.
+
+Managed split recovery deliberately resumes at the failed metadata stage instead
+of replaying already-cloned ownership. This retains one owner for accepted
+graphemes and links; it does not emulate native partial-cell replay's potential
+`putNoClobber` failure or orphan-reference history. An unexpected row/page clone
+failure throws into the processor's existing resize rollback instead of publishing
+partial allocator state. Real CLR allocation failure also propagates. Twenty-eight
+additional authored cases cover 4/16-KiB growth ceilings, five metadata pressure
+types, retained sources, split-prefix ownership, grouped/scalar/wide payload
+filtering, row-clone rollback with anchors, and bounded adversarial set retries.
+Sparse logical capacities avoid allocating four-GiB pages in these cases.
+These changes and tests have not yet been executed or profiled.
+
 This is not yet exact mutable allocator parity: the full failure/degradation and
-mutation-order audit remains unfinished, including reflow's page-ceiling row
-split and final-cell degradation policies. Cursor-style pressure splitting uses
+mutation-order audit remains unfinished. Cursor-style pressure splitting uses
 exact live row-layout selection, keeps the upper allocator and clones the suffix
 before publication. Migrating links precede the style retry; failed SGR retries its
 previous pen while cursor restoration/movement falls back to default. Other
