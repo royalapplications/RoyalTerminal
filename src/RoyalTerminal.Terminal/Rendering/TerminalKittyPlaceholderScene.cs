@@ -90,21 +90,18 @@ public sealed partial class TerminalScreen
             : _kittyPlaceholderScene?.Matches(targets, relatives, cellWidth, cellHeight) == true;
     }
 
-    internal void SetKittyPlaceholderScene(IReadOnlyList<TerminalKittyPlaceholderTarget> targets,
-        IReadOnlyList<TerminalKittyRelativePlacement> relatives, uint cellWidth, uint cellHeight)
+    private static TerminalKittyPlaceholderScene? CreateKittyPlaceholderScene(IReadOnlyList<TerminalKittyPlaceholderTarget> targets,
+        IReadOnlyList<TerminalKittyRelativePlacement> relatives, TerminalKittyImagePlacement[] fixedPlacements,
+        uint cellWidth, uint cellHeight)
     {
         bool active = relatives.Count > 0;
         for (int i = 0; !active && i < targets.Count; i++) active = targets[i].Virtual;
-        if (!active) return;
-        _kittyPlaceholderScene = new(targets, relatives,
-            _kittyAnchoredPlacements is null ? _kittyPlacements : [], cellWidth, cellHeight);
-        _kittyPlaceholderRuns = null;
-        _kittyProjectionState = null;
+        return active ? new(targets, relatives, fixedPlacements, cellWidth, cellHeight) : null;
     }
 
     // Scan each frame like Ghostty, but retain the immutable run array when unchanged.
     // Exact run comparison avoids a hash collision making stale placements permanent.
-    private bool RefreshPlaceholderRuns()
+    private TerminalKittyLocatedPlaceholder[] PreparePlaceholderRuns()
     {
         TerminalKittyLocatedPlaceholder[] old = _kittyPlaceholderRuns ?? [];
         List<TerminalKittyLocatedPlaceholder>? changed = null;
@@ -124,17 +121,15 @@ public sealed partial class TerminalScreen
                 count++;
             }
         }
-        if (changed is not null) _kittyPlaceholderRuns = changed.ToArray();
-        else if (count != old.Length) _kittyPlaceholderRuns = old.AsSpan(0, count).ToArray();
-        else if (_kittyPlaceholderRuns is not null) return false;
-        else _kittyPlaceholderRuns = [];
-        return true;
+        if (changed is not null) return changed.ToArray();
+        return count != old.Length ? old.AsSpan(0, count).ToArray() : old;
     }
 
-    private void AppendPlaceholderProjection(List<TerminalKittyImagePlacement> visible, TerminalKittyPlaceholderScene scene)
+    private void AppendPlaceholderProjection(List<TerminalKittyImagePlacement> visible, TerminalKittyPlaceholderScene scene,
+        ReadOnlySpan<TerminalKittyLocatedPlaceholder> runs)
     {
         Dictionary<TerminalKittyPlacementKey, TerminalGridPosition>? origins = scene.Relatives.Length > 0 ? [] : null;
-        foreach (TerminalKittyLocatedPlaceholder located in _kittyPlaceholderRuns ?? [])
+        foreach (TerminalKittyLocatedPlaceholder located in runs)
         {
             TerminalKittyPlaceholderRun run = located.Run;
             if (!scene.TryGetTarget(run, out TerminalKittyPlaceholderTarget target)) continue;

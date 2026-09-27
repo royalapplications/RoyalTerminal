@@ -429,6 +429,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ProcessCore(ReadOnlySpan<byte> data, bool stopAtGround, out int consumed)
     {
         _screen.ThrowIfSnapshotMutationFailed();
+        // A protocol mutation can succeed while preparing its render scene
+        // fails. Retry that scene before accepting the next top-level input.
+        if (_inputBatchDepth == 0 && _kittyPublicationPending) PublishKittyGraphics();
         TerminalModeState before;
         _inputBatchDepth++;
         try
@@ -4589,6 +4592,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _kittyStore = _primaryKittyStore;
         _animationNextTickDelay = null;
         _screen.ClearKittyGraphics();
+        _kittyPublicationPending = false;
         bool restorePrimaryAfterAlternateRestart =
             screenResetMode == SessionScreenResetMode.PreserveScrollback &&
             (_inAltScreen || _screen.AlternateBufferActive);
@@ -5064,6 +5068,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         get
         {
             if (_screen.SnapshotMutationFailed) return null;
+            if (_renderHold is null && _kittyPublicationPending) return TimeSpan.Zero;
             TimeSpan? delay = _renderHold is { } hold
                 ? ClampRefreshDelay(TimeSpan.FromSeconds(1) - _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp))
                 : null;
@@ -5089,6 +5094,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_screen.SnapshotMutationFailed) return false;
         _notifications?.Refresh();
         bool changed = _backgroundSearch?.TakeChanged() ?? false;
+        if (_renderHold is null && _kittyPublicationPending)
+        {
+            PublishKittyGraphics();
+            changed = true;
+        }
         if (_renderHold is { } hold &&
             _options.TimeProvider.GetElapsedTime(hold.StartedTimestamp) >= TimeSpan.FromSeconds(1))
         {
@@ -5144,6 +5154,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // A failed private mutation is never published by timeout or Dispose.
         // Retain its faulted owner so this processor cannot resume accidentally.
         if (_screen.SnapshotMutationFailed) return false;
+        if (_kittyPublicationPending) PublishKittyGraphics();
         // Host admission policy can change while the terminal frame is frozen.
         _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
         PublicationCheckpoint?.Invoke(ManagedPublicationCheckpoint.HoldPublishing);

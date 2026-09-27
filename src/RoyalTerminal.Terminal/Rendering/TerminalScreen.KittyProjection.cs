@@ -32,21 +32,32 @@ public sealed partial class TerminalScreen
         IReadOnlyList<TerminalKittyRelativePlacement> relatives,
         uint cellWidth, uint cellHeight)
     {
+        ThrowIfSnapshotMutationFailed();
         if (MatchesAnchoredKittyPlacements(placements) && MatchesKittyImageDimensions(images) &&
             MatchesKittyPlaceholderScene(targets, relatives, cellWidth, cellHeight))
         {
-            // Image registry ownership is independent in every screen state copy.
-            for (int i = 0; i < images.Count; i++) _kittyImagesById[images[i].ImageId] = images[i];
-            InvalidateViewport();
+            // Preserve projection caches while publishing all pixel replacements
+            // together. Registry scratch is reused, not shared with COW readers.
+            PublishKittyImages(PrepareKittyImages(images));
+            InvalidateViewportCore();
             return;
         }
 
-        ReplaceKittyGraphics(images, null);
-        _kittyAnchoredPlacements = new TerminalKittyAnchoredPlacement[placements.Count];
-        for (int i = 0; i < placements.Count; i++) _kittyAnchoredPlacements[i] = placements[i];
+        TerminalKittyAnchoredPlacement[] preparedPlacements = new TerminalKittyAnchoredPlacement[placements.Count];
+        for (int i = 0; i < placements.Count; i++) preparedPlacements[i] = placements[i];
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.KittyPlacementsPrepared);
         // The publisher supplies paint-ordered recipes. Keep that order for
         // comparison and preserve the existing ordering of equal-z placements.
-        SetKittyPlaceholderScene(targets, relatives, cellWidth, cellHeight);
+        TerminalKittyPlaceholderScene? scene = CreateKittyPlaceholderScene(targets, relatives, [], cellWidth, cellHeight);
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.KittyScenePrepared);
+        Dictionary<int, TerminalKittyImageSource> preparedImages = PrepareKittyImages(images);
+        PublishKittyImages(preparedImages);
+        _kittyPlacements = [];
+        _kittyAnchoredPlacements = preparedPlacements;
+        _kittyPlaceholderScene = scene;
+        _kittyPlaceholderRuns = null;
+        _kittyProjectionState = null;
+        InvalidateViewportCore();
     }
 
     private bool MatchesAnchoredKittyPlacements(IReadOnlyList<TerminalKittyAnchoredPlacement> placements)
@@ -81,7 +92,9 @@ public sealed partial class TerminalScreen
         if (_kittyAnchoredPlacements is not { Length: > 0 } && _kittyPlaceholderScene is null) return;
         KittyProjectionState state = new(_anchorRevision, ViewportTopAbsoluteRow,
             Columns, ViewportRows, _alternateBufferActive);
-        bool runsChanged = _kittyPlaceholderScene is not null && RefreshPlaceholderRuns();
+        TerminalKittyLocatedPlaceholder[]? runs = _kittyPlaceholderScene is not null
+            ? PreparePlaceholderRuns() : _kittyPlaceholderRuns;
+        bool runsChanged = !ReferenceEquals(runs, _kittyPlaceholderRuns);
         if (_kittyProjectionState == state && !runsChanged) return;
 
         List<TerminalKittyImagePlacement> visible = new(_kittyAnchoredPlacements?.Length ?? 0);
@@ -93,12 +106,15 @@ public sealed partial class TerminalScreen
             long row = origin.Row + placement.RowOffset - state.ViewportTop;
             AppendKittyProjection(visible, column, row, placement.Columns, placement.Rows, placement.Geometry);
         }
-        if (_kittyPlaceholderScene is { } placeholders) AppendPlaceholderProjection(visible, placeholders);
+        if (_kittyPlaceholderScene is { } placeholders) AppendPlaceholderProjection(visible, placeholders, runs);
         visible.Sort(TerminalKittyImagePlacement.ComparePaintOrder);
 
         // Replace the immutable projection instead of changing an array retained
         // by a previous frame or a copy-on-write screen.
-        _kittyPlacements = visible.ToArray();
+        TerminalKittyImagePlacement[] prepared = visible.ToArray();
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.KittyProjectionPrepared);
+        _kittyPlacements = prepared;
+        _kittyPlaceholderRuns = runs;
         _kittyProjectionState = state;
     }
 

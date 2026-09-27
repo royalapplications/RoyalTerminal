@@ -1187,43 +1187,14 @@ public sealed partial class TerminalScreen
         return _kittyImagesById.TryGetValue(imageId, out source);
     }
 
-    /// <summary>Replaces the current Kitty image snapshot.</summary>
+    /// <summary>
+    /// Replaces the current Kitty image snapshot. Preparation failure preserves
+    /// the previous images and placements. Serialize access with screen mutation.
+    /// </summary>
     public void ReplaceKittyGraphics(
         IReadOnlyList<TerminalKittyImageSource>? images,
         IReadOnlyList<TerminalKittyImagePlacement>? placements)
-    {
-        _kittyAnchoredPlacements = null;
-        _kittyPlaceholderScene = null;
-        _kittyPlaceholderRuns = null;
-        _kittyProjectionState = null;
-        _kittyImagesById.Clear();
-        if (images is not null)
-        {
-            for (int i = 0; i < images.Count; i++)
-            {
-                TerminalKittyImageSource image = images[i];
-                _kittyImagesById[image.ImageId] = image;
-            }
-        }
-
-        if (placements is null || placements.Count == 0)
-        {
-            _kittyPlacements = Array.Empty<TerminalKittyImagePlacement>();
-        }
-        else
-        {
-            TerminalKittyImagePlacement[] copy = new TerminalKittyImagePlacement[placements.Count];
-            for (int i = 0; i < placements.Count; i++)
-            {
-                copy[i] = placements[i];
-            }
-
-            _kittyPlacements = copy;
-            Array.Sort(_kittyPlacements, TerminalKittyImagePlacement.ComparePaintOrder);
-        }
-
-        InvalidateViewport();
-    }
+        => ReplaceKittyGraphicsWithPlaceholders(images, placements, [], [], 0, 0);
 
     /// <summary>Clears the current Kitty image snapshot.</summary>
     public void ClearKittyGraphics()
@@ -1320,10 +1291,19 @@ public sealed partial class TerminalScreen
         InvalidateViewport();
     }
 
-    /// <summary>Replaces protocol-neutral raster graphics from another screen snapshot.</summary>
+    /// <summary>
+    /// Replaces protocol-neutral raster graphics from another screen snapshot.
+    /// Reserves both collections before mutation; self-replacement is a no-op.
+    /// A failure while clearing covered text faults only this screen owner.
+    /// Serialize access to both screens with screen mutation.
+    /// </summary>
     public void ReplaceRasterGraphicsFrom(TerminalScreen source)
     {
         ArgumentNullException.ThrowIfNull(source);
+
+        ThrowIfSnapshotMutationFailed();
+        source.ThrowIfSnapshotMutationFailed();
+        if (ReferenceEquals(this, source)) return;
 
         if (source._rasterImagesById.Count == 0 && source._rasterPlacements.Count == 0)
         {
@@ -1331,6 +1311,9 @@ public sealed partial class TerminalScreen
             return;
         }
 
+        _rasterImagesById.EnsureCapacity(source._rasterImagesById.Count);
+        _rasterPlacements.EnsureCapacity(source._rasterPlacements.Count);
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.RasterPublicationPrepared);
         _rasterImagesById.Clear();
         foreach ((int imageId, TerminalRasterImageSource image) in source._rasterImagesById)
         {

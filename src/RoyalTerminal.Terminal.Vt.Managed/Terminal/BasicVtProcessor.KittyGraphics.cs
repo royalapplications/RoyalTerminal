@@ -10,6 +10,7 @@ public sealed partial class BasicVtProcessor
 {
     private TimeSpan? _animationNextTickDelay;
     private long _animationTickTimestamp;
+    private bool _kittyPublicationPending;
 
     private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
@@ -293,8 +294,12 @@ public sealed partial class BasicVtProcessor
     }
 
     private void PublishKittyGraphics()
-        => _kittyStore.Publish(_screen,
+    {
+        _kittyPublicationPending = true;
+        _kittyStore.Publish(_screen,
             (uint)GetEffectiveCellWidthPx(), (uint)GetEffectiveCellHeightPx());
+        _kittyPublicationPending = false;
+    }
 
     private bool AdvanceKittyAnimations(bool commitInputPrefix = false)
     {

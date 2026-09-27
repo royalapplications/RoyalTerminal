@@ -21,6 +21,11 @@ internal enum SnapshotMutationCheckpoint
     ResetPrepared,
     CursorResizeRestore,
     MetadataReconciliation,
+    KittyImagesPrepared,
+    KittyPlacementsPrepared,
+    KittyScenePrepared,
+    KittyProjectionPrepared,
+    RasterPublicationPrepared,
 }
 
 public sealed partial class TerminalScreen

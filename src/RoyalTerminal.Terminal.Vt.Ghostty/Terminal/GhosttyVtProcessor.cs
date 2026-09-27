@@ -2144,6 +2144,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             return;
         }
 
+        // A failed extraction/publication must retry even when only geometry
+        // changed and the native generation is unchanged.
+        _kittyGraphicsSynchronized = false;
         _kittyNextImageCache.Clear();
         _kittyImageSources.Clear();
         _kittyPlacements.Clear();
@@ -2246,10 +2249,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         imagesChanged |= _kittyImageCache.Count != _kittyNextImageCache.Count;
-        (_kittyImageCache, _kittyNextImageCache) = (_kittyNextImageCache, _kittyImageCache);
-        _kittyNextImageCache.Clear();
-        _kittyGraphicsGeneration = generation;
-        _kittyGraphicsSynchronized = true;
         _kittyPlacements.Sort(static (left, right) =>
         {
             int order = left.ZIndex.CompareTo(right.ZIndex);
@@ -2259,19 +2258,26 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         if (_kittyPlacements.Count == 0 && !hasVirtual)
         {
             _screen.ClearKittyGraphics();
-            return;
+        }
+        else
+        {
+            uint placeholderCellWidth = (uint)Math.Max(0, _nativeCellWidthPx);
+            uint placeholderCellHeight = (uint)Math.Max(0, _nativeCellHeightPx);
+            if (imagesChanged || !_screen.MatchesKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
+                    placeholderCellWidth, placeholderCellHeight) || !KittyPlacementsEqual(
+                    _screen.GetFixedKittyPlacements(), CollectionsMarshal.AsSpan(_kittyPlacements)))
+            {
+                _screen.ReplaceKittyGraphicsWithPlaceholders(_kittyImageSources, _kittyPlacements,
+                    _kittyPlaceholderTargets, _kittyVirtualRelatives,
+                    placeholderCellWidth, placeholderCellHeight);
+            }
         }
 
-        uint placeholderCellWidth = (uint)Math.Max(0, _nativeCellWidthPx);
-        uint placeholderCellHeight = (uint)Math.Max(0, _nativeCellHeightPx);
-        if (imagesChanged || !_screen.MatchesKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
-                placeholderCellWidth, placeholderCellHeight) || !KittyPlacementsEqual(
-                _screen.GetFixedKittyPlacements(), CollectionsMarshal.AsSpan(_kittyPlacements)))
-        {
-            _screen.ReplaceKittyGraphics(_kittyImageSources, _kittyPlacements);
-            _screen.SetKittyPlaceholderScene(_kittyPlaceholderTargets, _kittyVirtualRelatives,
-                placeholderCellWidth, placeholderCellHeight);
-        }
+        // Commit cache/generation only after the complete screen image scene.
+        (_kittyImageCache, _kittyNextImageCache) = (_kittyNextImageCache, _kittyImageCache);
+        _kittyNextImageCache.Clear();
+        _kittyGraphicsGeneration = generation;
+        _kittyGraphicsSynchronized = true;
     }
 
     private bool CacheKittyImage(int imageId, GhosttyKittyGraphicsImage image, bool contentUnchanged, ref bool imagesChanged)

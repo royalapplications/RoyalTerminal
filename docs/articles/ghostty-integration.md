@@ -1437,6 +1437,49 @@ retain the Skia renderer, and other operating systems retain normal rendering,
 matching Ghostty's platform support for this setting. Glyph and font caches are
 bounded, invalidated when font settings change, and disposed with the renderer.
 
+## Graphics scene publication
+
+The shared screen prepares Kitty placements, placeholder lookup and image
+registry before replacing any live scene state. Preparation failure keeps the
+previous frame, caches and copy-on-write readers intact. Image registry staging
+reuses two dictionaries; after each successful swap the old registry is cleared
+immediately, retaining capacity but no old pixel references. This scratch belongs
+to one screen instance and is not copied or transferred as transaction state.
+Pixel-only updates preserve projection caches and should allocate nothing after
+warm-up, at the cost of filling a second registry rather than updating live keys.
+Full geometry changes still allocate immutable placement/scene data.
+
+Native image cache/generation state commits only after screen publication; failed
+geometry-only refreshes remain retryable even with an unchanged native generation.
+The managed adapter retains pending publication across failed preparation and
+resize rollback, retrying before subsequent input, on timed refresh outside a
+hold, or before releasing a held screen. Placeholder runs and projected geometry
+also commit together: a failed projection cannot cache new runs with old geometry
+and cause subsequent renders to skip the update.
+
+Raster snapshot copying reserves dictionary/list capacity before replacing live
+contents, preserves per-buffer collection aliases and treats self-copy as a no-op.
+Allocation failure before publication is recoverable; a failure while clearing
+covered terminal cells retains the existing owner-local mutation-fault policy.
+This is not a claim that an entire input batch, protocol graphics store or terminal
+snapshot is rolled back when rendering publication fails.
+
+The reference is [Ghostty image storage](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_storage.zig),
+which reserves registry capacity before eviction/replacement.
+[Windows Terminal ImageSlice](https://github.com/microsoft/terminal/blob/main/src/buffer/out/ImageSlice.cpp)
+prepares a resized pixel buffer before moving it into storage; its geometry update
+order is not adopted as a transaction guarantee.
+[xterm.js image storage](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-image/src/ImageStorage.ts)
+uses canvas/Map lifetimes and eviction, not this CLR render-scene ownership model.
+RoyalTerminal uses a staged scene boundary for shared native/managed rendering.
+
+Twenty focused cases are authored for preparation/projection failures, retry,
+pixel-only scratch reuse, COW readers, raster ownership, hold release and resize
+rollback, including both backend adapters. `--graphics-publication` measures six
+full-scene/pixel-only workloads (1/32/256 images); the identical harness can run
+against pre-change `b340f5a1` for a baseline. Test, benchmark and CI execution remain
+deferred to final validation; no measured performance gain is claimed.
+
 ## Kitty image storage
 
 The managed engine retains raw RGB images at three bytes per pixel, matching
