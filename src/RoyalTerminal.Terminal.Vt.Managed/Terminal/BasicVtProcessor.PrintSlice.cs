@@ -41,7 +41,9 @@ public sealed partial class BasicVtProcessor
             byte next = data[bytes];
             if (next < 0x20 || next == 0x7F) break;
             if (Rune.DecodeFromUtf8(data[bytes..], out Rune rune, out int consumed) != OperationStatus.Done) break;
-            decoded[count++] = rune.Value;
+            // Match ProcessGround: decoded C1 controls are ignored, not printed
+            // and not executed as raw control-string introductions.
+            if (rune.Value is < 0x80 or > 0x9F) decoded[count++] = rune.Value;
             bytes += consumed;
         }
         PrintSlice<int>(decoded[..count]);

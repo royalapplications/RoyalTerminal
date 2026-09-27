@@ -105,6 +105,26 @@ public sealed class ManagedPrintSliceTests
         }
     }
 
+    [Fact]
+    public void DecoderIgnoresEveryUtf8EncodedC1WithoutChangingPrintOrParserState()
+    {
+        for (int codepoint = 0x80; codepoint <= 0x9F; codepoint++)
+        {
+            byte[] input = Encoding.UTF8.GetBytes("λλ" + char.ConvertFromUtf32(codepoint) + "AB\u001b[2b");
+            TerminalScreen expected = new(4, 3);
+            using BasicVtProcessor scalar = new(expected);
+            for (int index = 0; index < input.Length; index++) scalar.Process(input.AsSpan(index, 1));
+            for (int split = 0; split <= input.Length; split++)
+            {
+                TerminalScreen actual = new(4, 3);
+                using BasicVtProcessor bulk = new(actual);
+                bulk.Process(input.AsSpan(0, split)); bulk.Process(input.AsSpan(split));
+                AssertManagedEqual(bulk, actual, scalar, expected);
+                Assert.True(bulk.IsParserGround);
+            }
+        }
+    }
+
     [Theory]
     [InlineData("abcdefghijklmnopqrst")]
     [InlineData("λλλλλλλλλλλλλλλλλλλλ")]
