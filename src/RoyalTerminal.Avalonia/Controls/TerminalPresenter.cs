@@ -96,8 +96,15 @@ public class TerminalPresenter : Control
     {
         if (_compositionVisual is null)
             InitializeComposition();
-        UpdateVisualSize();
         return base.ArrangeOverride(finalSize);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        // Bounds is assigned after ArrangeOverride returns. Using its old value
+        // inside ArrangeOverride leaves the custom visual one layout behind.
+        if (change.Property == BoundsProperty) UpdateVisualSize();
     }
 
     public override void Render(DrawingContext context)

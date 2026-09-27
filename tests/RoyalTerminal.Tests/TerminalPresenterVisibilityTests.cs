@@ -37,7 +37,7 @@ public sealed class TerminalPresenterVisibilityTests
         presenter.SetRenderState(renderer, screen);
         presenter.SetShaderState([Shader("half4(1, 0, 0, 1)")], true);
         Border parent = new() { Child = presenter };
-        Window window = new() { Width = 240, Height = 100, Content = parent };
+        Window window = CreateWindow(parent);
         try
         {
             window.Show();
@@ -96,7 +96,7 @@ public sealed class TerminalPresenterVisibilityTests
         presenter.SetShaderState(sources, true);
         sources.Clear(); // The posted configuration owns the immutable sources.
         Border parent = new() { Child = presenter, IsVisible = false };
-        Window window = new() { Width = 240, Height = 100, Content = parent };
+        Window window = CreateWindow(parent);
         try
         {
             window.Show();
@@ -121,7 +121,7 @@ public sealed class TerminalPresenterVisibilityTests
         processor.Process("\u001b[41m\u001b[2J"u8);
         TerminalPresenter presenter = new();
         presenter.SetRenderState(renderer, screen);
-        Window window = new() { Width = 240, Height = 100, Content = presenter };
+        Window window = CreateWindow(presenter);
         try
         {
             window.Show();
@@ -154,7 +154,7 @@ public sealed class TerminalPresenterVisibilityTests
         Grid root = new();
         root.Children.Add(oldParent);
         root.Children.Add(nextParent);
-        Window window = new() { Width = 240, Height = 100, Content = root };
+        Window window = CreateWindow(root);
         try
         {
             window.Show();
@@ -191,16 +191,23 @@ public sealed class TerminalPresenterVisibilityTests
         {
             hidden[index] = new TerminalPresenter();
             hidden[index].SetRenderState(renderer, screen);
-            hiddenGroup.Children.Add(hidden[index]);
         }
         TerminalPresenter visible = new();
         visible.SetRenderState(renderer, screen);
         root.Children.Add(hiddenGroup);
-        root.Children.Add(visible);
-        Window window = new() { Width = 960, Height = 600, Content = root };
+        Window window = CreateWindow(root, 960, 600);
         try
         {
             window.Show();
+            // Materialize each frame before putting another presenter over it:
+            // Avalonia can cull siblings already covered by an opaque surface.
+            foreach (TerminalPresenter presenter in hidden)
+            {
+                hiddenGroup.Children.Add(presenter);
+                _ = Pixel(window);
+                Assert.True(presenter.DrawHandler!.RetainedFrameBytes > 0);
+            }
+            root.Children.Add(visible);
             _ = Pixel(window);
             long bytes = 0;
             foreach (TerminalPresenter presenter in hidden) bytes += presenter.DrawHandler!.RetainedFrameBytes;
@@ -215,6 +222,9 @@ public sealed class TerminalPresenterVisibilityTests
 
     private static TerminalShaderSource Shader(string expression) =>
         new("visibility", $"half4 main(float2 p) {{ return {expression}; }}", requiresContinuousAnimation: true);
+
+    private static Window CreateWindow(Control content, double width = 240, double height = 100) =>
+        new() { Width = width, Height = height, Content = content, WindowDecorations = WindowDecorations.None };
 
     private static void Pump()
     {

@@ -380,8 +380,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         SKMatrix matrix)
     {
         RenderTargetScale matrixScale = GetCanvasScale(matrix);
-        float inferredScaleX = InferScale(renderBounds.Width, localClipBounds.Width);
-        float inferredScaleY = InferScale(renderBounds.Height, localClipBounds.Height);
+        // Skia expands local clips outward for antialiasing (often -1..size+1).
+        // That padding is not DPI: inferring scale from it stretches a 320x100
+        // framebuffer to 322x102. Only a non-outset clip can supply fallback DPI.
+        bool clipIsOutset = localClipBounds.Left < 0 || localClipBounds.Top < 0;
+        float inferredScaleX = clipIsOutset ? 1f : InferScale(renderBounds.Width, localClipBounds.Width);
+        float inferredScaleY = clipIsOutset ? 1f : InferScale(renderBounds.Height, localClipBounds.Height);
         float scaleX = MathF.Max(matrixScale.X, inferredScaleX);
         float scaleY = MathF.Max(matrixScale.Y, inferredScaleY);
 

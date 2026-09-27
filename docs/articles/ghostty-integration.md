@@ -45,6 +45,8 @@ framebuffer ownership falls from 46,080,000 bytes to zero while the visible
 framebuffer remains allocated; this is not a whole-process or GPU-memory claim.
 Native macOS CGL tests exercise release outside a current context, shared-target
 survival, context loss/abandonment/disposal, retry, and raster fallback.
+The presenter synchronizes its composition size after layout assigns new bounds;
+antialias clip outsets are not treated as DPI scaling or framebuffer dimensions.
 
 ## Batched managed printing
 
