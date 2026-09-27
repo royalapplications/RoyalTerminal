@@ -13,6 +13,7 @@ public sealed partial class BasicVtProcessor
     internal Action<ManagedKittyParserAllocation>? KittyParserAllocationCheckpoint { get; set; }
     internal Action<ManagedKittyImageAllocation>? KittyImageAllocationCheckpoint { get; set; }
     internal Action<ManagedKittyStoreAllocation>? KittyStoreAllocationCheckpoint { get; set; }
+    internal Action<ManagedKittyAnimationAllocation>? KittyAnimationAllocationCheckpoint { get; set; }
 
     private void ProcessKittyCommand(ManagedKittyGraphicsCommand command)
     {
@@ -73,10 +74,22 @@ public sealed partial class BasicVtProcessor
                     {
                         responseId = composed.Id;
                         ManagedKittyImagePixels previous = composed.Animation.CurrentPixels;
-                        changed = composed.Animation.TryCompose(command, out error);
-                        if (changed) _kittyStore.CommitAnimationBytes(composed);
-                        if (!ReferenceEquals(previous, composed.Animation.CurrentPixels))
-                            _kittyStore.MarkContentChanged(composed);
+                        try
+                        {
+                            changed = composed.Animation.TryCompose(command, out error, KittyAnimationAllocationCheckpoint);
+                        }
+                        finally
+                        {
+                            // Native RGB promotion is committed even when a
+                            // later COW canvas allocation rejects composition.
+                            // Account for it on both protocol-error and other
+                            // exception paths; publication can retry afterward.
+                            bool promoted = composed.QuotaBytes != composed.Animation.StoredBytes;
+                            bool visibleChanged = !ReferenceEquals(previous, composed.Animation.CurrentPixels);
+                            if (changed || promoted) _kittyStore.CommitAnimationBytes(composed);
+                            if (visibleChanged) _kittyStore.MarkContentChanged(composed);
+                            if (changed || promoted || visibleChanged) _kittyPublicationPending = true;
+                        }
                     }
                     break;
             }
@@ -163,10 +176,19 @@ public sealed partial class BasicVtProcessor
             error = "EINVAL: frame dimensions exceed image";
             if (decoded.Width > animationImage.Animation.Width || decoded.Height > animationImage.Animation.Height)
                 return false;
-            KittyGraphicsDecodedImage frame = decoded.GetRgbaImage();
-            // Upstream promotes the base before resolving frame/base numbers or
-            // reserving append space, even if either later check rejects it.
-            _kittyStore.ConvertImageToRgba(animationImage);
+            KittyGraphicsDecodedImage frame;
+            try
+            {
+                frame = decoded.GetRgbaImage(KittyAnimationAllocationCheckpoint);
+                // Upstream promotes the base before resolving frame/base numbers
+                // or reserving append space, even if a later check rejects it.
+                _kittyStore.ConvertImageToRgba(animationImage, KittyAnimationAllocationCheckpoint);
+            }
+            catch (OutOfMemoryException)
+            {
+                error = "ENOMEM: out of memory";
+                return false;
+            }
             if (!animationImage.Animation.TryValidateFrame(responseCommand, frame, out responseFrame, out error))
                 return false;
             if (!_kittyStore.TryReserveAnimation(_screen, animationImage,
@@ -177,7 +199,7 @@ public sealed partial class BasicVtProcessor
             }
             ManagedKittyImagePixels previous = animationImage.Animation.CurrentPixels;
             if (!animationImage.Animation.TryTransmitFrame(responseCommand, frame,
-                    _options.KittyGraphicsStorageLimitBytes, out responseFrame, out error)) return false;
+                    _options.KittyGraphicsStorageLimitBytes, out responseFrame, out error, KittyAnimationAllocationCheckpoint)) return false;
             _kittyStore.CommitAnimationBytes(animationImage);
             if (!ReferenceEquals(previous, animationImage.Animation.CurrentPixels))
                 _kittyStore.MarkContentChanged(animationImage);

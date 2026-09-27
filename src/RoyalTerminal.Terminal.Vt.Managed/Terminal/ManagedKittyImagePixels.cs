@@ -51,17 +51,13 @@ internal sealed class ManagedKittyImagePixels
         return new(width, height, rgb);
     }
 
-    internal KittyGraphicsDecodedImage GetRgbaImage()
+    internal KittyGraphicsDecodedImage GetRgbaImage(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
         if (_rgba is not null) return _rgba;
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaBuffer);
         byte[] rgba = GC.AllocateUninitializedArray<byte>(RgbaByteLength);
-        for (int source = 0, destination = 0; source < _pixels.Length; source += 3, destination += 4)
-        {
-            rgba[destination] = _pixels[source];
-            rgba[destination + 1] = _pixels[source + 1];
-            rgba[destination + 2] = _pixels[source + 2];
-            rgba[destination + 3] = 255;
-        }
+        ManagedKittyAnimationPixels.ExpandRgb(_pixels, rgba);
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaView);
         return _rgba = new(Width, Height, rgba);
     }
 
@@ -84,5 +80,11 @@ internal sealed class ManagedKittyImagePixels
         return source;
     }
 
-    internal ManagedKittyImagePixels AsRgba() => IsRgba ? this : new(GetRgbaImage()) { _source = _source };
+    internal ManagedKittyImagePixels AsRgba(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
+    {
+        if (IsRgba) return this;
+        KittyGraphicsDecodedImage rgba = GetRgbaImage(allocationCheckpoint);
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaOwner);
+        return new(rgba) { _source = _source };
+    }
 }

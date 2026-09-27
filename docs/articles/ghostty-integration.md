@@ -1594,7 +1594,8 @@ prepare dictionary capacity and all managed image/initial-animation owners befor
 evicting images or removing a replaced image's placements. Existing image and
 placement keys reuse their dictionary slots. Placement preparation similarly
 reserves capacity before replacement and releases a newly tracked anchor on any
-preparation failure. Allocation failures return `ENOMEM`; unrelated exceptions
+preparation failure. Allocation failures return `ENOMEM`, except tracked-anchor
+preparation uses native `EINVAL: failed to prepare terminal state`; unrelated exceptions
 propagate after releasing that temporary ownership. Opportunistic pruning and
 explicit retransmission's earlier deletion remain native-compatible side effects,
 not rolled-back transactions. A successfully admitted image remains available when
@@ -1604,6 +1605,38 @@ Twenty-six focused admission, replacement, relative/virtual placement, anchor,
 retained-screen and processor retry cases are authored but unrun. Later animation
 editing and graphics publication remain separate failure boundaries. No measured
 performance improvement or complete allocation-failure parity is claimed.
+
+Animation allocation boundaries follow the native
+[frame execution/promotion/reservation order](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_exec.zig)
+and [pixel conversion/composition](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_pixel.zig).
+Source RGB conversion and root promotion fail with `ENOMEM` before assigning a
+frame response number; subsequent canvas/list failures retain the resolved number.
+Successful promotion remains charged and changes the image generation even if
+later composition fails. In particular, a failed managed COW canvas must not leave
+the store charging its old RGB byte count. Quota-driven evictions before an append
+are retained, but an unstored canvas is never charged. Metadata capacity is reserved
+before allocating/copying its canvas; frame pixels, gaps and playback timestamps
+commit only after all preparation succeeds. The managed COW requirement deliberately
+differs from native in-place frame edits because held render/snapshot readers share
+immutable pixels. Response observers and publication remain outside protocol-error
+catches; unrelated exceptions propagate with committed promotion accounting intact.
+
+RGB expansion now uses a bounded four-pixel `Vector128` shuffle with a scalar tail
+and fallback, opaque source-over pixels use direct copies, and nonzero backgrounds
+use the runtime's word-span fill. Full-canvas overwrites clone their owned source
+once without first copying/filling a canvas that would immediately be overwritten.
+Clipped rectangles and translucent pixels retain the native arithmetic. In
+particular, zero source alpha does **not** skip Wuffs' low-destination-alpha integer
+rounding. These are managed CPU equivalents, not transplants of
+[xterm.js image storage](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-image/src/ImageStorage.ts)
+or [Windows Terminal image slices](https://github.com/microsoft/terminal/blob/main/src/buffer/out/ImageSlice.cpp),
+whose storage/rendering paths do not define this Kitty animation contract.
+Sixty-eight new failure, ownership, alignment/tail and pixel cases are authored,
+including all 65,536 source/destination-alpha pairs in one reference comparison.
+`--kitty-animation` adds eighteen workloads; the same harness runs against
+`bb6d33ae` for before/after profiling. Execution, SIMD-disabled coverage,
+cross-platform sign-off and performance measurements remain deferred to final
+validation; no throughput gain or exhaustive mutation-failure parity is claimed.
 
 Kitty parser state is now stored by value in the processor, removing a separate
 heap parser owner for each APC while retaining one independently owned command.

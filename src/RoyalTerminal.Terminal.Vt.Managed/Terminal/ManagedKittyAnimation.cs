@@ -21,7 +21,7 @@ internal sealed class ManagedKittyAnimation
     internal ManagedKittyAnimation(ManagedKittyImagePixels root)
     {
         ArgumentNullException.ThrowIfNull(root);
-        _frames = [new(root, 0)];
+        _frames = new(1) { new(root, 0) };
     }
 
     private ManagedKittyAnimation(ManagedKittyAnimation source)
@@ -46,11 +46,11 @@ internal sealed class ManagedKittyAnimation
     internal uint CurrentFrameNumber => (uint)_currentIndex + 1;
     internal long StoredBytes => _frames[0].Image.StorageBytes + (long)_frames[0].Image.RgbaByteLength * (_frames.Count - 1);
 
-    internal bool PromoteRootToRgba()
+    internal bool PromoteRootToRgba(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
         Frame root = _frames[0];
         if (root.Image.IsRgba) return false;
-        _frames[0] = new(root.Image.AsRgba(), root.GapMilliseconds);
+        _frames[0] = new(root.Image.AsRgba(allocationCheckpoint), root.GapMilliseconds);
         return true;
     }
 
@@ -84,10 +84,31 @@ internal sealed class ManagedKittyAnimation
     }
 
     internal bool TryTransmitFrame(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
-        long maxStoredBytes, out uint frameNumber, out string error)
+        long maxStoredBytes, out uint frameNumber, out string error,
+        Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
+        frameNumber = 0;
+        try
+        {
+            return TryTransmitFrameCore(command, source, maxStoredBytes, out frameNumber, out error, allocationCheckpoint);
+        }
+        catch (OutOfMemoryException)
+        {
+            error = "ENOMEM: out of memory";
+            return false;
+        }
+    }
+
+    private bool TryTransmitFrameCore(ManagedKittyGraphicsCommand command, KittyGraphicsDecodedImage source,
+        long maxStoredBytes, out uint frameNumber, out string error, Action<ManagedKittyAnimationAllocation>? allocationCheckpoint)
+    {
+        frameNumber = 0;
+        error = "EINVAL: frame dimensions exceed image";
+        if (source.Width > Width || source.Height > Height) return false;
+        // As in the native executor, promotion precedes resolving a frame
+        // number/base and remains committed if a later admission fails.
+        PromoteRootToRgba(allocationCheckpoint);
         if (!TryValidateFrame(command, source, out frameNumber, out error)) return false;
-        PromoteRootToRgba();
         KittyGraphicsDecodedImage root = RootImage;
         bool append = frameNumber == (uint)_frames.Count + 1;
         uint baseFrame = command.Get('c');
@@ -97,8 +118,22 @@ internal sealed class ManagedKittyAnimation
             return false;
         }
 
+        // Reserve frame metadata before allocating/copying a full canvas. The
+        // caller already performed native-compatible quota eviction; capacity
+        // growth changes no frames, pixels, gap totals or playback clock.
+        if (append && _frames.Count == _frames.Capacity)
+        {
+            allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.FrameCapacity);
+            _frames.EnsureCapacity(_frames.Count + 1);
+        }
+        uint x = command.Get('x');
+        uint y = command.Get('y');
+        bool replaceCanvas = command.Get('X') == 1 && x == 0 && y == 0 &&
+            source.Width == root.Width && source.Height == root.Height;
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.FrameBuffer);
         byte[] pixels;
-        if (!append) pixels = (byte[])_frames[(int)frameNumber - 1].Image.GetRgbaImage().Rgba.Clone();
+        if (replaceCanvas) pixels = (byte[])source.Rgba.Clone();
+        else if (!append) pixels = (byte[])_frames[(int)frameNumber - 1].Image.GetRgbaImage().Rgba.Clone();
         else if (baseFrame > 0) pixels = (byte[])_frames[(int)baseFrame - 1].Image.GetRgbaImage().Rgba.Clone();
         else
         {
@@ -106,9 +141,7 @@ internal sealed class ManagedKittyAnimation
             ManagedKittyAnimationPixels.Fill(pixels, command.Get('Y'));
         }
 
-        uint x = command.Get('x');
-        uint y = command.Get('y');
-        if (x < root.Width && y < root.Height)
+        if (!replaceCanvas && x < root.Width && y < root.Height)
         {
             ManagedKittyAnimationPixels.Compose(pixels, root.Width, source.Rgba, source.Width,
                 Math.Min(source.Width, root.Width - (int)x), Math.Min(source.Height, root.Height - (int)y),
@@ -116,6 +149,7 @@ internal sealed class ManagedKittyAnimation
         }
 
         int gap = command.GetSigned('z');
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.FrameView);
         ManagedKittyImagePixels image = new(new KittyGraphicsDecodedImage(root.Width, root.Height, pixels));
         if (append)
         {
@@ -163,7 +197,22 @@ internal sealed class ManagedKittyAnimation
         return changed;
     }
 
-    internal bool TryCompose(ManagedKittyGraphicsCommand command, out string error)
+    internal bool TryCompose(ManagedKittyGraphicsCommand command, out string error,
+        Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
+    {
+        try
+        {
+            return TryComposeCore(command, out error, allocationCheckpoint);
+        }
+        catch (OutOfMemoryException)
+        {
+            error = "ENOMEM: out of memory";
+            return false;
+        }
+    }
+
+    private bool TryComposeCore(ManagedKittyGraphicsCommand command, out string error,
+        Action<ManagedKittyAnimationAllocation>? allocationCheckpoint)
     {
         uint sourceFrame = command.Get('r');
         uint destinationFrame = command.Get('c');
@@ -205,12 +254,14 @@ internal sealed class ManagedKittyAnimation
             return false;
         }
 
-        PromoteRootToRgba();
+        PromoteRootToRgba(allocationCheckpoint);
         Frame destination = _frames[(int)destinationFrame - 1];
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.FrameBuffer);
         byte[] pixels = (byte[])destination.Image.GetRgbaImage().Rgba.Clone();
         ManagedKittyAnimationPixels.Compose(pixels, Width, _frames[(int)sourceFrame - 1].Image.GetRgbaImage().Rgba,
             Width, (int)width, (int)height, (int)sourceX, (int)sourceY, (int)destinationX, (int)destinationY,
             command.Get('C') != 0);
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.FrameView);
         ManagedKittyImagePixels image = new(new KittyGraphicsDecodedImage(Width, Height, pixels));
         _frames[(int)destinationFrame - 1] = new(image, destination.GapMilliseconds);
         return true;

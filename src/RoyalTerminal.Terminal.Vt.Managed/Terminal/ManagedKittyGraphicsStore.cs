@@ -122,9 +122,9 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         return TryReserve(screen, additionalBytes, image.Id);
     }
 
-    internal void ConvertImageToRgba(Image image)
+    internal void ConvertImageToRgba(Image image, Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
-        if (!image.Animation.PromoteRootToRgba()) return;
+        if (!image.Animation.PromoteRootToRgba(allocationCheckpoint)) return;
         CommitAnimationBytes(image);
         MarkContentChanged(image);
     }
@@ -198,8 +198,12 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
             }
             if (!virtualPlacement && parent is null)
             {
+                // Ghostty reports trackPin failure as terminal-state preparation,
+                // distinct from allocation of the placement dictionary entry.
+                error = "EINVAL: failed to prepare terminal state";
                 allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.Anchor);
                 anchor = screen.CreateAnchor(absoluteRow, column);
+                error = "ENOMEM: out of memory";
             }
             allocationCheckpoint?.Invoke(ManagedKittyStoreAllocation.Placement);
             placement = new(anchor, parent, virtualPlacement, command.GetSigned('H'), command.GetSigned('V'),

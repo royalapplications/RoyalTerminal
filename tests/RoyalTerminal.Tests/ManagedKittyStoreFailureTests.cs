@@ -102,7 +102,8 @@ public sealed class ManagedKittyStoreFailureTests
         Assert.False(store.TryAddPlacement(screen, image, command, 0, 2, 8, 16, out var placement, out string error,
             stage => { if ((int)stage == checkpoint) throw new OutOfMemoryException(); }));
         Assert.Null(placement);
-        Assert.Equal("ENOMEM: out of memory", error);
+        Assert.Equal(checkpoint == (int)ManagedKittyStoreAllocation.Anchor
+            ? "EINVAL: failed to prepare terminal state" : "ENOMEM: out of memory", error);
         Assert.Equal(revision, store.Revision);
         Assert.Equal(3, store.PlacementCount);
         Assert.Equal(1, image.PlacementCount);
@@ -175,7 +176,9 @@ public sealed class ManagedKittyStoreFailureTests
         processor.ResponseCallback = bytes => replies.Add(Encoding.ASCII.GetString(bytes));
         processor.KittyStoreAllocationCheckpoint = stage => { if ((int)stage == checkpoint) throw new OutOfMemoryException(); };
         Send(processor, "a=T,i=4,p=1,s=1,v=1;AQIDBA==");
-        Assert.Equal("\u001b_Gi=4,p=1;ENOMEM: out of memory\u001b\\", Assert.Single(replies));
+        string expected = checkpoint == (int)ManagedKittyStoreAllocation.Anchor
+            ? "EINVAL: failed to prepare terminal state" : "ENOMEM: out of memory";
+        Assert.Equal($"\u001b_Gi=4,p=1;{expected}\u001b\\", Assert.Single(replies));
         Assert.Equal(3, screen.GetKittyPlacements().Length);
         Assert.Equal(3, screen.TrackedAnchorCount);
         Assert.False(screen.SnapshotMutationFailed);

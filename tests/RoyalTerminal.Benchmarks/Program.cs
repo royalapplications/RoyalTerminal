@@ -71,6 +71,12 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--kitty-animation", StringComparer.Ordinal))
+{
+    KittyAnimationBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--kitty-image-loader", StringComparer.Ordinal))
 {
     KittyImageLoaderBenchmark.Run();
