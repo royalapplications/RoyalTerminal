@@ -13,6 +13,39 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
+## Hidden-terminal rendering resources
+
+Both VT engines use the same visibility-aware Skia presenter. Hiding the
+presenter or an ancestor, setting an ancestor's opacity to zero, minimizing its
+window, or detaching it releases the owned retained framebuffer and compiled
+framebuffer shaders. Hidden output and cursor invalidations do not schedule
+composition frames. The terminal model continues to receive output; showing it
+recreates resources lazily and fully redraws the latest screen, size, and shader
+configuration, including rows whose dirty flags were already acknowledged.
+
+This follows [Ghostty's hidden-surface resource release](https://github.com/ghostty-org/ghostty/commit/c4e16970a803b170e352432424f44192cb59f3ac),
+[xterm.js's hidden refresh suspension](https://github.com/xtermjs/xterm.js/blob/master/src/browser/services/RenderService.ts),
+and [Windows Terminal's full viewport refresh when painting resumes](https://github.com/microsoft/terminal/blob/main/src/renderer/base/renderer.cpp).
+It is not a transplant of Ghostty's Metal/OpenGL swap chain.
+
+Avalonia composition messages do not guarantee a current GPU context. The
+framebuffer owner retains the borrowed context identity from Avalonia's public
+Skia platform lease, re-enters it for release, and never disposes that context.
+Retained GPU surfaces are unbudgeted so releasing a hidden framebuffer does not
+leave it in Skia's shared resource cache. Context loss is handled without issuing
+GPU operations; a custom backend without a re-enterable platform context uses a
+raster framebuffer. Shared font/image caches and other terminals' GPU resources
+are not purged. OS occlusion is not inferred from focus, and a visible background
+terminal keeps rendering.
+
+Headless coverage exercises hidden startup, ancestor/window/opacity transitions,
+latest-state redraw, shader configuration ownership, reparenting and late
+messages. A 20-hidden-plus-one-visible 960×600 fixture checks that hidden retained
+framebuffer ownership falls from 46,080,000 bytes to zero while the visible
+framebuffer remains allocated; this is not a whole-process or GPU-memory claim.
+Native macOS CGL tests exercise release outside a current context, shared-target
+survival, context loss/abandonment/disposal, retry, and raster fallback.
+
 ## Batched managed printing
 
 Managed input now writes eligible narrow and wide runs with one row-local cell

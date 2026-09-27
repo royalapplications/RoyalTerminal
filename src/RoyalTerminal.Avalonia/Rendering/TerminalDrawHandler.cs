@@ -24,7 +24,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private TerminalShaderPostProcessor? _shaderPostProcessor;
-    private SKSurface? _terminalSurface;
+    private TerminalRenderSurface? _terminalSurface;
+    private IReadOnlyList<TerminalShaderSource>? _shaderSources;
+    private bool _visible = true;
+    private bool _disposed;
     private SKImageInfo _terminalSurfaceInfo;
     private GRContext? _terminalSurfaceGrContext;
     private bool _terminalSurfaceGpuBacked;
@@ -53,12 +56,15 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     public readonly record struct InvalidateMessage(bool FullRedraw = false, bool DirtyRowsOnly = false);
     public readonly record struct ResizeMessage();
     public readonly record struct DisposeMessage();
+    /// <summary>Suspends rendering and releases retained resources while hidden.</summary>
+    public readonly record struct VisibilityMessage(bool Visible);
     public readonly record struct ShaderStateMessage(
         IReadOnlyList<TerminalShaderSource>? Sources,
         bool AnimationEnabled);
 
     public override void OnMessage(object message)
     {
+        if (_disposed) return;
         switch (message)
         {
             case UpdateMessage update:
@@ -88,12 +94,27 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             case DisposeMessage:
                 DisposeRenderResources();
                 break;
+
+            case VisibilityMessage visibility:
+                _visible = visibility.Visible;
+                if (_visible)
+                {
+                    RequestTerminalFrame(fullRedraw: true, invalidateViewport: true);
+                }
+                else
+                {
+                    _pendingRender = false;
+                    _shaderPostProcessor?.Dispose();
+                    _shaderPostProcessor = null;
+                    ResetCachedFrame();
+                }
+                break;
         }
     }
 
     public override void OnAnimationFrameUpdate()
     {
-        if (_pendingRender)
+        if (_pendingRender && _visible && !_disposed)
             Invalidate();
     }
 
@@ -101,6 +122,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     {
         try
         {
+            if (!_visible || _disposed) return;
             var renderer = _renderer;
             var screen = _screen;
             if (renderer is null || screen is null)
@@ -139,11 +161,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             SKImage? terminalFrame = null;
             SKColor background = default;
             GRContext? grContext = lease.GrContext;
+            _shaderPostProcessor ??= TerminalShaderPostProcessor.Create(_shaderSources);
 
             using (screen.Synchronization.AcquireDemand())
             {
                 background = new SKColor(screen.DefaultBackground);
-                if (!EnsureTerminalSurface(width, height, renderScale, grContext))
+                if (!EnsureTerminalSurface(width, height, renderScale, lease))
                 {
                     canvas.Clear(background);
                     renderer.RenderFull(canvas, screen);
@@ -160,7 +183,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 bool hasDirtyRows = fullRedraw || _terminalFrameDirty || cursorChanged || HasDirtyViewportRows(screen);
                 if (hasDirtyRows)
                 {
-                    SKCanvas terminalCanvas = _terminalSurface!.Canvas;
+                    SKCanvas terminalCanvas = _terminalSurface!.Surface.Canvas;
                     if (fullRedraw)
                     {
                         terminalCanvas.Clear(background);
@@ -190,7 +213,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 }
 
                 _lastCursorSnapshot = TerminalCursorRenderSnapshot.From(renderer);
-                terminalFrame = _terminalSurface!.Snapshot();
+                terminalFrame = _terminalSurface!.Surface.Snapshot();
             }
 
             if (terminalFrame is null)
@@ -254,6 +277,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void RequestRender()
     {
+        if (!_visible || _disposed || _pendingRender) return;
         _pendingRender = true;
         RegisterForNextAnimationFrameUpdate();
     }
@@ -274,8 +298,9 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         int width,
         int height,
         RenderTargetScale scale,
-        GRContext? grContext)
+        ISkiaSharpApiLease lease)
     {
+        GRContext? grContext = lease.GrContext;
         GRContext? activeGrContext = TerminalShaderPostProcessor.CanUseGpuRenderSurface(grContext)
             ? grContext
             : null;
@@ -291,12 +316,9 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
         ReleaseTerminalSurface();
         _terminalSurfaceInfo = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
-        _terminalSurface = TerminalShaderPostProcessor.CreateRenderSurface(
-            _terminalSurfaceInfo,
-            activeGrContext,
-            out bool isGpuBacked);
+        _terminalSurface = TerminalRenderSurface.Create(_terminalSurfaceInfo, lease);
         _terminalSurfaceGrContext = activeGrContext;
-        _terminalSurfaceGpuBacked = isGpuBacked;
+        _terminalSurfaceGpuBacked = _terminalSurface?.IsGpuBacked == true;
         _terminalSurfaceScaleX = scale.X;
         _terminalSurfaceScaleY = scale.Y;
         _cachedFrameValid = false;
@@ -308,19 +330,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void ReleaseTerminalSurface()
     {
-        SKSurface? terminalSurface = _terminalSurface;
+        _terminalSurface?.Dispose();
         _terminalSurface = null;
         _terminalSurfaceGrContext = null;
         _terminalSurfaceGpuBacked = false;
 
-        if (terminalSurface is null)
-        {
-            return;
-        }
-
-        terminalSurface.Canvas.Flush();
-        terminalSurface.Dispose();
     }
+
+    internal long RetainedFrameBytes => _terminalSurface?.ByteCount ?? 0;
+    internal bool HasCompiledShaders => _shaderPostProcessor?.HasShaders == true;
+    internal bool IsRenderPending => _pendingRender;
 
     internal static (int Width, int Height) GetRenderTargetPixelSize(
         Rect renderBounds,
@@ -487,7 +506,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         bool animationEnabled)
     {
         _shaderPostProcessor?.Dispose();
-        _shaderPostProcessor = TerminalShaderPostProcessor.Create(sources);
+        _shaderPostProcessor = null;
+        _shaderSources = sources;
         _shaderAnimationEnabled = animationEnabled;
         _shaderStartTimestamp = 0;
         _lastShaderTimestamp = 0;
@@ -502,13 +522,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _shaderAnimationEnabled = false;
         _shaderPostProcessor?.Dispose();
         _shaderPostProcessor = null;
+        _shaderSources = null;
         ResetCachedFrame();
+        _clearPaint.Dispose();
+        _disposed = true;
     }
 
     private bool ShouldContinueShaderAnimation()
     {
         TerminalShaderPostProcessor? shaderPostProcessor = _shaderPostProcessor;
-        return _shaderAnimationEnabled &&
+        return _visible && !_disposed && _shaderAnimationEnabled &&
                shaderPostProcessor is not null &&
                shaderPostProcessor.HasShaders &&
                shaderPostProcessor.RequiresContinuousAnimation;
