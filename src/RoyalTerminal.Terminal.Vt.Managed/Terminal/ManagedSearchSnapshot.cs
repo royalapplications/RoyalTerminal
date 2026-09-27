@@ -36,15 +36,22 @@ internal sealed class ManagedSearchSnapshot
         bool compatible = previous is not null && previous.Columns == screen.Columns &&
             previous.Alternate == screen.AlternateBufferActive;
         TerminalSearchChangeToken changes = screen.GetSnapshotRows(screen.AlternateBufferActive ? 1 : 0)!
-            .GetSearchChangeToken();
+            .GetSearchChangeToken(Math.Max(0, screen.TotalRows - screen.ViewportRows));
         if (compatible && previous!.ViewportRows == screen.ViewportRows &&
             ReferenceEquals(changes, previous._changes) && changes.Matches(previous._revision))
             return previous;
         ConditionalWeakTable<object, TerminalRow> storage = compatible ? previous!._storage : new();
-        ManagedSearchRows rows = ManagedSearchRows.Capture(screen, compatible ? previous!.Rows : null, storage, changes);
+        int unchangedPrefix = compatible && ReferenceEquals(changes, previous!._changes)
+            ? changes.UnchangedHistoryPrefix(previous._revision) : 0;
+        ManagedSearchRows rows = ManagedSearchRows.Capture(screen, compatible ? previous!.Rows : null, storage,
+            changes, unchangedPrefix);
         // Even a conservative invalidation publishes a new immutable stamp. Old
         // captures remain valid for independent consumers and worker threads.
-        return new(rows, screen.Columns, screen.ViewportRows, screen.AlternateBufferActive, storage, changes);
+        ManagedSearchSnapshot captured = new(rows, screen.Columns, screen.ViewportRows, screen.AlternateBufferActive, storage, changes);
+        // Do not acknowledge invalidation before every fallible capture step has
+        // succeeded: a retry must still see the prior capture's pending changes.
+        changes.RecordCaptured();
+        return captured;
     }
 
     internal int CommonPrefix(ManagedSearchSnapshot? other)

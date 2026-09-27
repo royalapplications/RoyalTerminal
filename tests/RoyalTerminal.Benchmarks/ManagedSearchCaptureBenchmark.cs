@@ -13,7 +13,7 @@ internal static class ManagedSearchCaptureBenchmark
         Console.WriteLine("| Rows | Workload | Iterations | Milliseconds | Allocated bytes |");
         Console.WriteLine("|---:|---|---:|---:|---:|");
         foreach (int rows in new[] { 1024, 16384 })
-        foreach (string workload in new[] { "idle", "tail-edit", "tail-wrap", "scroll", "writes-unobserved", "writes-observed" })
+        foreach (string workload in new[] { "idle", "tail-edit", "active-first-edit", "history-edit", "tail-wrap", "scroll", "writes-unobserved", "writes-observed" })
         {
             int iterations = workload == "idle" ? 10000 : workload.StartsWith("writes-", StringComparison.Ordinal) ? 1000000 : 128;
             _ = Measure(rows, workload, iterations);
@@ -44,6 +44,8 @@ internal static class ManagedSearchCaptureBenchmark
                 case "tail-edit":
                 case "writes-unobserved":
                 case "writes-observed": tail[0] = new() { Codepoint = 'a' + i % 2, Width = 1 }; break;
+                case "active-first-edit": screen.GetRow(count - screen.ViewportRows)[0] = new() { Codepoint = 'a' + i % 2, Width = 1 }; break;
+                case "history-edit": screen.GetRow(0)[0] = new() { Codepoint = 'a' + i % 2, Width = 1 }; break;
                 case "tail-wrap": tail.WrapsToNext = i % 2 == 0; break;
                 case "scroll": screen.AddRow()[0] = new() { Codepoint = 'x', Width = 1 }; break;
             }

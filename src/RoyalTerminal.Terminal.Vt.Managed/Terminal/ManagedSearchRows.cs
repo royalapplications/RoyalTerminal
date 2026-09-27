@@ -38,13 +38,16 @@ internal sealed class ManagedSearchRows
     }
 
     internal static ManagedSearchRows Capture(TerminalScreen screen, ManagedSearchRows? previous,
-        ConditionalWeakTable<object, TerminalRow> storage, TerminalSearchChangeToken changes)
+        ConditionalWeakTable<object, TerminalRow> storage, TerminalSearchChangeToken changes, int unchangedPrefix)
     {
         int count = screen.TotalRows;
         int blockCount = (int)(((long)count + BlockSize - 1) / BlockSize);
         bool sameShape = previous is not null && previous._offset == 0 && previous.Length == count;
         TerminalRow[][]? blocks = sameShape ? null : new TerminalRow[blockCount][];
-        for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        // Whole history blocks remain in the previous outer array (or its lazy
+        // clone). At most one boundary block joins the active-window comparison.
+        int firstBlock = sameShape ? Math.Clamp(unchangedPrefix, 0, count) / BlockSize : 0;
+        for (int blockIndex = firstBlock; blockIndex < blockCount; blockIndex++)
         {
             int start = blockIndex * BlockSize;
             int length = Math.Min(BlockSize, count - start);
@@ -55,7 +58,7 @@ internal sealed class ManagedSearchRows
                 while (same < length)
                 {
                     TerminalRow live = screen.GetRow(start + same);
-                    live.TrackSearchChanges(changes);
+                    live.TrackSearchChanges(changes, start + same < changes.ActiveStart);
                     if (!live.HasSameSearchContent(oldBlock[same])) break;
                     same++;
                 }
@@ -71,7 +74,7 @@ internal sealed class ManagedSearchRows
             {
                 int index = start + offset;
                 TerminalRow live = screen.GetRow(index);
-                live.TrackSearchChanges(changes);
+                live.TrackSearchChanges(changes, index < changes.ActiveStart);
                 TerminalRow? frozen = previous is not null && index < previous.Length ? previous[index] : null;
                 if (frozen is null || !live.HasSameSearchContent(frozen))
                 {

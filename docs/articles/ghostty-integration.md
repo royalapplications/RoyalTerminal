@@ -318,12 +318,17 @@ cell-storage swaps and structural row-buffer changes invalidate it independently
 of renderer dirty acknowledgments. Read-only access, unchanged layout setters
 and semantic-only row metadata do not invalidate search.
 
-Changed captures still check exact cell-storage and layout identities across
-all rows, reuse immutable 64-row reference blocks and maintain the weak storage
-cache. That path remains O(history rows); this change does not claim constant-time
-active-output capture. Conservative invalidations may publish a new capture
-with the same row blocks. A stamp never changes after publication, so one search
-consumer cannot advance another consumer's view.
+For active-only edits since the latest successful capture, row observation also
+proves that the history prefix is unchanged. Capture skips its whole 64-row
+reference blocks and compares only the active rows plus at most 63 boundary
+rows, retaining the weak storage cache. Changed captures still clone the outer
+block-reference array when needed: this is O(history blocks + active rows), not
+constant-time capture. Direct history edits, structural changes, lost observers
+and stale consumers fall back to exact O(total rows) storage/layout comparison.
+Conservative invalidations may publish a new capture with the same row blocks.
+A stamp never changes after publication, so one search consumer cannot advance
+another consumer's view; the dirty scope is acknowledged only after allocation
+of the complete new capture succeeds.
 
 Tokens contain no owner references and are not copied into COW row wrappers.
 Snapshots therefore do not retain live screens/history through their observer.
@@ -332,6 +337,15 @@ capture reattaches even rows in unchanged blocks. Retired rows can conservativel
 invalidate a former owner without retaining it. Revision saturation permanently
 disables the shortcut rather than risking stale equality after rollover. The
 existing screen-lock/no-retained-writable-cell-reference contract is unchanged.
+
+Active/history membership uses a spare row-metadata bit, not another per-row
+object or index. A wrapper present in both regions is always treated as history.
+Structural edits or a different active-window boundary replace the token and
+rebind membership, so recycled history rows become active without retaining a
+permanent full-scan penalty. This rebuild is lazy and happens once at the next
+capture, not per added/removed row. Viewport scrolling does not change which
+terminal rows are mutable. Wrapped and hard-break matches across the retained
+history boundary continue through the existing KMP checkpoints.
 
 [Ghostty search](https://github.com/ghostty-org/ghostty/pull/14097) retains history
 work, gates active search on content dirtiness and tracks screen generations.
@@ -343,9 +357,12 @@ or xterm.js's event/timeout cache.
 
 New cases cover row/structure mutations, aliased wrappers, independent COW
 owners/consumers, adoption, both sides of storage swaps, renderer acknowledgment,
-screen/viewport transitions, slices, saturation and weak ownership. These cases
+screen/viewport transitions, slices, saturation and weak ownership. Active-window
+cases add direct-history fallbacks, boundary blocks, both-region aliases, recycled
+membership, stale-consumer capture and cross-boundary search equivalence. These cases
 and `--managed-search-capture` are authored but unrun. The benchmark separates
-idle, tail edits, wrap changes and scrolling at 1,024/16,384 rows, plus a paired
+idle, first/last active-row edits, history edits, wrap changes and scrolling at
+1,024/16,384 rows, plus a paired
 observed/unobserved write loop to quantify notification overhead. Before/after
 profiling, allocation measurements and all validation remain deferred; no
 measured speedup is claimed.

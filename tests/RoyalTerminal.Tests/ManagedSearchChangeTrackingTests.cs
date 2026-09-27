@@ -16,22 +16,35 @@ namespace RoyalTerminal.Tests;
 public sealed class ManagedSearchChangeTrackingTests
 {
     [Theory]
-    [InlineData("indexer")]
-    [InlineData("span")]
-    [InlineData("shrink")]
-    [InlineData("grow")]
-    [InlineData("clear")]
-    [InlineData("copy")]
-    [InlineData("copy-active")]
-    [InlineData("clear-preserved")]
-    [InlineData("swap")]
-    [InlineData("wrap")]
-    [InlineData("continuation")]
-    [InlineData("colors")]
-    public void EveryRowMutationInvalidatesCaptureWithoutChangingRetainedCells(string mutation)
+    [InlineData("indexer", true)]
+    [InlineData("indexer", false)]
+    [InlineData("span", true)]
+    [InlineData("span", false)]
+    [InlineData("shrink", true)]
+    [InlineData("shrink", false)]
+    [InlineData("grow", true)]
+    [InlineData("grow", false)]
+    [InlineData("clear", true)]
+    [InlineData("clear", false)]
+    [InlineData("copy", true)]
+    [InlineData("copy", false)]
+    [InlineData("copy-active", true)]
+    [InlineData("copy-active", false)]
+    [InlineData("clear-preserved", true)]
+    [InlineData("clear-preserved", false)]
+    [InlineData("swap", true)]
+    [InlineData("swap", false)]
+    [InlineData("wrap", true)]
+    [InlineData("wrap", false)]
+    [InlineData("continuation", true)]
+    [InlineData("continuation", false)]
+    [InlineData("colors", true)]
+    [InlineData("colors", false)]
+    public void EveryRowMutationInvalidatesCaptureWithoutChangingRetainedCells(string mutation, bool history)
     {
         TerminalScreen screen = Screen();
-        TerminalRow row = screen.GetRow(64);
+        int index = history ? 64 : 128;
+        TerminalRow row = screen.GetRow(index);
         row[0] = new() { Codepoint = 'a', Width = 1 };
         TerminalRow source = new(8);
         source[0] = new() { Codepoint = 'z', Width = 1 };
@@ -58,15 +71,16 @@ public sealed class ManagedSearchChangeTrackingTests
 
         row.IsDirty = false;
         Assert.False(changes.Matches(revision));
+        Assert.Equal(history ? 0 : 126, changes.UnchangedHistoryPrefix(revision));
         ManagedSearchSnapshot after = ManagedSearchSnapshot.Capture(screen, before);
         Assert.NotSame(before, after);
-        Assert.NotSame(before.Rows[64], after.Rows[64]);
+        Assert.NotSame(before.Rows[index], after.Rows[index]);
         Assert.Same(before.Rows[0], after.Rows[0]);
-        Assert.True(row.HasSameSearchContent(after.Rows[64]));
-        Assert.Equal((int)'a', before.Rows[64].ReadOnlyCells[0].Codepoint);
-        Assert.Equal(8, before.Rows[64].Columns);
-        Assert.False(before.Rows[64].WrapsToNext);
-        Assert.False(before.Rows[64].IsWrapContinuation);
+        Assert.True(row.HasSameSearchContent(after.Rows[index]));
+        Assert.Equal((int)'a', before.Rows[index].ReadOnlyCells[0].Codepoint);
+        Assert.Equal(8, before.Rows[index].Columns);
+        Assert.False(before.Rows[index].WrapsToNext);
+        Assert.False(before.Rows[index].IsWrapContinuation);
         Assert.Same(after, ManagedSearchSnapshot.Capture(screen, after));
     }
 
@@ -113,6 +127,7 @@ public sealed class ManagedSearchChangeTrackingTests
         Assert.Same(after, ManagedSearchSnapshot.Capture(screen, after));
         if (mutation is "add" or "add-range" or "prepend" or "replace")
         {
+            changes = rows.GetSearchChangeToken();
             revision = changes.Revision;
             added[0] = new() { Codepoint = 'x', Width = 1 };
             Assert.False(changes.Matches(revision));
