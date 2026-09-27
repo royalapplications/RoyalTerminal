@@ -25,7 +25,7 @@ public sealed partial class BasicVtProcessor
         private readonly TerminalScreen _screen = owner._screen;
         private readonly RenderHoldState? _hold = owner._renderHold;
         private readonly ManagedKittyGraphicsStore _kitty = owner._kittyStore;
-        private readonly HashSet<int> _tabs = owner._tabStops;
+        private readonly ManagedTabStops _tabs = owner._tabStops;
         private readonly int _tabColumns = owner._tabStopColumns;
         private readonly (int Column, int Row, bool Wrap) _cursor = (owner._cursorCol, owner._cursorRow, owner._delayedWrap);
         private readonly (int Column, int Row, bool Wrap) _primary = (owner._savedMainCursorCol, owner._savedMainCursorRow, owner._savedMainDelayedWrap);

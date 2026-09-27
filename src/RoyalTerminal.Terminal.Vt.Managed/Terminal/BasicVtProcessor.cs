@@ -157,7 +157,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private readonly ManagedMouseEncoder _mouseEncoder = new();
 
     // Tab stops
-    private HashSet<int> _tabStops = [];
+    private ManagedTabStops _tabStops = null!; // Initialized with screen geometry by the constructor.
 
     // UTF-8 multi-byte decoding state
     private int _utf8Codepoint;
@@ -405,10 +405,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void InitTabStops()
     {
+        if (_tabStops is null || _tabStops.Columns != _screen.Columns)
+            _tabStops = new(_screen.Columns);
+        _tabStops.ResetDefaults();
         _tabStopColumns = _screen.Columns;
-        _tabStops.Clear();
-        for (var i = 0; i < _screen.Columns; i += 8)
-            _tabStops.Add(i);
     }
 
     /// <summary>
@@ -965,17 +965,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void AppendTabstopSnapshot(StringBuilder builder)
     {
         builder.Append("\x1b[3g");
-        if (_tabStops.Count == 0)
+        int tabStop = _tabStops.FindNext(0, _screen.Columns - 1);
+        if (tabStop < 0)
         {
             return;
         }
 
-        int[] orderedTabStops = new int[_tabStops.Count];
-        _tabStops.CopyTo(orderedTabStops);
-        Array.Sort(orderedTabStops);
-        for (int i = 0; i < orderedTabStops.Length; i++)
+        for (; tabStop >= 0; tabStop = _tabStops.FindNext(tabStop + 1, _screen.Columns - 1))
         {
-            int tabStop = orderedTabStops[i];
             builder.Append("\x1b[")
                 .Append(tabStop + 1)
                 .Append('G')
@@ -1139,7 +1136,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'\t': // HT — Horizontal Tab
-                ResetDelayedWrap();
                 TabForward();
                 break;
 
@@ -1651,15 +1647,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void TabForward()
     {
         if (_cursorCol >= RightMargin) return;
-        for (var c = _cursorCol + 1; c <= RightMargin; c++)
-        {
-            if (_tabStops.Contains(c))
-            {
-                _cursorCol = c;
-                return;
-            }
-        }
-        _cursorCol = RightMargin;
+        int next = _tabStops.FindNext(_cursorCol + 1, RightMargin);
+        _cursorCol = next >= 0 ? next : RightMargin;
     }
 
     #endregion
@@ -3145,6 +3134,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // DEC private mode families: CSI ? ...
         if (_csiPrivateMarker == '?')
         {
+            if (finalByte == 'W')
+            {
+                if (_params.Count == 1 && p0 == 5) _tabStops.ResetDefaults();
+                return;
+            }
             if (finalByte is 's' or 'r')
             {
                 SaveOrRestoreDecModes(restore: finalByte == 'r');
@@ -3397,10 +3391,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'g': // TBC — Tab Clear
+                if (_params.Count > 1) break;
                 if (p0 == 0)
                     _tabStops.Remove(_cursorCol);
                 else if (p0 == 3)
                     _tabStops.Clear();
+                break;
+
+            case 'W': // CTC — Cursor Tabulation Control (Ghostty's single-parameter subset)
+                if (_params.Count > 1) break;
+                if (p0 == 0) _tabStops.Add(_cursorCol);
+                else if (p0 == 2) _tabStops.Remove(_cursorCol);
+                else if (p0 == 5) _tabStops.Clear();
                 break;
 
             case 'n': // DSR — Device Status Report
@@ -3473,23 +3475,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 for (var n = 0; n < count; n++)
                 {
                     if (_cursorCol <= left) break;
-                    var found = false;
-                    for (var c = _cursorCol - 1; c >= left; c--)
-                    {
-                        if (_tabStops.Contains(c))
-                        {
-                            _cursorCol = c;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) _cursorCol = left;
+                    int previous = _tabStops.FindPrevious(_cursorCol - 1, left);
+                    _cursorCol = previous >= 0 ? previous : left;
                 }
                 break;
             }
 
             case 'I': // CHT — Cursor Horizontal Forward Tabulation
-                for (var n = 0; n < Math.Max(1, p0); n++)
+                for (var n = 0; n < Math.Max(1, p0) && _cursorCol < RightMargin; n++)
                     TabForward();
                 break;
 
@@ -3514,12 +3507,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'f': // HVP
             case 'X': // ECH
             case '@': // ICH
-            case 'Z': // CBT
-            case 'I': // CHT
             case 'd': // VPA
             case 'e': // VPR
             case 'a': // HPR
-            case 'g': // TBC
             case 'r': // DECSTBM
                 ResetDelayedWrap();
                 break;
@@ -4881,9 +4871,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _screen.SynchronizeSnapshotScrollbackQuota(_publishedScreen.SnapshotScrollbackQuota);
             _kittyStore = _kittyStore.CreateStateCopy();
             // Width changes reset tab stops. Reserve the replacement once;
-            // keep custom stops and their existing set on height-only resizes.
+            // keep custom stops and their existing bitmap on height-only resizes.
             if (_tabStopColumns != columns && (notifyOnly || columns != _screen.Columns || rows != _screen.ViewportRows))
-                _tabStops = new((Math.Max(columns, _screen.Columns) - 1) / 8 + 1);
+                _tabStops = new(columns);
             ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Staged);
             if (reportSize) UpdateReportCellSize(columns, rows, widthPx, heightPx);
             _widthPx = widthPx;

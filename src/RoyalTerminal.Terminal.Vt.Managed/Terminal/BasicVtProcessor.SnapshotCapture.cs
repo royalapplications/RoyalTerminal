@@ -80,10 +80,13 @@ public sealed partial class BasicVtProcessor
         BinaryPrimitives.WriteUInt64LittleEndian(header[87..], quota?.MaximumBytes ?? ulong.MaxValue);
         BinaryPrimitives.WriteUInt64LittleEndian(header[95..], quota is null ? (ulong)_screen.ScrollbackLimit : quota.MaximumRows ?? ulong.MaxValue);
         output.Write(header);
-        byte[] tabs = new byte[(_screen.Columns + 7) / 8];
-        foreach (int stop in _tabStops)
-            if ((uint)stop < (uint)_screen.Columns) tabs[stop / 8] |= (byte)(1 << (stop % 8));
-        output.Write(tabs);
+        Span<byte> tabs = stackalloc byte[64];
+        for (int offset = 0; offset < _tabStops.PackedByteLength; offset += tabs.Length)
+        {
+            int length = Math.Min(tabs.Length, _tabStops.PackedByteLength - offset);
+            _tabStops.CopyPackedBytes(offset, tabs[..length]);
+            output.Write(tabs[..length]);
+        }
         Span<byte> rgb = stackalloc byte[3];
         for (int i = 0; i < 256; i++) { Rgb(rgb, _colors.GetOriginalPalette(i)); output.Write(rgb); }
         Span<byte> mask = stackalloc byte[32]; mask.Clear();

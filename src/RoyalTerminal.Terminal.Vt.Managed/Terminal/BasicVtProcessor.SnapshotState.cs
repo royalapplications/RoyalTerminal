@@ -56,13 +56,7 @@ public sealed partial class BasicVtProcessor
         if (_screen.Columns != header.Columns || _screen.ViewportRows != header.Rows ||
             _screen.AlternateBufferActive != (header.ActiveScreenKey == 1))
             throw new InvalidOperationException("Snapshot processor geometry must match its staged screen.");
-        int tabCount = 0;
-        for (int column = 0; column < header.Columns; column++)
-            if (terminal.IsTabStop(column)) tabCount++;
-        _tabStops.EnsureCapacity(tabCount);
-        _tabStops.Clear();
-        for (int column = 0; column < header.Columns; column++)
-            if (terminal.IsTabStop(column)) _tabStops.Add(column);
+        _tabStops.LoadPacked(terminal.TabStops);
         _tabStopColumns = header.Columns;
         _widthPx = header.PixelWidth;
         _heightPx = header.PixelHeight;

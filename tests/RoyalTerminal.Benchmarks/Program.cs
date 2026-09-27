@@ -71,6 +71,12 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-tabstops", StringComparer.Ordinal))
+{
+    ManagedTabStopsBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-mode-state", StringComparer.Ordinal))
 {
     ManagedModeStateBenchmark.Run();

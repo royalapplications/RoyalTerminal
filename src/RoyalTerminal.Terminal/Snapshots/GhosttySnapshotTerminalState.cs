@@ -30,6 +30,7 @@ internal sealed class GhosttySnapshotTerminalState
     }
 
     internal GhosttySnapshotTerminalHeader Header { get; }
+    internal ReadOnlySpan<byte> TabStops => _variableState.AsSpan(0, (Header.Columns + 7) / 8);
     internal ReadOnlySpan<byte> Pwd => _variableState.AsSpan(_pwdOffset, _pwdLength);
     internal ReadOnlySpan<byte> Title => _variableState.AsSpan(_titleOffset);
 

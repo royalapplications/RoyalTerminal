@@ -448,6 +448,45 @@ also includes mode-churn and grapheme-mode workloads for actual processor costs.
 Tests, before/after profiling and CI inspection remain deferred to final validation;
 neither a measured throughput gain nor a whole-terminal heap reduction is claimed.
 
+## Managed tabstop storage and controls
+
+Managed tab stops now use one bit per column, with 512 columns stored inline in
+the owning object and additional storage rounded to 64-bit words. There is no
+separate array for ordinary widths. Forward/backward navigation skips empty
+words with bit scans; repeated forward tabulation stops at the right margin.
+Styled VT export enumerates stops in order without allocating and sorting an
+integer array. Binary export uses bounded 64-byte stack scratch instead of a
+new bitmap; restore imports the packed little-endian words directly.
+
+This ports the compact-storage principle of
+[Ghostty #13600](https://github.com/ghostty-org/ghostty/pull/13600)
+and preserves idempotent clear behavior from
+[Ghostty #13900](https://github.com/ghostty-org/ghostty/pull/13900).
+The comparison also closes missing CTC commands (`CSI W`, `CSI 0/2/5 W`) and
+DECST8C (`CSI ? 5 W`). Defaults now match pinned Ghostty's bitmap exactly:
+every eighth column, excluding zero-based column zero and the final column.
+Explicit stops at either endpoint remain legal. HT, CHT, CBT and tab-clear/set
+commands preserve pending wrap, as in Ghostty's terminal/stream handler.
+
+[Windows Terminal's tab dispatch](https://github.com/microsoft/terminal/blob/main/src/terminal/adapter/adaptDispatch.cpp)
+uses column storage and
+[xterm.js's buffer](https://github.com/xtermjs/xterm.js/blob/master/src/common/buffer/Buffer.ts)
+uses a sparse object with scalar navigation. Their edge-clamping behavior was
+compared; RoyalTerminal follows Ghostty for default endpoint bits and strict
+CTC/DECST8C parameters rather than combining differing behaviors. Width changes
+stage a replacement bitmap and reset defaults only on successful resize;
+height-only resize retains custom stops. Existing snapshot bytes, including
+explicit endpoint stops, remain accepted.
+
+Focused cases cover word/inline/tail boundaries, exact packed round trips,
+bounded navigation against a scalar reference, malformed controls, pending
+wrap, margins, both snapshot formats, resize rollback and native differentials.
+`--managed-tabstops` compares hash-set and packed creation, sparse forward/backward
+navigation, ordered export and bitmap export at 80/512/521/4096 columns. The
+expected gains are smaller storage, fewer lookup operations and removal of
+temporary export arrays; no measured speedup is claimed. Tests, before/after
+profiling and CI execution/inspection remain deferred to final validation.
+
 ## Managed search capture invalidation
 
 The search-only COW capture now has a lazy, buffer-specific change token. An
