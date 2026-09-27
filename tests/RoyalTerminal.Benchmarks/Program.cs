@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--kitty-delete", StringComparer.Ordinal))
+{
+    KittyDeletionBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--hyperlink-collection", StringComparer.Ordinal))
 {
     HyperlinkCollectionBenchmark.Run();

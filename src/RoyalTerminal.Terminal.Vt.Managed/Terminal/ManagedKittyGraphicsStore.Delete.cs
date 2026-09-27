@@ -11,18 +11,18 @@ internal sealed partial class ManagedKittyGraphicsStore
     {
         bool changed = DeleteVisible(screen, cellWidth, cellHeight, deleteUnused: true);
         // Unlike protocol d=A, ED2 also discards images that had no placements.
-        foreach (Image image in _images.Values)
-            if (image.PlacementCount == 0) changed |= RemoveImage(screen, image.Id);
+        foreach ((uint id, Image _) in _images) changed |= DeleteIfUnused(id);
         return changed;
     }
 
     internal bool DeleteById(TerminalScreen screen, uint imageId, uint placementId, bool deleteUnused)
     {
         if (imageId == 0 || !_images.ContainsKey(imageId)) return false;
-        bool changed = DeleteMatchingPlacements(screen, (key, _) => key.ImageId == imageId &&
-            (placementId == 0 || !key.Internal && key.Id == placementId), deleteUnused);
-        if (deleteUnused && (placementId == 0 || changed))
-            changed |= DeleteIfUnused(screen, imageId);
+        bool matched = placementId == 0 || _placements.ContainsKey(new(imageId, placementId, false));
+        bool changed = DeleteMatchingPlacements(screen,
+            new(DeleteKind.Id, ImageId: imageId, PlacementId: placementId), deleteUnused);
+        if (deleteUnused && matched)
+            changed |= DeleteIfUnused(imageId);
         return changed;
     }
 
@@ -30,83 +30,103 @@ internal sealed partial class ManagedKittyGraphicsStore
     {
         if (last == 0 || first > last) return false;
         bool changed = DeleteMatchingPlacements(screen,
-            (key, _) => key.ImageId >= first && key.ImageId <= last, deleteUnused);
+            new(DeleteKind.Range, ImageId: first, LastImageId: last), deleteUnused);
         if (!deleteUnused) return changed;
-        List<uint> unused = [];
-        foreach (Image image in _images.Values)
-            if (image.Id >= first && image.Id <= last && image.PlacementCount == 0) unused.Add(image.Id);
-        foreach (uint id in unused) changed |= RemoveImage(screen, id);
+        foreach ((uint id, Image _) in _images)
+            if (id >= first && id <= last) changed |= DeleteIfUnused(id);
         return changed;
     }
 
     internal bool DeleteByZ(TerminalScreen screen, int z, bool deleteUnused)
         => DeleteMatchingPlacements(screen,
-            (_, placement) => !placement.Virtual && placement.Options.Z == z, deleteUnused);
+            new(DeleteKind.Z, Z: z), deleteUnused);
 
     internal bool DeleteAtCell(TerminalScreen screen, int column, int row,
         int? z, uint cellWidth, uint cellHeight, bool deleteUnused)
         => column >= 0 && column < screen.Columns && row >= 0 && row < screen.ViewportRows &&
-        DeleteMatchingPlacements(screen, (key, placement) =>
-        {
-            if (z is int layer && placement.Options.Z != layer) return false;
-            return TryGetCellRect(screen, key, placement, cellWidth, cellHeight,
-                out long left, out long top, out long right, out long bottom) &&
-                column >= left && column < right && row >= top && row < bottom;
-        }, deleteUnused);
+        DeleteMatchingPlacements(screen, new(DeleteKind.Cell, Column: column, Row: row,
+            Z: z, CellWidth: cellWidth, CellHeight: cellHeight), deleteUnused);
 
     internal bool DeleteByColumn(TerminalScreen screen, int column,
         uint cellWidth, uint cellHeight, bool deleteUnused)
-        => DeleteMatchingPlacements(screen, (key, placement) =>
-            TryGetCellRect(screen, key, placement, cellWidth, cellHeight,
-                out long left, out _, out long right, out _) &&
-            column >= left && column < right, deleteUnused);
+        => DeleteMatchingPlacements(screen, new(DeleteKind.Column, Column: column,
+            CellWidth: cellWidth, CellHeight: cellHeight), deleteUnused);
 
     internal bool DeleteByRow(TerminalScreen screen, int row,
         uint cellWidth, uint cellHeight, bool deleteUnused)
-        => row >= 0 && row < screen.ViewportRows && DeleteMatchingPlacements(screen, (key, placement) =>
-            TryGetCellRect(screen, key, placement, cellWidth, cellHeight,
-                out _, out long top, out _, out long bottom) &&
-            row >= top && row < bottom, deleteUnused);
+        => row >= 0 && row < screen.ViewportRows && DeleteMatchingPlacements(screen,
+            new(DeleteKind.Row, Row: row, CellWidth: cellWidth, CellHeight: cellHeight), deleteUnused);
 
     internal bool DeleteVisible(TerminalScreen screen, uint cellWidth, uint cellHeight, bool deleteUnused)
-        => DeleteMatchingPlacements(screen, (key, placement) =>
-        {
-            if (placement.Anchor is not TerminalScreenAnchor anchor ||
-                !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin)) return false;
-            int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
-            if (origin.Row >= activeTop + screen.ViewportRows) return false;
-            // Ghostty selects every active-area pin, including an empty crop.
-            if (origin.Row >= activeTop) return true;
-            // A placement anchored in history can still reach into the active viewport.
-            if (!_images.TryGetValue(key.ImageId, out Image? image)) return false;
-            ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
-                (uint)image.Animation.Width, (uint)image.Animation.Height,
-                cellWidth, cellHeight);
-            return geometry.Columns > 0 && geometry.Rows > 0 && origin.Row + (long)geometry.Rows > activeTop;
-        }, deleteUnused);
+        => DeleteMatchingPlacements(screen,
+            new(DeleteKind.Visible, CellWidth: cellWidth, CellHeight: cellHeight), deleteUnused);
 
     private bool DeleteMatchingPlacements(TerminalScreen screen,
-        Func<PlacementKey, Placement, bool> predicate, bool deleteUnused)
+        in DeleteFilter filter, bool deleteUnused)
     {
-        List<PlacementKey> selected = [];
-        HashSet<uint>? candidates = deleteUnused ? [] : null;
-        if (candidates is not null)
-            foreach (Image image in _images.Values)
-                if (image.PlacementCount > 0) candidates.Add(image.Id);
+        // Dictionary.Remove preserves its active enumerator on our target
+        // runtimes. Like Ghostty, delete matching entries in place, then reap
+        // relative descendants. No selection lists, closures or fallible growth
+        // are needed before OR after mutation starts.
+        bool changed = false;
         foreach ((PlacementKey key, Placement placement) in _placements)
-            if (predicate(key, placement)) selected.Add(key);
-        foreach (PlacementKey key in selected) RemovePlacement(screen, key);
-        RemoveOrphans(screen);
-        bool changed = selected.Count > 0;
-        if (candidates is not null)
-            foreach (uint id in candidates)
-                changed |= DeleteIfUnused(screen, id);
-        return changed;
+        {
+            if (!MatchesDelete(screen, key, placement, filter)) continue;
+            changed |= RemovePlacement(screen, key);
+            if (deleteUnused) changed |= DeleteIfUnused(key.ImageId);
+        }
+        return RemoveOrphans(screen, deleteUnused) || changed;
     }
 
-    private bool DeleteIfUnused(TerminalScreen screen, uint id)
-        => _images.TryGetValue(id, out Image? image) && image.PlacementCount == 0 &&
-           RemoveImage(screen, id);
+    private bool DeleteIfUnused(uint id)
+    {
+        if (!_images.TryGetValue(id, out Image? image) || image.PlacementCount != 0) return false;
+        _images.Remove(id);
+        _storedBytes -= image.QuotaBytes;
+        _generation++;
+        // Do not call RemoveImage: it reaps orphans without uppercase deletion
+        // semantics. The owning placement pass must finish before that cascade.
+        return true;
+    }
+
+    private bool MatchesDelete(TerminalScreen screen, PlacementKey key, Placement placement, in DeleteFilter filter)
+    {
+        switch (filter.Kind)
+        {
+            case DeleteKind.Id:
+                return key.ImageId == filter.ImageId && (filter.PlacementId == 0 || !key.Internal && key.Id == filter.PlacementId);
+            case DeleteKind.Range:
+                return key.ImageId >= filter.ImageId && key.ImageId <= filter.LastImageId;
+            case DeleteKind.Z:
+                return !placement.Virtual && placement.Options.Z == filter.Z;
+            case DeleteKind.Visible:
+                if (placement.Anchor is not TerminalScreenAnchor anchor ||
+                    !screen.TryResolveAnchor(anchor, out TerminalGridPosition origin)) return false;
+                int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
+                if (origin.Row >= activeTop + screen.ViewportRows) return false;
+                // Active pins match even with an empty crop. History pins match
+                // only if their cell rectangle extends into the active area.
+                if (origin.Row >= activeTop) return true;
+                if (!_images.TryGetValue(key.ImageId, out Image? image)) return false;
+                ManagedKittyPlacementGeometry geometry = placement.Options.Calculate(
+                    (uint)image.Animation.Width, (uint)image.Animation.Height, filter.CellWidth, filter.CellHeight);
+                return geometry.Columns > 0 && geometry.Rows > 0 && origin.Row + (long)geometry.Rows > activeTop;
+        }
+        if (filter.Z is int z && placement.Options.Z != z) return false;
+        if (!TryGetCellRect(screen, key, placement, filter.CellWidth, filter.CellHeight,
+                out long left, out long top, out long right, out long bottom)) return false;
+        return filter.Kind switch
+        {
+            DeleteKind.Cell => filter.Column >= left && filter.Column < right && filter.Row >= top && filter.Row < bottom,
+            DeleteKind.Column => filter.Column >= left && filter.Column < right,
+            DeleteKind.Row => filter.Row >= top && filter.Row < bottom,
+            _ => false,
+        };
+    }
+
+    private enum DeleteKind : byte { Id, Range, Z, Cell, Column, Row, Visible }
+    private readonly record struct DeleteFilter(DeleteKind Kind, uint ImageId = 0, uint PlacementId = 0,
+        uint LastImageId = 0, int Column = 0, int Row = 0, int? Z = null, uint CellWidth = 0, uint CellHeight = 0);
 
     private bool TryGetCellRect(TerminalScreen screen, PlacementKey key, Placement placement,
         uint cellWidth, uint cellHeight, out long left, out long top, out long right, out long bottom)

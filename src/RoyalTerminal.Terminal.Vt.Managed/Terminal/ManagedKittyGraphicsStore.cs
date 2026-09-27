@@ -240,15 +240,22 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         RemoveOrphans(screen);
     }
 
-    internal void RemoveOrphans(TerminalScreen screen)
+    internal bool RemoveOrphans(TerminalScreen screen, bool deleteUnused = false)
     {
+        bool changed = false;
         bool removed;
         do
         {
             removed = false;
             foreach ((PlacementKey key, Placement placement) in _placements)
-                if (placement.Parent is PlacementKey parent && !_placements.ContainsKey(parent)) removed |= RemovePlacement(screen, key);
+                if (placement.Parent is PlacementKey parent && !_placements.ContainsKey(parent))
+                {
+                    removed |= RemovePlacement(screen, key);
+                    if (deleteUnused) DeleteIfUnused(key.ImageId);
+                }
+            changed |= removed;
         } while (removed);
+        return changed;
     }
 
     internal bool TryResolveRoot(TerminalScreen screen, Placement placement, out Placement? root, out long horizontalOffset, out long verticalOffset)
