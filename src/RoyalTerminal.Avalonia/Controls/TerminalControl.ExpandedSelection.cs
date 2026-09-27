@@ -7,15 +7,15 @@ namespace RoyalTerminal.Avalonia.Controls;
 
 public partial class TerminalControl
 {
-    internal bool TryReadExpandedWordSelection(out string? text)
+    internal bool TryReadExpandedSelection(out string? text)
     {
         text = null;
-        if (_screen is null || !_hasAnchoredSelection || _mouseSelectionGranularity != MouseSelectionGranularity.Word ||
+        if (_screen is null || !_hasAnchoredSelection || _mouseSelectionGranularity == MouseSelectionGranularity.Character ||
             _renderer is null || _renderer.SelectionIsRectangle || _selectionAnchorSpans.Length == 0 ||
             _vtProcessor is not ITerminalBufferSelectionExportSource source) return false;
         lock (_screen.SyncRoot)
         {
-            // Expanded word spans are ordered, contiguous buffer rows. Use their
+            // Expanded word/line spans are ordered, contiguous buffer rows. Use their
             // absolute endpoints instead of the renderer's clipped visible spans.
             var first = _selectionAnchorSpans[0];
             var last = _selectionAnchorSpans[^1];

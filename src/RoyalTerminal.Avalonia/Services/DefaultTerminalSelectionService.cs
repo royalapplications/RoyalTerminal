@@ -30,9 +30,9 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         string? text = null;
         bool usedRendererSelection = false;
 
-        if (owner is TerminalControl control && control.TryReadExpandedWordSelection(out text))
+        if (owner is TerminalControl control && control.TryReadExpandedSelection(out text))
         {
-            // Visible highlight spans are clipped. A word may start or end in
+            // Visible highlight spans are clipped. A word/line may start or end in
             // off-viewport history owned only by the processor (native VT).
             usedRendererSelection = true;
         }

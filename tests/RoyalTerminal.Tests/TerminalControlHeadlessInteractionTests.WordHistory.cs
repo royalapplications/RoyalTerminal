@@ -16,12 +16,16 @@ namespace RoyalTerminal.Tests;
 public sealed partial class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaTheory]
-    [InlineData(VtProcessorPreference.Managed, false)]
-    [InlineData(VtProcessorPreference.Managed, true)]
-    [InlineData(VtProcessorPreference.Native, false)]
-    [InlineData(VtProcessorPreference.Native, true)]
-    public async Task Headless_WordHistory_SelectsAndCopiesBeyondBothViewportEdges(
-        VtProcessorPreference preference, bool atTop)
+    [InlineData(VtProcessorPreference.Managed, false, 2)]
+    [InlineData(VtProcessorPreference.Managed, true, 2)]
+    [InlineData(VtProcessorPreference.Native, false, 2)]
+    [InlineData(VtProcessorPreference.Native, true, 2)]
+    [InlineData(VtProcessorPreference.Managed, false, 3)]
+    [InlineData(VtProcessorPreference.Managed, true, 3)]
+    [InlineData(VtProcessorPreference.Native, false, 3)]
+    [InlineData(VtProcessorPreference.Native, true, 3)]
+    public async Task Headless_ExpandedHistory_SelectsAndCopiesBeyondBothViewportEdges(
+        VtProcessorPreference preference, bool atTop, int clickCount)
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable())
             Assert.Skip("Native unavailable; rebuild required before final validation.");
@@ -38,13 +42,13 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             else control.ScrollToBottom();
             Dispatcher.UIThread.RunJobs();
             Point point = await GetCellInteractionPointAsync(control, window, 2, 1);
-            RaiseMousePressReleaseSequence(control, window, point, clickCount: 2);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount);
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal((0, atTop ? 0 : -3), control.Renderer!.SelectionStart!.Value);
             Assert.Equal((columns, atTop ? rows + 2 : rows - 1), control.Renderer.SelectionEnd!.Value);
             Assert.Equal(rows, control.Renderer.GetSelectionSpans().Length);
-            Assert.True(control.TryReadExpandedWordSelection(out string? selected));
+            Assert.True(control.TryReadExpandedSelection(out string? selected));
             Assert.Equal(word, selected);
             await control.CopySelectionAsync();
             Assert.Equal(word, await window.Clipboard!.TryGetTextAsync());
@@ -57,7 +61,33 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             await control.CopySelectionAsync();
             Assert.Equal(word, await window.Clipboard!.TryGetTextAsync());
             control.ClearSelection();
-            Assert.False(control.TryReadExpandedWordSelection(out _));
+            Assert.False(control.TryReadExpandedSelection(out _));
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_TripleClick_TrimsWhitespaceAndHonorsPromptBoundaries(
+        VtProcessorPreference preference, bool semantic)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) Assert.Skip("Native unavailable.");
+        string input = semantic ? "\u001b]133;A\a$ \u001b]133;B\acmd\u001b]133;C\a out" : "  one two  ";
+        TerminalControl control = await CreateTextSelectionControlAsync(input, preference);
+        Window window = Assert.IsType<Window>(TopLevel.GetTopLevel(control));
+        try
+        {
+            Assert.Equal(preference == VtProcessorPreference.Native, control.IsUsingNativeVtProcessor);
+            Point point = await GetCellInteractionPointAsync(control, window, 3, 0);
+            RaiseMousePressReleaseSequence(control, window, point, clickCount: 3);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal((2, 0), control.Renderer!.SelectionStart!.Value);
+            Assert.Equal((semantic ? 5 : 9, 0), control.Renderer.SelectionEnd!.Value);
+            await control.CopySelectionAsync();
+            Assert.Equal(semantic ? "cmd" : "one two", await window.Clipboard!.TryGetTextAsync());
         }
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }

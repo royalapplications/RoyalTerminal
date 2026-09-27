@@ -700,6 +700,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     private TerminalHighlightSpan[]? _selectionViewportSpansSource;
     private SkiaTerminalRenderer? _selectionViewportSpansRenderer;
     private int _selectionViewportSpansTopRow = int.MinValue;
+    private int _selectionViewportSpansRows = -1;
     private Point _lastSelectionPointerPoint;
     private KeyModifiers _lastSelectionKeyModifiers;
     private bool _leftPointerDown;
@@ -3851,7 +3852,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         lock (_screen.SyncRoot)
         {
             activeExtent = granularity == MouseSelectionGranularity.Line
-                ? ResolveLogicalLineExtentLocked(absoluteRow, topRow)
+                ? ResolveLogicalLineExtentLocked(column, absoluteRow, topRow)
                 : ResolveWordExtentLocked(column, absoluteRow, topRow);
         }
 
@@ -3931,10 +3932,20 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             extent.End.Column, topRow + extent.End.Row);
     }
 
-    private SelectionExtent ResolveLogicalLineExtentLocked(int absoluteRow, int topRow)
+    private SelectionExtent ResolveLogicalLineExtentLocked(int column, int absoluteRow, int topRow)
     {
         if (_screen is null)
         {
+            return new SelectionExtent(0, absoluteRow, 1, absoluteRow);
+        }
+
+        if (_vtProcessor is ITerminalLineSelectionSource source)
+        {
+            // Ghostty line semantics: trim edge whitespace, stop at prompt/input/
+            // output boundaries, and include the whole final wide glyph.
+            if (source.TryGetLineExtent(new(Math.Clamp(column, 0, _screen.Columns - 1), absoluteRow),
+                ReadOnlySpan<uint>.Empty, semanticPromptBoundary: true, out TerminalLineExtent line))
+                return new SelectionExtent(line.Start.Column, line.Start.Row, line.End.Column, line.End.Row);
             return new SelectionExtent(0, absoluteRow, 1, absoluteRow);
         }
 
@@ -4022,7 +4033,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return Array.Empty<TerminalHighlightSpan>();
         }
 
-        List<TerminalHighlightSpan> spans = new(rowCount);
+        TerminalHighlightSpan[] spans = new TerminalHighlightSpan[rowCount];
+        int spanCount = 0;
         for (int absoluteRow = startExtent.StartAbsoluteRow; absoluteRow <= endExtent.EndAbsoluteRow; absoluteRow++)
         {
             int startColumn = absoluteRow == startExtent.StartAbsoluteRow ? startExtent.StartColumn : 0;
@@ -4036,14 +4048,16 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
                 continue;
             }
 
-            spans.Add(new TerminalHighlightSpan(
+            spans[spanCount++] = new TerminalHighlightSpan(
                 absoluteRow,
                 startColumn,
                 endColumnExclusive - 1,
-                TerminalHighlightKind.Selection));
+                TerminalHighlightKind.Selection);
         }
 
-        return spans.ToArray();
+        if (spanCount == 0) return Array.Empty<TerminalHighlightSpan>();
+        if (spanCount != spans.Length) Array.Resize(ref spans, spanCount);
+        return spans;
     }
 
     private static int CompareSelectionExtents(SelectionExtent left, SelectionExtent right)
@@ -4168,43 +4182,21 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             return;
         }
 
+        int viewportRows = _screen?.ViewportRows ?? int.MaxValue;
         if (ReferenceEquals(_selectionViewportSpansSource, _selectionAnchorSpans) &&
             ReferenceEquals(_selectionViewportSpansRenderer, _renderer) &&
-            _selectionViewportSpansTopRow == topRow)
+            _selectionViewportSpansTopRow == topRow && _selectionViewportSpansRows == viewportRows)
         {
             return;
         }
 
-        TerminalHighlightSpan[] visibleSpans = new TerminalHighlightSpan[_selectionAnchorSpans.Length];
-        int visibleSpanCount = 0;
-        for (int i = 0; i < _selectionAnchorSpans.Length; i++)
-        {
-            TerminalHighlightSpan span = _selectionAnchorSpans[i];
-            int viewportRow = span.Row - topRow;
-            if (_screen is not null && (viewportRow < 0 || viewportRow >= _screen.ViewportRows))
-            {
-                continue;
-            }
-
-            visibleSpans[visibleSpanCount++] = new TerminalHighlightSpan(
-                viewportRow,
-                span.StartColumn,
-                span.EndColumn,
-                span.Kind);
-        }
-
-        if (visibleSpanCount == 0)
-        {
-            visibleSpans = Array.Empty<TerminalHighlightSpan>();
-        }
-        else if (visibleSpanCount != visibleSpans.Length)
-        {
-            Array.Resize(ref visibleSpans, visibleSpanCount);
-        }
+        TerminalHighlightSpan[] visibleSpans = TerminalSelectionProjection.ProjectViewport(
+            _selectionAnchorSpans, topRow, viewportRows);
 
         _selectionViewportSpansSource = _selectionAnchorSpans;
         _selectionViewportSpansRenderer = _renderer;
         _selectionViewportSpansTopRow = topRow;
+        _selectionViewportSpansRows = viewportRows;
         _renderer.SetSelectionSpans(visibleSpans);
     }
 
@@ -4219,6 +4211,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _selectionViewportSpansSource = null;
         _selectionViewportSpansRenderer = null;
         _selectionViewportSpansTopRow = int.MinValue;
+        _selectionViewportSpansRows = -1;
     }
 
     private TerminalGridPosition[]? CreateSelectionResizeAnchorsLocked(out bool anchorsAreSpans)

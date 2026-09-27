@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--selection-projection", StringComparer.Ordinal))
+{
+    SelectionProjectionBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--font-candidates", StringComparer.Ordinal))
 {
     FontCandidateBenchmark.Run();
