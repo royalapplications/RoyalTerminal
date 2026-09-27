@@ -71,6 +71,12 @@ if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-unknown-apc", StringComparer.Ordinal))
+{
+    ManagedUnknownApcBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-dcs-replies", StringComparer.Ordinal))
 {
     ManagedDcsReplyBenchmark.Run();

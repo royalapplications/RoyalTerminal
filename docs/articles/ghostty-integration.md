@@ -507,6 +507,33 @@ and never reinterpret discarded payload as a new Kitty command. Captured arrays
 are callback-owned; CAN/SUB-aborted unknown commands remain silent. This policy
 is host configuration, not snapshot state.
 
+Unknown capture also follows pinned `apc.zig`'s allocation-failure contract:
+failed growth drops that append, preserves earlier bytes and marks the report
+truncated; later appends may still succeed. A failed final byte-array copy
+reports empty, truncated content. Identification preserves native prefix,
+semicolon/overflow suffix and bulk-payload append boundaries. The four-byte
+identifier is inline, separate from recognized glyph body storage. Capture
+scratch grows only on demand up to the command's frozen quota. Managed scratch
+up to 4096 bytes is reused; larger buffers are released at command boundaries,
+or transferred directly to the callback when exactly filled. Lowering the
+inactive quota trims retained scratch. This bounds idle retention, but can
+increase allocation for repeated, large fragmented captures compared with a
+permanently retained list. Callback/record allocations and arbitrary consumer
+exceptions are not covered by the byte-storage allocation-failure guarantee.
+
+The capture reference remains [Ghostty #13702](https://github.com/ghostty-org/ghostty/pull/13702).
+[xterm.js's APC parser](https://github.com/xtermjs/xterm.js/blob/master/src/common/parser/ApcParser.ts)
+uses registered handlers or incremental fallback and rejects oversized handler
+payloads; Windows Terminal's dispatch does not define this bounded truncated
+raw-capture API. Neither replaces Ghostty's allocation-failure semantics here.
+Thirty-four focused cases cover failure injection, append boundaries, owned
+results, scratch retention, cancellation, identifier storage and glyph-body
+delivery. `--managed-unknown-apc` pairs the former reusable-list capture with
+the bounded owner for six small/full/clipped/fragmented/large workloads. Expected
+benefits are no identifier heap storage, no small scratch regrowth and no idle
+large unknown buffer. Measurements, test execution and CI remain deferred;
+no measured throughput or allocation improvement is claimed.
+
 Managed OSC 9;4 now tracks active progress in the stream-effect layer, including
 when there is no callback. Protocol RIS sends a remove report only while active,
 then disarms the flag before callback delivery, following

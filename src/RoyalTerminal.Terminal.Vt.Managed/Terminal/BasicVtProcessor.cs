@@ -6,6 +6,7 @@
 // scrolling, scroll regions (DECSTBM), alternate screen buffer, DEC private modes,
 // DEC line-drawing character set, erase, insert/delete lines & characters, and tabs.
 
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -107,13 +108,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private char _intermediateChar;
     private readonly List<byte> _oscBuffer = [];
     private readonly List<byte> _dcsBuffer = [];
-    private readonly List<byte> _apcBuffer = [];
+    private readonly List<byte> _apcBuffer = []; // Recognized glyph payload only.
+    private uint _apcIdentifier;
+    private int _apcIdentifierLength;
+    private ManagedUnknownApcCapture _apcUnknownCapture;
     private bool _apcKittyRecognized;
     private ManagedKittyGraphicsParser? _apcKittyParser;
     private bool _glyphProtocolEnabled;
     private bool _apcGlyphRecognized;
     private bool _apcUnknownRecognized;
-    private int _apcUnknownCaptureLimit;
     private bool _apcGlyphEnabled;
     private readonly SixelDecoder _sixelDecoder;
     private readonly BasicVtProcessorOptions _options;
@@ -1057,12 +1060,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ResetApcCommand()
     {
         _apcBuffer.Clear();
+        _apcIdentifier = 0;
+        _apcIdentifierLength = 0;
+        _apcUnknownCapture.Reset(UnknownSequenceMaxBytes);
         _apcKittyRecognized = false;
         _apcKittyParser = null;
         _apcTruncated = false;
         _apcGlyphRecognized = false;
         _apcUnknownRecognized = false;
-        _apcUnknownCaptureLimit = 0;
         _apcGlyphEnabled = false;
     }
 
@@ -2627,7 +2632,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void AppendApcPayload(ReadOnlySpan<byte> payload)
     {
         if (payload.IsEmpty) return;
-        if (!_apcUnknownRecognized && !_apcKittyRecognized && _apcBuffer.Count == 0 && payload[0] == (byte)'G')
+        if (!_apcUnknownRecognized && !_apcKittyRecognized && _apcIdentifierLength == 0 && payload[0] == (byte)'G')
         {
             _apcKittyRecognized = true;
             if (_kittyStore.Enabled) _apcKittyParser = new(_options.KittyGraphicsMaxApcBytes);
@@ -2648,30 +2653,39 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             byte value = payload[0];
             if (value == (byte)';')
             {
-                if (CollectionsMarshal.AsSpan(_apcBuffer).SequenceEqual(glyphIdentifier))
+                if (_apcIdentifierLength == 4 && _apcIdentifier == 0x31613532u) // Little-endian "25a1".
                 {
-                    _apcBuffer.Add(value);
                     _apcGlyphRecognized = true;
                     _apcGlyphEnabled = _glyphProtocolEnabled;
-                    payload = payload[1..];
                 }
-                else BeginUnknownApc();
+                else
+                {
+                    BeginUnknownApc();
+                    _apcUnknownCapture.Append(payload[..1]);
+                }
+                payload = payload[1..];
                 break;
             }
-            if (_apcBuffer.Count >= glyphIdentifier.Length)
+            if (_apcIdentifierLength >= glyphIdentifier.Length)
             {
                 BeginUnknownApc();
+                _apcUnknownCapture.Append(payload[..1]);
+                payload = payload[1..];
                 break;
             }
-            int index = _apcBuffer.Count;
-            _apcBuffer.Add(value);
+            int index = _apcIdentifierLength++;
+            _apcIdentifier |= (uint)value << (index * 8);
             payload = payload[1..];
             if (UnknownSequenceMaxBytes > 0 && value != glyphIdentifier[index]) BeginUnknownApc();
         }
         if (payload.IsEmpty) return;
-        int limit = _apcGlyphRecognized
-            ? (_apcGlyphEnabled ? 1024 * 1024 + 5 : 5)
-            : _apcUnknownCaptureLimit;
+        if (_apcUnknownRecognized)
+        {
+            _apcUnknownCapture.Append(payload);
+            return;
+        }
+        if (!_apcGlyphEnabled) return;
+        const int limit = 1024 * 1024;
         int count = Math.Min(payload.Length, Math.Max(0, limit - _apcBuffer.Count));
         if (count > 0)
         {
@@ -2686,10 +2700,10 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void BeginUnknownApc()
     {
         _apcUnknownRecognized = true;
-        _apcUnknownCaptureLimit = UnknownSequenceMaxBytes;
-        if (_apcBuffer.Count <= _apcUnknownCaptureLimit) return;
-        _apcBuffer.RemoveRange(_apcUnknownCaptureLimit, _apcBuffer.Count - _apcUnknownCaptureLimit);
-        _apcTruncated = true;
+        _apcUnknownCapture.Begin(UnknownSequenceMaxBytes);
+        Span<byte> prefix = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32LittleEndian(prefix, _apcIdentifier);
+        _apcUnknownCapture.Append(prefix[.._apcIdentifierLength]);
     }
 
     private void CompleteApc(bool terminated = true)
@@ -2705,15 +2719,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             if (_apcGlyphRecognized)
             {
                 if (_apcGlyphEnabled && !_apcTruncated &&
-                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer)[5..], _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
+                    ManagedGlyphProtocol.Execute(CollectionsMarshal.AsSpan(_apcBuffer), _screen.GlyphGlossary, ResponseCallback, GlyphCoverageSource))
                     _screen.NotifyGlyphGlossaryChanged();
                 return;
             }
-            if (terminated && _apcUnknownRecognized && _apcUnknownCaptureLimit > 0) UnknownSequenceCallback?.Invoke(
-                new TerminalUnknownSequence(
-                    TerminalUnknownSequenceType.Apc,
-                    _apcBuffer.ToArray(),
-                    _apcTruncated));
+            if (terminated && _apcUnknownRecognized && _apcUnknownCapture.MaximumBytes > 0 &&
+                UnknownSequenceCallback is { } callback)
+            {
+                byte[] content = _apcUnknownCapture.Finish(out bool truncated);
+                callback(new TerminalUnknownSequence(TerminalUnknownSequenceType.Apc, content, truncated));
+            }
         }
         finally
         {

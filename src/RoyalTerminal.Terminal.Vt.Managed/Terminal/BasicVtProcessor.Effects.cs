@@ -19,7 +19,14 @@ public sealed partial class BasicVtProcessor
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             _unknownSequenceMaxBytes = value;
+            if (!_apcUnknownRecognized) _apcUnknownCapture.Reset(value);
         }
+    }
+
+    internal Action<ManagedUnknownApcAllocation>? UnknownApcAllocationCheckpoint
+    {
+        get => _apcUnknownCapture.AllocationCheckpoint;
+        set => _apcUnknownCapture.AllocationCheckpoint = value;
     }
 
     private void PublishProgressReport(TerminalProgressReport report)
