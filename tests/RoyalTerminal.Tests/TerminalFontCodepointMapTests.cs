@@ -85,7 +85,7 @@ public sealed class TerminalFontCodepointMapTests
         SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped);
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new(0x1F600, 0x1F601, "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping(0x1F600, 0x1F601, "emoji"));
         Assert.Empty(matcher.Families);
         foreach (TerminalTypefaceStyle style in Enum.GetValues<TerminalTypefaceStyle>())
         {
@@ -105,7 +105,7 @@ public sealed class TerminalFontCodepointMapTests
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
         Matcher matcher = new(_ => null);
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new('A', 'Z', "earlier"), new('A', 'B', "missing"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping('A', 'Z', "earlier"), new('A', 'B', "missing"));
         Assert.Same(primary, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Bold, 'A').Typeface);
         Assert.Same(primary, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Italic, 'B').Typeface);
         Assert.Equal(new[] { "missing" }, matcher.Families);
@@ -118,7 +118,7 @@ public sealed class TerminalFontCodepointMapTests
         SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped);
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new('A', 'B', "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping('A', 'B', "emoji"));
         Assert.Same(primary, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 'A').Typeface);
         // A mapped descriptor is a configured regular face: unlike discovered
         // fallback fonts, its default presentation is ANY even outside the map.
@@ -137,7 +137,7 @@ public sealed class TerminalFontCodepointMapTests
         SKTypeface discovered = Load("NotoColorEmoji.ttf");
         Matcher matcher = new(_ => mapped) { Character = _ => discovered };
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new('A', 'A', "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping('A', 'A', "emoji"));
         if (mappingFirst) resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 'A');
         Assert.Same(discovered, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, "😁\uFE0F").Typeface);
         if (!mappingFirst) resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 'A');
@@ -170,7 +170,7 @@ public sealed class TerminalFontCodepointMapTests
         using SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped);
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new(0x1F600, 0x1F600, "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping(0x1F600, 0x1F600, "emoji"));
         Assert.Same(mapped, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Bold, "😀").Typeface);
         Assert.Equal(0, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Bold, "😀\uFE0E").ReplacementCodepoint);
         Assert.Equal(0xFFFD, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Bold, "😀\uFE0F").ReplacementCodepoint);
@@ -184,12 +184,12 @@ public sealed class TerminalFontCodepointMapTests
         using SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped) { Character = _ => mapped };
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new(0x1F600, 0x1F600, "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping(0x1F600, 0x1F600, "emoji"));
         Assert.Same(mapped, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 0x1F600).Typeface);
         Assert.Equal(0xFFFD, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, "😀\uFE0F").ReplacementCodepoint);
         Assert.NotEqual(nint.Zero, mapped.Handle);
         // A later collection may borrow a face already present in discovery.
-        TerminalTypefaceCollection borrowed = Collection(mapped, new(0x1F601, 0x1F601, "same"));
+        TerminalTypefaceCollection borrowed = Collection(mapped, new TerminalTypefaceCodepointMapping(0x1F601, 0x1F601, "same"));
         Assert.Same(mapped, resolver.ResolveTypeface(borrowed, TerminalTypefaceStyle.Regular, 0x1F601).Typeface);
         resolver.Dispose();
         Assert.NotEqual(nint.Zero, mapped.Handle);
@@ -202,7 +202,7 @@ public sealed class TerminalFontCodepointMapTests
         SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped);
         using TerminalFontResolver resolver = new(matcher);
-        TerminalTypefaceCollection collection = Collection(primary, new('A', 'A', "emoji"));
+        TerminalTypefaceCollection collection = Collection(primary, new TerminalTypefaceCodepointMapping('A', 'A', "emoji"));
         Assert.Equal(0xFFFD, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 0x1F600, CultureInfo.InvariantCulture).ReplacementCodepoint);
         resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 'A', CultureInfo.InvariantCulture);
         Assert.Equal(0xFFFD, resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 0x1F600, CultureInfo.InvariantCulture).ReplacementCodepoint);
@@ -224,9 +224,9 @@ public sealed class TerminalFontCodepointMapTests
         SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Assert.True(mapped.ContainsGlyph(0x2611));
         Matcher matcher = new(_ => mapped);
-        using SkiaTerminalRenderer renderer = new(new TerminalFontResolver(matcher), Collection(primary, new(0x2611, 0x2611, "symbol")), 24)
+        using SkiaTerminalRenderer renderer = new(new TerminalFontResolver(matcher), Collection(primary, new TerminalTypefaceCodepointMapping(0x2611, 0x2611, "symbol")), 24)
         { EnableTextShaping = shaping, CursorVisible = cursor, CursorColumn = 0, EnableTextRenderDiagnostics = true };
-        using SkiaTerminalRenderer missing = new(new TerminalFontResolver(new Matcher(_ => null)), Collection(primary, new(0x2611, 0x2611, "missing")), 24)
+        using SkiaTerminalRenderer missing = new(new TerminalFontResolver(new Matcher(_ => null)), Collection(primary, new TerminalTypefaceCodepointMapping(0x2611, 0x2611, "missing")), 24)
         { EnableTextShaping = shaping, CursorVisible = cursor, CursorColumn = 0, EnableTextRenderDiagnostics = true };
         TerminalScreen screen = new(3, 1);
         using BasicVtProcessor processor = new(screen);
@@ -247,7 +247,7 @@ public sealed class TerminalFontCodepointMapTests
         using SKTypeface primary = Load("JetBrainsMono-Regular.ttf");
         SKTypeface mapped = Load("NotoEmoji-Regular.ttf");
         Matcher matcher = new(_ => mapped);
-        using SkiaTerminalRenderer renderer = new(new TerminalFontResolver(matcher), Collection(primary, new(0x1F600, 0x1F600, "emoji")), 24);
+        using SkiaTerminalRenderer renderer = new(new TerminalFontResolver(matcher), Collection(primary, new TerminalTypefaceCodepointMapping(0x1F600, 0x1F600, "emoji")), 24);
         TerminalScreen screen = new(4, 1);
         using BasicVtProcessor processor = new(screen);
         byte[] before = processor.GetBinarySnapshot();
