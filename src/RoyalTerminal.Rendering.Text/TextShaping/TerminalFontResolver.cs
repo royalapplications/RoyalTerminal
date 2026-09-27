@@ -28,7 +28,7 @@ public readonly record struct TerminalFontResolution(SKTypeface Typeface, bool U
 /// <summary>
 /// Resolves primary/fallback typefaces for terminal text rendering.
 /// </summary>
-public sealed class TerminalFontResolver : IDisposable
+public sealed partial class TerminalFontResolver : IDisposable
 {
     private const int VariationSelector15 = 0xFE0E;
     private const int VariationSelector16 = 0xFE0F;
@@ -39,6 +39,7 @@ public sealed class TerminalFontResolver : IDisposable
     private readonly bool _ownsFontManager;
     private readonly string? _preferredEmojiFamily;
     private SKTypeface? _preferredEmojiTypeface;
+    private bool _ownsPreferredEmojiTypeface = true;
     private bool _preferredEmojiResolved;
     private readonly Dictionary<FontFallbackCacheKey, FontFallbackCacheEntry> _fallbackCache = new();
     private readonly Dictionary<nint, SKFont> _containsGlyphFontCache = new();
@@ -109,21 +110,26 @@ public sealed class TerminalFontResolver : IDisposable
     {
         ArgumentNullException.ThrowIfNull(primaryTypeface);
         ThrowIfDisposed();
+        return ResolveText(primaryTypeface, text, culture);
+    }
 
+    private TerminalFontResolution ResolveText(SKTypeface primaryTypeface, ReadOnlySpan<char> text,
+        CultureInfo? culture, CollectionState? collection = null, TerminalTypefaceStyle style = TerminalTypefaceStyle.Regular)
+    {
         if (text.IsEmpty)
         {
             return new TerminalFontResolution(primaryTypeface, UsedFallback: false);
         }
         if (Rune.DecodeFromUtf16(text, out Rune firstRune, out int charsConsumed) != OperationStatus.Done)
-            return ResolveReplacement(primaryTypeface, culture, null);
+            return ResolveReplacement(primaryTypeface, culture, null, collection, style);
 
         // Ghostty only accepts a selector immediately after the base scalar.
         // A later selector, keycap, modifier or tag cannot change that request.
         bool? explicitEmojiPresentation = GetExplicitPresentation(text[charsConsumed..]);
 
         if (!TryResolveTypefaceCore(primaryTypeface, firstRune.Value, culture, explicitEmojiPresentation,
-            out TerminalFontResolution primary))
-            return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation);
+            out TerminalFontResolution primary, collection, style))
+            return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation, collection, style);
         if (charsConsumed == text.Length || ContainsGrapheme(primary.Typeface, text, explicitEmojiPresentation))
         {
             return primary;
@@ -148,7 +154,7 @@ public sealed class TerminalFontResolver : IDisposable
             // base's explicit presentation. Whole-cluster validation below
             // permits either presentation for these additional components.
             if (!TryResolveTypefaceCore(primaryTypeface, component.Value, culture, null,
-                out TerminalFontResolution candidate)) break;
+                out TerminalFontResolution candidate, collection, style)) break;
             if (candidate.Typeface.Handle != primary.Typeface.Handle &&
                 ContainsGrapheme(candidate.Typeface, text, explicitEmojiPresentation))
             {
@@ -156,7 +162,7 @@ public sealed class TerminalFontResolver : IDisposable
             }
         }
 
-        return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation);
+        return ResolveReplacement(primaryTypeface, culture, explicitEmojiPresentation, collection, style);
     }
 
     /// <summary>
@@ -177,8 +183,12 @@ public sealed class TerminalFontResolver : IDisposable
         int codepoint,
         CultureInfo? culture,
         bool? explicitEmojiPresentation,
-        out TerminalFontResolution resolution)
+        out TerminalFontResolution resolution,
+        CollectionState? collection = null,
+        TerminalTypefaceStyle style = TerminalTypefaceStyle.Regular)
     {
+        if (collection is not null)
+            return TryResolveCollectionFace(collection, style, primaryTypeface, codepoint, culture, explicitEmojiPresentation, out resolution);
         // A configured font is authoritative without an explicit selector,
         // including a deliberately chosen monochrome emoji font.
         if (ContainsGlyph(primaryTypeface, codepoint, explicitEmojiPresentation))
@@ -195,13 +205,14 @@ public sealed class TerminalFontResolver : IDisposable
         return resolution.UsedFallback || ContainsGlyph(primaryTypeface, codepoint);
     }
 
-    private TerminalFontResolution ResolveReplacement(SKTypeface primaryTypeface, CultureInfo? culture, bool? presentation)
+    private TerminalFontResolution ResolveReplacement(SKTypeface primaryTypeface, CultureInfo? culture, bool? presentation,
+        CollectionState? collection = null, TerminalTypefaceStyle style = TerminalTypefaceStyle.Regular)
     {
         // RunIterator replaces the whole unsupported cell, never just the
         // missing component. Preserve the original cell width in the renderer.
-        if (TryResolveTypefaceCore(primaryTypeface, 0xFFFD, culture, presentation, out TerminalFontResolution replacement))
+        if (TryResolveTypefaceCore(primaryTypeface, 0xFFFD, culture, presentation, out TerminalFontResolution replacement, collection, style))
             return replacement with { ReplacementCodepoint = 0xFFFD };
-        if (TryResolveTypefaceCore(primaryTypeface, ' ', culture, presentation, out replacement))
+        if (TryResolveTypefaceCore(primaryTypeface, ' ', culture, presentation, out replacement, collection, style))
             return replacement with { ReplacementCodepoint = ' ' };
         throw new InvalidOperationException("No available terminal font can render a replacement character or space.");
     }
@@ -210,16 +221,18 @@ public sealed class TerminalFontResolver : IDisposable
         SKTypeface primaryTypeface,
         int codepoint,
         CultureInfo? culture,
-        bool preferEmojiPresentation)
+        bool preferEmojiPresentation,
+        SKFontStyle? discoveryStyle = null)
     {
         CultureInfo usedCulture = culture ?? CultureInfo.CurrentUICulture;
         string cultureName = usedCulture.Name;
+        SKFontStyle requestedStyle = discoveryStyle ?? primaryTypeface.FontStyle;
 
         FontFallbackCacheKey key = new(
             primaryTypeface.Handle,
-            primaryTypeface.FontWeight,
-            primaryTypeface.FontWidth,
-            primaryTypeface.FontSlant,
+            requestedStyle.Weight,
+            requestedStyle.Width,
+            requestedStyle.Slant,
             codepoint,
             cultureName,
             preferEmojiPresentation);
@@ -238,7 +251,8 @@ public sealed class TerminalFontResolver : IDisposable
                     primaryTypeface,
                     codepoint,
                     usedCulture,
-                    preferEmojiPresentation);
+                    preferEmojiPresentation,
+                    requestedStyle);
                 _fallbackCache.Add(key, entry);
             }
         }
@@ -277,7 +291,7 @@ public sealed class TerminalFontResolver : IDisposable
 
             foreach (FontFallbackCacheEntry entry in _fallbackCache.Values)
             {
-                if (entry.FallbackTypeface is not { } fallbackTypeface)
+                if (!entry.Owned || entry.FallbackTypeface is not { } fallbackTypeface)
                 {
                     continue;
                 }
@@ -291,7 +305,9 @@ public sealed class TerminalFontResolver : IDisposable
             }
 
             _fallbackCache.Clear();
-            if (_preferredEmojiTypeface is { } preferred && disposedTypefaces.Add(preferred)) preferred.Dispose();
+            _collections.Clear();
+            _borrowedTypefaces.Clear();
+            if (_ownsPreferredEmojiTypeface && _preferredEmojiTypeface is { } preferred && disposedTypefaces.Add(preferred)) preferred.Dispose();
             _preferredEmojiTypeface = null;
         }
 
@@ -305,7 +321,8 @@ public sealed class TerminalFontResolver : IDisposable
         SKTypeface primaryTypeface,
         int codepoint,
         CultureInfo culture,
-        bool preferEmojiPresentation)
+        bool preferEmojiPresentation,
+        SKFontStyle requestedStyle)
     {
         // Ghostty explicitly prefers the system Apple emoji family on macOS.
         // Resolve it once, in its regular style, and verify the actual family:
@@ -329,14 +346,17 @@ public sealed class TerminalFontResolver : IDisposable
                 else
                 {
                     if (candidate is not null && string.Equals(candidate.FamilyName, _preferredEmojiFamily, StringComparison.Ordinal))
+                    {
                         _preferredEmojiTypeface = candidate;
-                    else candidate?.Dispose();
+                        _ownsPreferredEmojiTypeface = !_borrowedTypefaces.Contains(candidate);
+                    }
+                    else if (candidate is not null) ReleaseRejectedTypeface(candidate, primaryTypeface);
                     _preferredEmojiResolved = true;
                 }
             }
 
             if (_preferredEmojiTypeface is { } preferred && ContainsGlyph(preferred, codepoint, preferEmojiPresentation))
-                return preferred.Handle == primaryTypeface.Handle ? FontFallbackCacheEntry.NoFallback : new(preferred);
+                return preferred.Handle == primaryTypeface.Handle ? FontFallbackCacheEntry.NoFallback : new(preferred, _ownsPreferredEmojiTypeface);
         }
 
         string[]? languageTags = GetLanguageTags(culture, preferEmojiPresentation);
@@ -353,27 +373,34 @@ public sealed class TerminalFontResolver : IDisposable
         FontFallbackCacheEntry Match(string? family)
         {
             SKTypeface? fallbackTypeface = _fontMatcher.MatchCharacter(
-                family, primaryTypeface.FontStyle, languageTags, codepoint);
+                family, requestedStyle, languageTags, codepoint);
             if (fallbackTypeface is null || ReferenceEquals(fallbackTypeface, primaryTypeface))
                 return FontFallbackCacheEntry.NoFallback;
             if (fallbackTypeface.Handle != primaryTypeface.Handle && !TerminalFontCoverage.IsLastResort(fallbackTypeface) &&
                 ContainsGlyph(fallbackTypeface, codepoint, preferEmojiPresentation))
-                return new FontFallbackCacheEntry(fallbackTypeface);
+                return new FontFallbackCacheEntry(fallbackTypeface, !_borrowedTypefaces.Contains(fallbackTypeface));
 
-            // System matchers can return an object already retained for a
-            // different presentation/codepoint. Reject this request, not the
-            // lifetime of the earlier successful cache entry.
-            if (ReferenceEquals(fallbackTypeface, _preferredEmojiTypeface)) return FontFallbackCacheEntry.NoFallback;
-            foreach (FontFallbackCacheEntry cached in _fallbackCache.Values)
-                if (ReferenceEquals(cached.FallbackTypeface, fallbackTypeface)) return FontFallbackCacheEntry.NoFallback;
-
-            // Remove the font holding a rejected candidate before releasing it;
-            // native handles can be reused by the subsequent global match.
-            if (_containsGlyphFontCache.Remove(fallbackTypeface.Handle, out SKFont? font)) font.Dispose();
-            if (_presentationCache.Remove(fallbackTypeface.Handle, out TerminalGlyphPresentation? presentation)) presentation.Dispose();
-            fallbackTypeface.Dispose();
+            ReleaseRejectedTypeface(fallbackTypeface, primaryTypeface);
             return FontFallbackCacheEntry.NoFallback;
         }
+    }
+
+    private void ReleaseRejectedTypeface(SKTypeface fallbackTypeface, SKTypeface primaryTypeface)
+    {
+        if (ReferenceEquals(fallbackTypeface, primaryTypeface) || _borrowedTypefaces.Contains(fallbackTypeface)) return;
+
+        // System matchers can return an object already retained for a
+        // different presentation/codepoint. Reject this request, not the
+        // lifetime of the earlier successful cache entry.
+        if (ReferenceEquals(fallbackTypeface, _preferredEmojiTypeface)) return;
+        foreach (FontFallbackCacheEntry cached in _fallbackCache.Values)
+            if (ReferenceEquals(cached.FallbackTypeface, fallbackTypeface)) return;
+
+        // Remove the font holding a rejected candidate before releasing it;
+        // native handles can be reused by the subsequent global match.
+        if (_containsGlyphFontCache.Remove(fallbackTypeface.Handle, out SKFont? font)) font.Dispose();
+        if (_presentationCache.Remove(fallbackTypeface.Handle, out TerminalGlyphPresentation? presentation)) presentation.Dispose();
+        fallbackTypeface.Dispose();
     }
 
     private bool ContainsGlyph(SKTypeface typeface, int codepoint, bool? emojiPresentation = null)
@@ -484,7 +511,7 @@ public sealed class TerminalFontResolver : IDisposable
         string CultureName,
         bool PreferEmojiPresentation);
 
-    private readonly record struct FontFallbackCacheEntry(SKTypeface? FallbackTypeface)
+    private readonly record struct FontFallbackCacheEntry(SKTypeface? FallbackTypeface, bool Owned = true)
     {
         public static FontFallbackCacheEntry NoFallback { get; } = new(null);
     }

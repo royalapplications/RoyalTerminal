@@ -28,7 +28,7 @@ public sealed partial class SkiaTerminalRenderer
         try
         {
             foreach (ref readonly TerminalCell cell in Preedit!.RenderCells)
-                _preeditDisplayCells.Add(in cell, ResolveFontForCell(_glyphCache.RegularTypeface, in cell));
+                _preeditDisplayCells.Add(in cell, ResolveFontForCell(in cell));
             RenderPreeditDisplay(canvas, foreground, y, range, _preeditDisplayCells.Cells, _preeditDisplayCells.Fonts);
         }
         finally { _preeditDisplayCells.Clear(); }

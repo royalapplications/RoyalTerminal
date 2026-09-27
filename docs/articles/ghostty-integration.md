@@ -47,8 +47,38 @@ resolver, and rejected candidates do not dispose fonts retained by another
 cache entry. Where Skia exposes a mapped font stream, a HarfBuzz blob borrows it
 with an owned release callback, avoiding a managed copy of large bitmap tables.
 This checks available color data, not an interactive guarantee for every font
-format/backend. Ordering across multiple configured faces remains separate
-parity work.
+format/backend.
+
+`TerminalTypefaceCollection` supplies ordered faces for regular, bold, italic
+and bold-italic logical styles. The shared renderer and glyph-coverage source
+use these collections, including ordinary family/file configuration. Hosts may
+set `TerminalControl.TypefaceCollection` or use the renderer/coverage
+`CreateWithTypefaces` factories to provide multiple faces per style. Collections
+copy entries but borrow typefaces: callers keep every face alive for the lifetime
+of all consuming renderers/resolvers, including retained presentation resources.
+Passing null to the control restores family/file configuration.
+
+Following Ghostty's
+[CodepointResolver](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/CodepointResolver.zig),
+configured style faces are searched in order, then regular configured and loaded
+fallback faces, before regular-style discovery. Discovered faces are reused for
+later scalars, but must match explicit or Unicode-default presentation; configured
+faces accept any presentation by default. Final ANY lookup only considers loaded
+regular faces. Like
+[SharedGrid](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/SharedGrid.zig),
+both scalar hits and misses remain cached even as the collection grows. Cache
+keys additionally preserve the managed API's culture argument. New configuration
+creates a new collection/resolver; the bounded glyph-coverage cache resets its
+resolver on eviction. Cluster selection, cursor, IME and password rendering use
+the same collection policy. Resolver-owned discovery faces are released once;
+configured faces are never disposed by borrowed-collection consumers.
+
+Persisted application family lists, per-codepoint overrides, disabled/synthetic
+style policy and exhaustive platform fallback enumeration are still distinct
+remaining parity requirements. Skia's family/global matching is not claimed to
+enumerate Ghostty's complete platform discovery iterator. The font benchmark
+compares existing single-face discovery with loaded-collection reuse; isolated
+font-query measurements are not an end-to-end rendering speedup claim.
 
 Unsupported cells now carry an explicit `TerminalFontResolution.ReplacementCodepoint`:
 the entire cluster becomes U+FFFD, falling back to a space if that glyph is

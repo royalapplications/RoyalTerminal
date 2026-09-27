@@ -17,6 +17,7 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
     private readonly TerminalFontSource _fontSource;
     private readonly string? _fontFilePath;
     private readonly int _cacheCapacity;
+    private readonly TerminalTypefaceCollection? _typefaces;
     private readonly object _sync = new();
     private readonly Dictionary<uint, bool> _coverage = new();
     private GlyphCache? _fonts;
@@ -44,6 +45,22 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
     internal int CachedCount { get { lock (_sync) return _coverage.Count; } }
     internal bool IsInitialized { get { lock (_sync) return _fonts is not null; } }
 
+    /// <summary>
+    /// Creates lazy coverage using ordered, caller-owned faces. Keep the faces
+    /// alive until this source is disposed; queries use the regular collection.
+    /// </summary>
+    public static SkiaTerminalGlyphCoverageSource CreateWithTypefaces(TerminalTypefaceCollection typefaces)
+    {
+        ArgumentNullException.ThrowIfNull(typefaces);
+        return new(typefaces);
+    }
+
+    private SkiaTerminalGlyphCoverageSource(TerminalTypefaceCollection typefaces)
+        : this(string.Empty, TerminalFontSource.System, null, 4096)
+    {
+        _typefaces = typefaces;
+    }
+
     /// <inheritdoc />
     /// <remarks>Returns false for invalid scalars and after disposal.</remarks>
     public bool HasSystemGlyph(uint codepoint)
@@ -53,7 +70,9 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
         {
             if (_disposed) return false;
             if (_coverage.TryGetValue(codepoint, out bool found)) return found;
-            _fonts ??= new GlyphCache(_fontFamily, _fontSource, _fontFilePath);
+            _fonts ??= _typefaces is null
+                ? new GlyphCache(_fontFamily, _fontSource, _fontFilePath)
+                : GlyphCache.CreateWithTypefaces(_typefaces);
             _resolver ??= new TerminalFontResolver();
             if (_coverage.Count == _cacheCapacity)
             {
@@ -64,7 +83,7 @@ public sealed class SkiaTerminalGlyphCoverageSource : ITerminalGlyphCoverageSour
                 _resolver = next;
                 _coverage.Clear();
             }
-            TerminalFontResolution resolution = _resolver.ResolveTypeface(_fonts.RegularTypeface, (int)codepoint,
+            TerminalFontResolution resolution = _resolver.ResolveTypeface(_fonts.TypefaceCollection, TerminalTypefaceStyle.Regular, (int)codepoint,
                 CultureInfo.InvariantCulture);
             SKTypeface typeface = resolution.Typeface;
             using SKFont font = GlyphCache.CreateFont(typeface, 12);

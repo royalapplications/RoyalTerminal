@@ -305,6 +305,24 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private bool _shaderAnimationEnabled = true;
 
+    /// <summary>Ordered caller-owned font faces overriding family/file font selection.</summary>
+    public static readonly DirectProperty<TerminalControl, TerminalTypefaceCollection?> TypefaceCollectionProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, TerminalTypefaceCollection?>(
+            nameof(TypefaceCollection), o => o.TypefaceCollection, (o, v) => o.TypefaceCollection = v);
+
+    private TerminalTypefaceCollection? _typefaceCollection;
+
+    /// <summary>
+    /// Gets or sets ordered configured font faces. Null restores family/file
+    /// selection. Faces are borrowed and must outlive all renderers using them,
+    /// including any renderer still retained by the presenter after replacement.
+    /// </summary>
+    public TerminalTypefaceCollection? TypefaceCollection
+    {
+        get => _typefaceCollection;
+        set => SetAndRaise(TypefaceCollectionProperty, ref _typefaceCollection, value);
+    }
+
     public string FontFamilyName
     {
         get => GetValue(FontFamilyNameProperty);
@@ -1252,6 +1270,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         base.OnPropertyChanged(change);
 
         if (change.Property == FontFamilyNameProperty ||
+            change.Property == TypefaceCollectionProperty ||
             change.Property == FontSourceProperty ||
             change.Property == FontFilePathProperty ||
             change.Property == TerminalFontSizeProperty ||
@@ -1410,7 +1429,10 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         string? fontFilePath = FontSource == TerminalFontSource.File
             ? FontFilePath
             : null;
-        SkiaTerminalRenderer renderer = new(
+        SkiaTerminalRenderer renderer = _typefaceCollection is { } typefaces
+            ? SkiaTerminalRenderer.CreateWithTypefaces(typefaces,
+                (float)GetActualTerminalFontSize(TerminalFontSize), CreateFontRenderingSettings())
+            : new(
             family,
             (float)GetActualTerminalFontSize(TerminalFontSize),
             FontSource,

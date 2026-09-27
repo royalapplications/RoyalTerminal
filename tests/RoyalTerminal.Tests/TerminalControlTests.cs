@@ -4915,6 +4915,41 @@ public class TerminalControlTests
     [AvaloniaTheory]
     [InlineData(VtProcessorPreference.Managed)]
     [InlineData(VtProcessorPreference.Native)]
+    public void Control_TypefaceCollectionRebindsCoverageAndRestoresFamilySelection(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;
+        using SKTypeface regular = FontPresentationTestFonts.Load("JetBrainsMono-Regular.ttf");
+        using SKTypeface emoji = FontPresentationTestFonts.Load("NotoEmoji-Regular.ttf");
+        TerminalTypefaceCollection collection = new(new(regular, TerminalTypefaceStyle.Regular), new(emoji, TerminalTypefaceStyle.Regular));
+        TerminalControl control = CreateControlWithTransport(new FakeTransport(),
+            new DefaultVtProcessorFactory([new GhosttyVtProcessorProvider()]), preference);
+        control.WriteOutput("ready"u8);
+        ITerminalGlyphCoverageSink sink = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        using SkiaTerminalRenderer original = control.Renderer!;
+        control.TypefaceCollection = collection;
+        using SkiaTerminalRenderer configured = control.Renderer!;
+        Assert.Same(collection, control.GetValue(TerminalControl.TypefaceCollectionProperty));
+        Assert.NotSame(original, configured);
+        Assert.Same(configured.GlyphCoverageSource, sink.GlyphCoverageSource);
+        Assert.True(configured.GlyphCoverageSource.HasSystemGlyph(0x1F600));
+        control.TypefaceCollection = collection;
+        Assert.Same(configured, control.Renderer);
+        control.VtProcessorPreference = preference == VtProcessorPreference.Managed && GhosttyVtProcessor.IsAvailable()
+            ? VtProcessorPreference.Native : VtProcessorPreference.Managed;
+        ITerminalGlyphCoverageSink replacement = Assert.IsAssignableFrom<ITerminalGlyphCoverageSink>(control.ActiveVtProcessor);
+        Assert.Same(configured.GlyphCoverageSource, replacement.GlyphCoverageSource);
+        control.TypefaceCollection = null;
+        using SkiaTerminalRenderer restored = control.Renderer!;
+        Assert.NotSame(configured, restored);
+        Assert.Same(restored.GlyphCoverageSource, replacement.GlyphCoverageSource);
+        configured.Dispose();
+        Assert.NotEqual(nint.Zero, regular.Handle);
+        Assert.NotEqual(nint.Zero, emoji.Handle);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
     public void Control_GlyphCoverageTracksFontChangesAndProcessorReplacement(VtProcessorPreference preference)
     {
         if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) return;

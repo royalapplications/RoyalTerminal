@@ -26,11 +26,15 @@ public sealed class GlyphCache : IDisposable
     private readonly SKTypeface? _boldTypeface;
     private readonly SKTypeface? _italicTypeface;
     private readonly SKTypeface? _boldItalicTypeface;
+    private readonly bool _ownsTypefaces = true;
     private TerminalFontRenderingSettings _fontRenderingSettings;
     private bool _disposed;
 
     /// <summary>The default font used for rendering.</summary>
     public SKTypeface RegularTypeface => _regularTypeface;
+
+    /// <summary>Ordered configured faces, valid for this cache's lifetime.</summary>
+    public TerminalTypefaceCollection TypefaceCollection { get; }
 
     /// <summary>Number of cached glyphs.</summary>
     public int Count => _cache.Count;
@@ -94,6 +98,7 @@ public sealed class GlyphCache : IDisposable
             _boldTypeface = null;
             _italicTypeface = null;
             _boldItalicTypeface = null;
+            TypefaceCollection = new(new TerminalTypefaceEntry(fileTypeface, TerminalTypefaceStyle.Regular));
             return;
         }
 
@@ -101,6 +106,35 @@ public sealed class GlyphCache : IDisposable
         _boldTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Bold);
         _italicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Italic);
         _boldItalicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.BoldItalic);
+        List<TerminalTypefaceEntry> entries = [new(_regularTypeface, TerminalTypefaceStyle.Regular)];
+        if (_boldTypeface is not null) entries.Add(new(_boldTypeface, TerminalTypefaceStyle.Bold));
+        if (_italicTypeface is not null) entries.Add(new(_italicTypeface, TerminalTypefaceStyle.Italic));
+        if (_boldItalicTypeface is not null) entries.Add(new(_boldItalicTypeface, TerminalTypefaceStyle.BoldItalic));
+        TypefaceCollection = new(entries.ToArray());
+    }
+
+    /// <summary>
+    /// Creates a cache using borrowed, ordered faces. The caller must keep these
+    /// faces alive until the cache and all users of its collection are disposed.
+    /// </summary>
+    public static GlyphCache CreateWithTypefaces(TerminalTypefaceCollection typefaces,
+        int maxEntries = 8192, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(typefaces);
+        return new GlyphCache(typefaces, maxEntries, fontRenderingSettings);
+    }
+
+    private GlyphCache(TerminalTypefaceCollection typefaces, int maxEntries,
+        TerminalFontRenderingSettings? fontRenderingSettings)
+    {
+        _maxEntries = maxEntries;
+        _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
+        _ownsTypefaces = false;
+        TypefaceCollection = typefaces;
+        _regularTypeface = typefaces.GetPrimaryTypeface();
+        _boldTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Bold);
+        _italicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Italic);
+        _boldItalicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.BoldItalic);
     }
 
     /// <summary>
@@ -230,10 +264,13 @@ public sealed class GlyphCache : IDisposable
         _disposed = true;
 
         Clear();
-        _regularTypeface.Dispose();
-        _boldTypeface?.Dispose();
-        _italicTypeface?.Dispose();
-        _boldItalicTypeface?.Dispose();
+        if (_ownsTypefaces)
+        {
+            _regularTypeface.Dispose();
+            _boldTypeface?.Dispose();
+            _italicTypeface?.Dispose();
+            _boldItalicTypeface?.Dispose();
+        }
     }
 
     private static SKTypeface CreateSystemTypeface(string fontFamily, SKFontStyle style)

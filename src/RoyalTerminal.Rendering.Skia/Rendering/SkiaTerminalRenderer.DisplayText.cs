@@ -38,9 +38,7 @@ public sealed partial class SkiaTerminalRenderer
             DrawSpriteCell(canvas, sprite, category, column, Math.Max(1, (int)cell.Width), y, CursorTextColor);
             return;
         }
-        SKTypeface primary = _glyphCache.GetTypeface((cell.Attributes & CellAttributes.Bold) != 0,
-            (cell.Attributes & CellAttributes.Italic) != 0);
-        TerminalFontResolution font = ResolveFontForCell(primary, in cell);
+        TerminalFontResolution font = ResolveFontForCell(in cell);
         _displayCells.Clear();
         _displayCells.Add(in cell, font);
         canvas.Save();

@@ -393,11 +393,30 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         TerminalFontSource fontSource = TerminalFontSource.System,
         string? fontFilePath = null,
         TerminalFontRenderingSettings? fontRenderingSettings = null)
+        : this(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a renderer with ordered configured faces for each terminal style.
+    /// Faces are borrowed and must outlive the renderer and its coverage source.
+    /// Cell metrics come from the first regular face.
+    /// </summary>
+    public static SkiaTerminalRenderer CreateWithTypefaces(TerminalTypefaceCollection typefaces,
+        float fontSize = 14f, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(typefaces);
+        return new(string.Empty, fontSize, TerminalFontSource.System, null, fontRenderingSettings, typefaces);
+    }
+
+    private SkiaTerminalRenderer(string fontFamily, float fontSize, TerminalFontSource fontSource,
+        string? fontFilePath, TerminalFontRenderingSettings? fontRenderingSettings, TerminalTypefaceCollection? typefaces)
     {
         _fontSize = fontSize;
-        _glyphCoverageSource = new(fontFamily, fontSource, fontFilePath);
+        _glyphCoverageSource = typefaces is null ? new(fontFamily, fontSource, fontFilePath)
+            : SkiaTerminalGlyphCoverageSource.CreateWithTypefaces(typefaces);
         _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
-        _glyphCache = new GlyphCache(
+        _glyphCache = typefaces is not null ? GlyphCache.CreateWithTypefaces(typefaces, fontRenderingSettings: _fontRenderingSettings) : new GlyphCache(
             fontFamily,
             fontSource,
             fontFilePath,
@@ -979,12 +998,11 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
 
             bool bold = (firstCell.Attributes & CellAttributes.Bold) != 0;
             bool italic = (firstCell.Attributes & CellAttributes.Italic) != 0;
-            SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = ResolveForegroundColorForCell(
                 in firstCell,
                 rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
-            TerminalFontResolution firstFont = ResolveFontForCell(primaryTypeface, in firstCell);
+            TerminalFontResolution firstFont = ResolveFontForCell(in firstCell);
             SKTypeface runTypeface = firstFont.Typeface;
             _displayCells.Clear();
             _displayCells.Add(in firstCell, firstFont);
@@ -1017,7 +1035,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                TerminalFontResolution nextFont = ResolveFontForCell(primaryTypeface, in nextCell);
+                TerminalFontResolution nextFont = ResolveFontForCell(in nextCell);
                 TerminalCell nextDisplay = _displayCells.Project(in nextCell, nextFont);
                 if (IsSymbolGlyphClipCandidate(in nextDisplay) &&
                     !(_enableLigatures && IsProgrammingLigatureCharCell(in nextDisplay)))
@@ -3219,10 +3237,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                 return false;
             }
 
-            bool bold = (cell.Attributes & CellAttributes.Bold) != 0;
-            bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
-            SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
-            TerminalFontResolution resolution = ResolveFontForCell(primaryTypeface, in cell);
+            TerminalFontResolution resolution = ResolveFontForCell(in cell);
             if (resolution.ReplacementCodepoint != 0) return false;
             SKTypeface typeface = resolution.Typeface;
             if (!_singleGlyphIdCache.TryGetOrCreate(
@@ -4628,15 +4643,20 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private TerminalFontResolution ResolveFontForCell(SKTypeface primaryTypeface, ref readonly TerminalCell cell)
+    private TerminalFontResolution ResolveFontForCell(ref readonly TerminalCell cell)
     {
+        bool bold = (cell.Attributes & CellAttributes.Bold) != 0;
+        bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
+        TerminalTypefaceStyle style = bold
+            ? (italic ? TerminalTypefaceStyle.BoldItalic : TerminalTypefaceStyle.Bold)
+            : (italic ? TerminalTypefaceStyle.Italic : TerminalTypefaceStyle.Regular);
         TerminalFontResolution resolution = string.IsNullOrEmpty(cell.Grapheme)
             ? _fontResolver.ResolveTypeface(
-                primaryTypeface,
+                _glyphCache.TypefaceCollection, style,
                 GetCellPrimaryCodepoint(in cell),
                 s_renderCulture)
             : _fontResolver.ResolveTypeface(
-                primaryTypeface,
+                _glyphCache.TypefaceCollection, style,
                 cell.Grapheme.AsSpan(),
                 s_renderCulture);
 

@@ -28,26 +28,32 @@ internal static class FontDiscoveryBenchmark
         // per-codepoint cache. Font database/JIT startup is excluded below.
         const int resolvers = 20;
         const int emojiCount = 80;
-        for (int i = 0; i < 10; i++) ResolveNew();
-        double[] milliseconds = new double[7];
-        long[] allocations = new long[7];
-        for (int sample = 0; sample < milliseconds.Length; sample++)
+        TerminalTypefaceCollection collection = new(new TerminalTypefaceEntry(primary, TerminalTypefaceStyle.Regular));
+        foreach (bool useCollection in new[] { false, true })
         {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            started = Stopwatch.GetTimestamp();
-            for (int i = 0; i < resolvers; i++) ResolveNew();
-            milliseconds[sample] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            allocations[sample] = GC.GetAllocatedBytesForCurrentThread() - before;
+            for (int i = 0; i < 10; i++) ResolveNew(useCollection);
+            double[] milliseconds = new double[7];
+            long[] allocations = new long[7];
+            for (int sample = 0; sample < milliseconds.Length; sample++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                started = Stopwatch.GetTimestamp();
+                for (int i = 0; i < resolvers; i++) ResolveNew(useCollection);
+                milliseconds[sample] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                allocations[sample] = GC.GetAllocatedBytesForCurrentThread() - before;
+            }
+            Array.Sort(milliseconds);
+            Array.Sort(allocations);
+            Console.WriteLine(FormattableString.Invariant($"{(useCollection ? "Loaded collection" : "Single-face baseline")}: {resolvers} fresh resolvers x {emojiCount} emoji, median of seven warmed samples: {milliseconds[3]:F3} ms; {allocations[3]} allocated bytes"));
         }
-        Array.Sort(milliseconds);
-        Array.Sort(allocations);
-        Console.WriteLine(FormattableString.Invariant($"{resolvers} fresh resolvers x {emojiCount} emoji, median of seven warmed samples: {milliseconds[3]:F3} ms; {allocations[3]} allocated bytes"));
 
-        void ResolveNew()
+        void ResolveNew(bool useCollection)
         {
             using TerminalFontResolver resolver = new();
             for (int i = 0; i < emojiCount; i++)
-                _ = resolver.ResolveTypeface(primary, 0x1F600 + i, CultureInfo.InvariantCulture);
+                _ = useCollection
+                    ? resolver.ResolveTypeface(collection, TerminalTypefaceStyle.Regular, 0x1F600 + i, CultureInfo.InvariantCulture)
+                    : resolver.ResolveTypeface(primary, 0x1F600 + i, CultureInfo.InvariantCulture);
         }
     }
 }
