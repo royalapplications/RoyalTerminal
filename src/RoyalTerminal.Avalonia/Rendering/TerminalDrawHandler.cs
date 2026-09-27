@@ -151,12 +151,28 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             (float logicalWidth, float logicalHeight) = GetRenderTargetLogicalSize(
                 renderBounds,
                 canvas.LocalClipBounds);
-            (int width, int height) = GetRenderTargetPixelSize(
-                renderBounds,
-                canvas.LocalClipBounds,
-                renderScale.X,
-                renderScale.Y);
-            SKRect logicalDestinationRect = new(0, 0, width / renderScale.X, height / renderScale.Y);
+            int width;
+            int height;
+            SKRect logicalDestinationRect;
+            if (TerminalPixelSnapLayout.TryCreate(
+                    logicalWidth, logicalHeight, renderScale.X, renderScale.Y,
+                    canvas.TotalMatrix, out TerminalPixelSnapLayout pixelLayout))
+            {
+                width = pixelLayout.Width;
+                height = pixelLayout.Height;
+                logicalDestinationRect = pixelLayout.Destination;
+                // No physical coverage: don't allocate a phantom one-pixel FBO.
+                if (width == 0 || height == 0)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                (width, height) = GetRenderTargetPixelSize(
+                    renderBounds, canvas.LocalClipBounds, renderScale.X, renderScale.Y);
+                logicalDestinationRect = new SKRect(0, 0, width / renderScale.X, height / renderScale.Y);
+            }
             SKRect logicalClipRect = new(0, 0, logicalWidth, logicalHeight);
             SKImage? terminalFrame = null;
             SKColor background = default;
