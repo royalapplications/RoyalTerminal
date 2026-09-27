@@ -87,9 +87,9 @@ public sealed class GhosttyRenderOverscanTypesTests
         GhosttyResizeWindow size = new() { Width = 800, Height = 600 };
         Assert.Equal(4, (byte*)&size.Height - (byte*)&size);
         GhosttyAction action = default;
-        action.Data.ResizeWindow = size;
-        Assert.Equal(800u, action.Data.ResizeWindow.Width);
-        Assert.Equal(600u, action.Data.ResizeWindow.Height);
-        Assert.Equal(0, (byte*)&action.Data.ResizeWindow - (byte*)&action.Data);
+        action.Action.ResizeWindow = size;
+        Assert.Equal(800u, action.Action.ResizeWindow.Width);
+        Assert.Equal(600u, action.Action.ResizeWindow.Height);
+        Assert.Equal(0, (byte*)&action.Action.ResizeWindow - (byte*)&action.Action);
     }
 }
