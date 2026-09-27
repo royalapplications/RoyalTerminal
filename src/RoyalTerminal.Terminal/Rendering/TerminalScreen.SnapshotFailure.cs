@@ -14,6 +14,12 @@ internal enum SnapshotMutationCheckpoint
     RowRetirement,
     HistoryPrepared,
     InactiveBufferPrepared,
+    BufferSwitchPrepared,
+    BufferSwitchPublished,
+    RowRecycling,
+    ThemeRowResolved,
+    ResetPrepared,
+    CursorResizeRestore,
 }
 
 public sealed partial class TerminalScreen

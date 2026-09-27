@@ -102,7 +102,12 @@ public sealed partial class TerminalScreen
             token, ref counter, restart, SnapshotPageLayout());
     }
 
-    internal void EndSnapshotCursorHyperlink(int key) => _snapshotPageTracker?.EndCursorHyperlink(key);
+    internal void EndSnapshotCursorHyperlink(int key)
+    {
+        ThrowIfSnapshotMutationFailed();
+        try { _snapshotPageTracker?.EndCursorHyperlink(key); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
 
     internal int SnapshotCursorHyperlinkToken(int key, int fallback)
         => TracksSnapshotMetadata ? _snapshotPageTracker?.CursorHyperlinkToken(key, fallback) ?? fallback : fallback;

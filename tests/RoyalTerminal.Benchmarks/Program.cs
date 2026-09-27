@@ -41,6 +41,12 @@ if (args.Contains("--managed-print", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-raster", StringComparer.Ordinal))
+{
+    ManagedRasterBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
 {
     ApcIngestionBenchmark.Run();

@@ -3993,6 +3993,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SwitchToAltScreen(bool clearAlt)
     {
+        // The protocol has already changed mode/cursor registers. Unlike the
+        // screen-only preparation API, failure here cannot leave a usable owner.
+        try { SwitchToAltScreenCore(clearAlt); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void SwitchToAltScreenCore(bool clearAlt)
+    {
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
@@ -4011,8 +4019,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         CaptureDepartingSnapshotCursor();
         _primaryCharsets = _charsets;
         _currentHyperlinkId = 0;
-        _inAltScreen = true;
         _screen.SwitchToAlternateBuffer(clear: false);
+        _inAltScreen = true;
         _kittyStore = _alternateKittyStore ??= new ManagedKittyGraphicsStore(_options.KittyGraphicsStorageLimitBytes);
         AdvanceKittyAnimations();
         PublishKittyGraphics();
@@ -4030,6 +4038,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SwitchToMainScreen(bool restoreRestartPosition = false, bool copyCursor = true)
     {
+        try { SwitchToMainScreenCore(restoreRestartPosition, copyCursor); }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void SwitchToMainScreenCore(bool restoreRestartPosition, bool copyCursor)
+    {
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (!_inAltScreen) return;
         CaptureDepartingSnapshotCursor();
@@ -4042,6 +4056,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         _screen.SwitchToPrimaryBuffer();
+        _inAltScreen = false;
         _alternateCharsets = _charsets;
         _currentHyperlinkId = 0;
         _kittyStore = _primaryKittyStore;
@@ -4054,7 +4069,6 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             _cursorRow = _savedMainCursorRow;
             _delayedWrap = _savedMainDelayedWrap;
         }
-        _inAltScreen = false;
         if (!copyCursor)
         {
             // 1049 returns to the dormant primary cursor before DECRC. Unlike
@@ -5096,6 +5110,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ResizeCheckpoint?.Invoke(alternateScreen ? ManagedResizeCheckpoint.AlternateCursor : ManagedResizeCheckpoint.PrimaryCursor);
             return hyperlink;
         }
+        catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
         finally
         {
             cursorLease?.Dispose();

@@ -708,6 +708,34 @@ history/ownership failure and retry cases are authored but unrun. The
 benchmark and CI execution remains deferred. This is not yet a completed audit
 of every allocator failure or platform path.
 
+Screen-only buffer switching now prepares missing rows and raster collections
+before publishing the selected buffer, following Ghostty `ScreenSet.getInit`
+and `switchTo`, [Windows Terminal's alternate-buffer creation](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalCore/TerminalApi.cpp)
+and [xterm.js's fill-before-activation ordering](https://github.com/xtermjs/xterm.js/blob/master/src/common/buffer/BufferSet.ts).
+The existing Ghostty-compatible persistent alternate-buffer policy is unchanged.
+Failed screen-only preparation remains retryable; failure after selection or
+within a protocol switch faults the owner, since protocol mode/cursor registers
+may already have changed. Row recycling, multi-row scroll-clear, theme recoloring
+and raster-anchor shifts also contain partial allocation failures. A failed owner
+cannot be repaired by clearing all rows. A normal screen reset prepares replacement
+rows directly without normalizing a dormant buffer only to discard it.
+
+Resize failures latch their private staging owner before cursor-lease cleanup.
+Faulted leases do not fork shared tables during unwinding, preserving the original
+failure and the outer transaction's usable pre-resize owner. Successful and
+non-faulted abandoned leases retain their existing reference-restoration rules.
+
+Raster-image retirement skips registry scans when scrolling changes anchors but
+removes no placements. Empty/single-image cleanup needs no scratch allocation;
+multi-image cleanup reuses owner-local scratch and removes stale dictionary entries
+without a temporary deletion list. This scratch is not snapshot state and is not
+shared by COW owners. Replacement reserves registry/list capacity before deleting
+overlap or clearing text. Thirty structural/cursor/raster regression cases and a
+`--managed-raster` benchmark (1/2/8/64 live images, warmed replacement, seven samples)
+are authored but unrun. Expected savings are fewer temporary collections and
+unnecessary source scans, not a measured throughput claim; before/after profiling
+and all execution remain in the final validation stage.
+
 Full-width IL/DL now clamp the count to the affected rows and traverse once in
 the native direction, copying directly from the requested distance. In-place
 SU/SD share this bounded movement; the primary top-origin history path still

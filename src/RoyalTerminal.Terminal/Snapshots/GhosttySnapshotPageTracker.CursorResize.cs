@@ -70,8 +70,16 @@ internal sealed partial class GhosttySnapshotPageTracker
         // Must run after prompt erasure, not merely after row remapping.
         internal int Complete(int cursorRow, ref uint counter)
         {
+            _screen.ThrowIfSnapshotMutationFailed();
+            try { return CompleteCore(cursorRow, ref counter); }
+            catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+        }
+
+        private int CompleteCore(int cursorRow, ref uint counter)
+        {
             GhosttySnapshotPageTracker owner = _owner ?? throw new InvalidOperationException("Resize cursor lease already completed.");
             int token = _screen.RestoreSnapshotResizeCursor(_key, cursorRow, _pen, _token, ref counter);
+            _screen.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.CursorResizeRestore);
             if (owner.FindResizeStorage(_screen, _key, _identity, out _, out State? state))
             {
                 state!.Storage.Styles.ReleaseTableReference(StyleId);
@@ -85,7 +93,16 @@ internal sealed partial class GhosttySnapshotPageTracker
         {
             GhosttySnapshotPageTracker? owner = _owner;
             _owner = null;
-            if (owner is null) return;
+            // A failed private resize will be discarded by its outer transaction.
+            // Do not fork a page table while unwinding or replace the first OOM.
+            if (owner is null || owner.MutationFailed || _screen.SnapshotMutationFailed) return;
+            try { Restore(owner); }
+            catch (OutOfMemoryException failure) when (_screen.RecordSnapshotMutationFailure(failure)) { throw; }
+        }
+
+        private void Restore(GhosttySnapshotPageTracker owner)
+        {
+            _screen.MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.CursorResizeRestore);
             if (owner.FindResizeStorage(_screen, _key, _identity, out GhosttySnapshotPageAllocation? page, out State? state))
             {
                 // Before destructive page replacement, failure can restore the

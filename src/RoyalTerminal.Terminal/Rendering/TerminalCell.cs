@@ -779,6 +779,8 @@ public sealed partial class TerminalScreen
     private Dictionary<int, TerminalKittyImageSource> _kittyImagesById = [];
     private Dictionary<int, TerminalRasterImageSource> _rasterImagesById = [];
     private List<TerminalRasterImagePlacement> _rasterPlacements = [];
+    // Scratch only: never copied or transferred with published screen state.
+    private HashSet<int>? _rasterReferencedIds;
     private Dictionary<int, TerminalRasterImageSource>? _primaryRasterImagesById;
     private List<TerminalRasterImagePlacement>? _primaryRasterPlacements;
     private Dictionary<int, TerminalRasterImageSource>? _alternateRasterImagesById;
@@ -805,6 +807,7 @@ public sealed partial class TerminalScreen
         get => _scrollbackLimit;
         set
         {
+            ThrowIfSnapshotMutationFailed();
             int normalizedValue = NormalizeScrollbackLimit(value);
             if (_scrollbackLimit == normalizedValue)
             {
@@ -902,7 +905,13 @@ public sealed partial class TerminalScreen
     public void ApplyTheme(TerminalTheme theme, bool invalidateRows = true)
     {
         ArgumentNullException.ThrowIfNull(theme);
+        ThrowIfSnapshotMutationFailed();
+        try { ApplyThemeCore(theme, invalidateRows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
 
+    private void ApplyThemeCore(TerminalTheme theme, bool invalidateRows)
+    {
         if (CellThemeColorsChanged(_theme, theme))
         {
             ResolveExistingCellColors(theme);
@@ -944,11 +953,12 @@ public sealed partial class TerminalScreen
         }
     }
 
-    private static void ResolveRowColors(TerminalRowBuffer rows, TerminalTheme theme)
+    private void ResolveRowColors(TerminalRowBuffer rows, TerminalTheme theme)
     {
         for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
             rows[rowIndex].ResolveCellColors(theme);
+            MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.ThemeRowResolved);
         }
     }
 
@@ -1182,6 +1192,13 @@ public sealed partial class TerminalScreen
             throw new ArgumentException("Raster image source and placement ids must match.", nameof(placement));
         }
 
+        ThrowIfSnapshotMutationFailed();
+        // Reserve registry/list growth before removing overlapped images or
+        // clearing text. Same-id replacements already own their dictionary slot.
+        if (!_rasterImagesById.ContainsKey(source.ImageId))
+            _rasterImagesById.EnsureCapacity(_rasterImagesById.Count + 1);
+        _rasterPlacements.EnsureCapacity(_rasterPlacements.Count + 1);
+
         int startAbsRow = GetRasterPlacementStartRow(placement);
         int endAbsRow = GetRasterPlacementEndRow(placement);
         int startColumn = GetRasterPlacementStartColumn(placement);
@@ -1285,6 +1302,13 @@ public sealed partial class TerminalScreen
     /// <summary>Shifts raster image anchors inside a viewport row range.</summary>
     public void ShiftRasterGraphicsInViewportRows(int startViewportRow, int endViewportRow, int rowDelta)
     {
+        ThrowIfSnapshotMutationFailed();
+        try { ShiftRasterGraphicsInViewportRowsCore(startViewportRow, endViewportRow, rowDelta); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ShiftRasterGraphicsInViewportRowsCore(int startViewportRow, int endViewportRow, int rowDelta)
+    {
         if (_rasterPlacements.Count == 0 || rowDelta == 0)
         {
             return;
@@ -1295,6 +1319,7 @@ public sealed partial class TerminalScreen
         int startAbsRow = GetAbsoluteRowForViewportRow(startRow);
         int endAbsRow = GetAbsoluteRowForViewportRow(endRow);
         bool changed = false;
+        bool removed = false;
 
         for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
         {
@@ -1305,14 +1330,14 @@ public sealed partial class TerminalScreen
             }
 
             int nextAnchorRow = placement.AnchorRow + rowDelta;
-            TerminalRasterImagePlacement shifted = placement.WithAnchorRow(nextAnchorRow);
-            if (!RasterPlacementIntersectsRows(shifted, startAbsRow, endAbsRow))
+            if (nextAnchorRow > endAbsRow || GetRasterPlacementEndRow(placement) + rowDelta < startAbsRow)
             {
                 _rasterPlacements.RemoveAt(i);
+                removed = true;
             }
             else
             {
-                _rasterPlacements[i] = shifted;
+                _rasterPlacements[i] = placement.WithAnchorRow(nextAnchorRow);
             }
 
             changed = true;
@@ -1320,7 +1345,7 @@ public sealed partial class TerminalScreen
 
         if (changed)
         {
-            TrimUnreferencedRasterSources();
+            if (removed) TrimUnreferencedRasterSources();
             InvalidateViewport();
         }
     }
@@ -1332,6 +1357,13 @@ public sealed partial class TerminalScreen
 
     private TerminalRow AddRowCore(int maxRows, GhosttySnapshotScrollbackQuota? growthQuota = null)
     {
+        ThrowIfSnapshotMutationFailed();
+        try { return AddRowAndTrim(maxRows, growthQuota); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private TerminalRow AddRowAndTrim(int maxRows, GhosttySnapshotScrollbackQuota? growthQuota)
+    {
         int removedRows = Math.Max(0, _rows.Count + 1 - maxRows);
         TerminalRow row;
         if (removedRows > 0 && _rows.Count > 0)
@@ -1340,6 +1372,7 @@ public sealed partial class TerminalScreen
             // row. Clearing all metadata prevents stale wrap/resize state.
             row = _rows[0];
             RemoveRows(0, Math.Min(removedRows, _rows.Count));
+            MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.RowRecycling);
             // Reusing the CLR array is not retaining the historical native page.
             // Admission assigns the recycled row to the new tail's capacity.
             row.SnapshotAllocation = null;
@@ -1374,6 +1407,23 @@ public sealed partial class TerminalScreen
     /// </summary>
     public void SwitchToAlternateBuffer(bool clear)
     {
+        ThrowIfSnapshotMutationFailed();
+        // Ghostty ScreenSet.getInit and xterm.js fillViewportRows prepare a new
+        // buffer before selecting it. Preparation failure keeps the old owner.
+        TerminalRowBuffer rows = _alternateBufferActive ? _rows :
+            _alternateRows ?? CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        Dictionary<int, TerminalRasterImageSource> images = _alternateBufferActive ? _rasterImagesById :
+            _alternateRasterImagesById ?? [];
+        List<TerminalRasterImagePlacement> placements = _alternateBufferActive ? _rasterPlacements :
+            _alternateRasterPlacements ?? [];
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.BufferSwitchPrepared);
+        try { SwitchToAlternateBufferCore(clear, rows, images, placements); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void SwitchToAlternateBufferCore(bool clear, TerminalRowBuffer rows,
+        Dictionary<int, TerminalRasterImageSource> images, List<TerminalRasterImagePlacement> placements)
+    {
         if (_alternateBufferActive)
         {
             ScrollOffset = 0;
@@ -1395,10 +1445,10 @@ public sealed partial class TerminalScreen
         _alternateBufferActive = true;
         _viewportTop = 0;
 
-        _alternateRows ??= new TerminalRowBuffer(ViewportRows);
-        _rows = _alternateRows;
-        _rasterImagesById = _alternateRasterImagesById ?? [];
-        _rasterPlacements = _alternateRasterPlacements ?? [];
+        _rows = _alternateRows = rows;
+        _rasterImagesById = images;
+        _rasterPlacements = placements;
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.BufferSwitchPublished);
         EnsureAlternateRows();
 
         if (clear)
@@ -1415,21 +1465,34 @@ public sealed partial class TerminalScreen
     /// </summary>
     public void SwitchToPrimaryBuffer()
     {
+        ThrowIfSnapshotMutationFailed();
         if (!_alternateBufferActive)
         {
             return;
         }
 
+        TerminalRowBuffer rows = _primaryRows ?? CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        Dictionary<int, TerminalRasterImageSource> images = _primaryRasterImagesById ?? [];
+        List<TerminalRasterImagePlacement> placements = _primaryRasterPlacements ?? [];
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.BufferSwitchPrepared);
+        try { SwitchToPrimaryBufferCore(rows, images, placements); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void SwitchToPrimaryBufferCore(TerminalRowBuffer rows,
+        Dictionary<int, TerminalRasterImageSource> images, List<TerminalRasterImagePlacement> placements)
+    {
         _alternateRows = _rows;
         _alternateRasterImagesById = _rasterImagesById;
         _alternateRasterPlacements = _rasterPlacements;
-        _rows = _primaryRows ?? CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
-        _rasterImagesById = _primaryRasterImagesById ?? [];
-        _rasterPlacements = _primaryRasterPlacements ?? [];
+        _rows = rows;
+        _rasterImagesById = images;
+        _rasterPlacements = placements;
         _primaryRows = null;
         _primaryRasterImagesById = null;
         _primaryRasterPlacements = null;
         _alternateBufferActive = false;
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.BufferSwitchPublished);
 
         if (!_snapshotRowGeometry) ResizeActiveRows(Columns);
         EnsureMinimumRows(ViewportRows);
@@ -1442,6 +1505,13 @@ public sealed partial class TerminalScreen
     /// Releases any inactive alternate screen rows.
     /// </summary>
     public void DiscardInactiveAlternateBuffer()
+    {
+        ThrowIfSnapshotMutationFailed();
+        try { DiscardInactiveAlternateBufferCore(); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void DiscardInactiveAlternateBufferCore()
     {
         if (_alternateBufferActive)
         {
@@ -1568,12 +1638,19 @@ public sealed partial class TerminalScreen
     /// </summary>
     public void ClearAll()
     {
-        if (_alternateBufferActive)
-        {
-            SwitchToPrimaryBuffer();
-        }
+        ThrowIfSnapshotMutationFailed();
+        TerminalRowBuffer rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+        MutationCheckpoint?.Invoke(SnapshotMutationCheckpoint.ResetPrepared);
+        try { ClearAllCore(rows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
 
-        _rows = CreateRows(Columns, ViewportRows, DefaultForeground, DefaultBackground);
+    private void ClearAllCore(TerminalRowBuffer rows)
+    {
+        // A reset replaces both buffers; do not resize/clear the dormant one
+        // only to discard it. Replacement rows are prepared before selection.
+        _rows = rows;
+        _alternateBufferActive = false;
         _snapshotPageTracker = null;
         _primaryRows = null;
         if (_alternateRows is not null) _snapshotAlternateGeneration = unchecked(_snapshotAlternateGeneration + 1);
@@ -1601,6 +1678,13 @@ public sealed partial class TerminalScreen
     // Return the active-area displacement so the parser can reload its cursor
     // pin rather than unconditionally homing a cursor on a retained blank row.
     internal int MoveViewportToScrollbackAndClearCore(bool clearActiveRows = true)
+    {
+        ThrowIfSnapshotMutationFailed();
+        try { return MoveViewportToScrollbackAndClearRows(clearActiveRows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private int MoveViewportToScrollbackAndClearRows(bool clearActiveRows)
     {
         if (_alternateBufferActive)
         {
@@ -1851,30 +1935,34 @@ public sealed partial class TerminalScreen
 
     private void ShiftRasterGraphicsAfterTopRowsRemoved(int removedRows)
     {
+        try { ShiftRasterGraphicsAfterTopRowsRemovedCore(removedRows); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void ShiftRasterGraphicsAfterTopRowsRemovedCore(int removedRows)
+    {
         ShiftAnchorsAfterTopRowsRemoved(removedRows);
         if (_rasterPlacements.Count == 0 || removedRows <= 0)
         {
             return;
         }
 
-        bool changed = false;
+        bool removed = false;
         for (int i = _rasterPlacements.Count - 1; i >= 0; i--)
         {
-            TerminalRasterImagePlacement placement = _rasterPlacements[i].WithAnchorRow(
-                _rasterPlacements[i].AnchorRow - removedRows);
-            if (GetRasterPlacementEndRow(placement) < 0)
+            TerminalRasterImagePlacement placement = _rasterPlacements[i];
+            if (GetRasterPlacementEndRow(placement) - removedRows < 0)
             {
                 _rasterPlacements.RemoveAt(i);
+                removed = true;
             }
             else
             {
-                _rasterPlacements[i] = placement;
+                _rasterPlacements[i] = placement.WithAnchorRow(placement.AnchorRow - removedRows);
             }
-
-            changed = true;
         }
 
-        if (changed)
+        if (removed)
         {
             TrimUnreferencedRasterSources();
         }
@@ -1882,35 +1970,44 @@ public sealed partial class TerminalScreen
 
     private void TrimUnreferencedRasterSources()
     {
+        try { TrimUnreferencedRasterSourcesCore(); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
+    private void TrimUnreferencedRasterSourcesCore()
+    {
         if (_rasterImagesById.Count == 0)
         {
             return;
         }
 
-        HashSet<int> activeIds = new();
-        for (int i = 0; i < _rasterPlacements.Count; i++)
+        if (_rasterPlacements.Count == 0)
         {
-            activeIds.Add(_rasterPlacements[i].ImageId);
-        }
-
-        List<int>? staleIds = null;
-        foreach (int imageId in _rasterImagesById.Keys)
-        {
-            if (!activeIds.Contains(imageId))
-            {
-                staleIds ??= [];
-                staleIds.Add(imageId);
-            }
-        }
-
-        if (staleIds is null)
-        {
+            _rasterImagesById.Clear();
             return;
         }
 
-        for (int i = 0; i < staleIds.Count; i++)
+        if (_rasterPlacements.Count == 1)
         {
-            _rasterImagesById.Remove(staleIds[i]);
+            int retained = _rasterPlacements[0].ImageId;
+            foreach (KeyValuePair<int, TerminalRasterImageSource> image in _rasterImagesById)
+                if (image.Key != retained) _rasterImagesById.Remove(image.Key);
+            return;
+        }
+
+        HashSet<int> activeIds = _rasterReferencedIds ??= new();
+        try
+        {
+            for (int i = 0; i < _rasterPlacements.Count; i++)
+                activeIds.Add(_rasterPlacements[i].ImageId);
+            // .NET supports Remove during Dictionary enumeration. No stale-id
+            // list, Keys wrapper, or fresh set is needed for every scroll/erase.
+            foreach (KeyValuePair<int, TerminalRasterImageSource> image in _rasterImagesById)
+                if (!activeIds.Contains(image.Key)) _rasterImagesById.Remove(image.Key);
+        }
+        finally
+        {
+            activeIds.Clear();
         }
     }
 
