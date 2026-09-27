@@ -396,6 +396,42 @@ observed/unobserved write loop to quantify notification overhead. Before/after
 profiling, allocation measurements and all validation remain deferred; no
 measured speedup is claimed.
 
+## Managed snapshot grid transport
+
+The grid codec ports the row-transport work from
+[Ghostty #13848](https://github.com/ghostty-org/ghostty/pull/13848):
+[vectorized encoding](https://github.com/ghostty-org/ghostty/commit/973f619a2),
+[narrow decoding](https://github.com/ghostty-org/ghostty/commit/2aaad3ca9),
+[per-row wide repair](https://github.com/ghostty-org/ghostty/commit/7c1014ef6) and
+[batched grapheme encoding](https://github.com/ghostty-org/ghostty/commit/593762cfa).
+Runtime-vectorized trailing-zero detection and OR classification select the
+same 1/2/4/8-byte row width. `Vector<T>` narrowing packs 1/2/4-byte output, while
+8-byte output bulk-copies the managed wire words, which already contain link
+IDs. One/two-byte input widens in vectors; surrogate BMP lanes become U+FFFD
+before widening. Full-word semantic normalization remains scalar. Only rows
+containing width markers run the separate wide-pair repair, including elided
+default cells beyond an encoded prefix.
+
+No hardware-vector or little-endian assumption leaks into the wire contract:
+scalar tails and nonaccelerated/big-endian fallbacks retain explicit little-endian
+conversion. Helpers validate spans before writes and operate within the existing
+4 KiB stack buffer. Grapheme entries share that buffer across small records;
+larger entries flush then stream in bounded chunks. Suffix codepoints bulk-copy
+on little-endian hosts, entry order remains row-major and empty suffix maps avoid
+a grid scan. An oversized owned suffix is rejected instead of truncating its
+16-bit length field. Decode limits, suffix filtering, page ID resolution and
+live allocator reconstruction remain unchanged.
+
+[Windows Terminal text export](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
+and [xterm.js serialization](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-serialize/src/SerializeAddon.ts)
+do not define this binary format; Ghostty remains the wire reference. New scalar
+oracle, all-BMP, lane/tail/alignment, sentinel/bounds, width classification, suffix
+batching and zero-allocation cases are authored but unrun. The
+`--managed-snapshot-grid` harness separates encode/decode for blank, ASCII, BMP,
+styled, linked, wide and dense/sparse-grapheme grids. Before/after measurements,
+hardware-disabled execution, native golden/round-trip tests and the full suite
+remain deferred; no measured speedup or cross-platform sign-off is claimed.
+
 ## Managed snapshot record scratch
 
 The managed binary snapshot encoder follows Ghostty's

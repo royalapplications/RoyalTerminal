@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.Terminal.Snapshots;
 
@@ -78,21 +79,10 @@ internal sealed class GhosttySnapshotGrid
             int width = 1 << ((rawFlags >> 4) & 3);
             ReadOnlySpan<byte> words = Take(ref remaining, encodedCount * width);
             Span<ulong> target = cells.AsSpan(row * columns, columns);
-            for (int column = 0; column < encodedCount; column++)
-            {
-                ReadOnlySpan<byte> word = words[(column * width)..];
-                ulong bits = width switch
-                {
-                    1 => (ulong)word[0] << 2,
-                    2 => (ulong)BinaryPrimitives.ReadUInt16LittleEndian(word) << 2,
-                    4 => BinaryPrimitives.ReadUInt32LittleEndian(word),
-                    _ => BinaryPrimitives.ReadUInt64LittleEndian(word),
-                };
-                target[column] = NormalizeCell(bits);
-            }
+            bool hasWide = GhosttySnapshotGridCodec.Decode(words, target[..encodedCount], width);
             // Include elided defaults: a final encoded wide marker can have
             // no tail when the next (unencoded) cell is the implicit default.
-            for (int column = 0; column < columns; column++)
+            for (int column = 0; hasWide && column < columns; column++)
             {
                 int kind = Width(target[column]);
                 if (column > 0 && Width(target[column - 1]) == 1 && kind != 2)
@@ -162,12 +152,7 @@ internal sealed class GhosttySnapshotGrid
         for (int row = 0; row < Rows; row++)
         {
             ReadOnlySpan<ulong> cells = _cells.AsSpan(row * Columns, Columns);
-            int count = Columns;
-            while (count > 0 && cells[count - 1] == 0) count--;
-            ulong combined = 0;
-            for (int column = 0; column < count; column++) combined |= cells[column];
-            int selector = (combined & ~(0xFFUL << 2)) == 0 ? 0 :
-                (combined & ~(0xFFFFUL << 2)) == 0 ? 1 : combined <= uint.MaxValue ? 2 : 3;
+            (int count, int selector) = GhosttySnapshotGridCodec.Classify(cells);
             int width = 1 << selector;
             scratch[0] = (byte)(_rows[row] | (selector << 4));
             BinaryPrimitives.WriteUInt16LittleEndian(scratch[1..], (ushort)count);
@@ -175,63 +160,62 @@ internal sealed class GhosttySnapshotGrid
             for (int start = 0; start < count;)
             {
                 int batch = Math.Min(count - start, scratch.Length / width);
-                for (int i = 0; i < batch; i++)
-                {
-                    ulong word = cells[start + i];
-                    Span<byte> output = scratch[(i * width)..];
-                    switch (width)
-                    {
-                        case 1: output[0] = (byte)(word >> 2); break;
-                        case 2: BinaryPrimitives.WriteUInt16LittleEndian(output, (ushort)(word >> 2)); break;
-                        case 4: BinaryPrimitives.WriteUInt32LittleEndian(output, (uint)word); break;
-                        default: BinaryPrimitives.WriteUInt64LittleEndian(output, word); break;
-                    }
-                }
+                GhosttySnapshotGridCodec.Encode(cells.Slice(start, batch), scratch, width);
                 destination.Write(scratch[..(batch * width)]);
                 start += batch;
             }
         }
         BinaryPrimitives.WriteUInt32LittleEndian(scratch, (uint)_suffixes.Count);
         destination.Write(scratch[..4]);
+        if (_suffixes.Count == 0) return;
         // Canonical suffix order is row-major, independent of input order.
+        // Small entries share the existing bounded scratch buffer and one write
+        // per flush. Oversized entries retain bounded streaming chunks.
+        int used = 0;
         for (int index = 0; index < _cells.Length; index++)
         {
             if ((_cells[index] & 3) != 1) continue;
             uint[] suffix = _suffixes[index];
-            BinaryPrimitives.WriteUInt16LittleEndian(scratch, (ushort)(index / Columns));
-            BinaryPrimitives.WriteUInt16LittleEndian(scratch[2..], (ushort)(index % Columns));
-            BinaryPrimitives.WriteUInt16LittleEndian(scratch[4..], (ushort)suffix.Length);
+            if (suffix.Length > ushort.MaxValue) throw new InvalidDataException("Snapshot grapheme entry exceeds the wire limit.");
+            int needed = 6 + suffix.Length * 4;
+            if (needed > scratch.Length - used)
+            {
+                if (used > 0) destination.Write(scratch[..used]);
+                used = 0;
+            }
+            BinaryPrimitives.WriteUInt16LittleEndian(scratch[used..], (ushort)(index / Columns));
+            BinaryPrimitives.WriteUInt16LittleEndian(scratch[(used + 2)..], (ushort)(index % Columns));
+            BinaryPrimitives.WriteUInt16LittleEndian(scratch[(used + 4)..], (ushort)suffix.Length);
+            if (needed <= scratch.Length)
+            {
+                WriteCodepoints(suffix, scratch[(used + 6)..]);
+                used += needed;
+                continue;
+            }
             destination.Write(scratch[..6]);
             for (int start = 0; start < suffix.Length;)
             {
                 int batch = Math.Min(suffix.Length - start, scratch.Length / 4);
-                for (int i = 0; i < batch; i++)
-                    BinaryPrimitives.WriteUInt32LittleEndian(scratch[(i * 4)..], suffix[start + i]);
+                WriteCodepoints(suffix.AsSpan(start, batch), scratch);
                 destination.Write(scratch[..(batch * 4)]);
                 start += batch;
             }
         }
+        if (used > 0) destination.Write(scratch[..used]);
+    }
+
+    private static void WriteCodepoints(ReadOnlySpan<uint> codepoints, Span<byte> destination)
+    {
+        if (BitConverter.IsLittleEndian)
+            MemoryMarshal.AsBytes(codepoints).CopyTo(destination);
+        else
+            for (int i = 0; i < codepoints.Length; i++)
+                BinaryPrimitives.WriteUInt32LittleEndian(destination[(i * 4)..], codepoints[i]);
     }
 
     private static int Width(ulong cell) => (int)((cell >> 42) & 3);
     private static bool ValidScalar(uint cp) => cp <= 0x10FFFF && cp is not (>= 0xD800 and <= 0xDFFF);
     private static bool ValidSuffix(uint cp) => cp != 0 && ValidScalar(cp);
-
-    private static ulong NormalizeCell(ulong cell)
-    {
-        uint content = (uint)((cell >> 2) & 0xFFFFFF);
-        switch (cell & 3)
-        {
-            case 0:
-            case 1:
-                cell &= ~3UL;
-                if (!ValidScalar(content)) cell = (cell & ~ContentMask) | (0xFFFDUL << 2);
-                break;
-            case 2: cell = (cell & ~ContentMask) | ((ulong)(byte)content << 2); break;
-        }
-        if (((cell >> 46) & 3) == 3) cell &= ~(3UL << 46);
-        return (cell >> 48) != 0 ? cell | HyperlinkFlag : cell & ~HyperlinkFlag;
-    }
 
     private static ReadOnlySpan<byte> Take(ref ReadOnlySpan<byte> remaining, int count)
     {

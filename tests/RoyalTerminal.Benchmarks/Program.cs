@@ -35,6 +35,12 @@ if (args.Contains("--managed-snapshot-encode", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-snapshot-grid", StringComparer.Ordinal))
+{
+    ManagedSnapshotGridBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-snapshot-reflow", StringComparer.Ordinal))
 {
     ManagedSnapshotReflowBenchmark.Run();
