@@ -34,7 +34,7 @@ public sealed partial class BasicVtProcessor
         _delayedWrap = false;
         LineFeed(wrapForced: atScreenEdge, softWrap: true);
         _cursorCol = _scrollLeft;
-        TerminalRow destination = _screen.GetViewportRow(_cursorRow);
+        TerminalRow destination = GetActiveRow(_cursorRow);
         ClearPreservedCellsForMutation(destination);
         ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
         WriteWidenedGraphemeCell(destination, _scrollLeft, original.Codepoint, 2);

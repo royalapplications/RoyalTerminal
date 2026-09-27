@@ -20,7 +20,7 @@ public sealed partial class BasicVtProcessor
         int end = _screen.ViewportRows - 1;
         while (end >= _scrollBottom)
         {
-            TerminalRow last = _screen.GetViewportRow(end);
+            TerminalRow last = GetActiveRow(end);
             if (_screen.TracksSnapshotMetadata && last.SnapshotAllocation is null)
             {
                 using GhosttySnapshotPageTracker.RowEdit observed = _screen.EditSnapshotRowMetadata(last);
@@ -28,11 +28,11 @@ public sealed partial class BasicVtProcessor
             GhosttySnapshotPageAllocation? page = last.SnapshotAllocation;
             int start = end;
             while (start > _scrollBottom &&
-                ReferenceEquals(_screen.GetViewportRow(start - 1).SnapshotAllocation, page)) start--;
+                ReferenceEquals(GetActiveRow(start - 1).SnapshotAllocation, page)) start--;
 
             _screen.RotateViewportRowsDown(start, end);
             if (start > _scrollBottom)
-                CopyRow(_screen.GetViewportRow(start - 1), last, preserveWrap: true);
+                CopyRow(GetActiveRow(start - 1), last, preserveWrap: true);
             else
             {
                 if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
@@ -57,7 +57,7 @@ public sealed partial class BasicVtProcessor
         int start = _scrollTop;
         while (start <= _scrollBottom)
         {
-            TerminalRow first = _screen.GetViewportRow(start);
+            TerminalRow first = GetActiveRow(start);
             if (_screen.TracksSnapshotMetadata && first.SnapshotAllocation is null)
             {
                 using GhosttySnapshotPageTracker.RowEdit observed = _screen.EditSnapshotRowMetadata(first);
@@ -65,7 +65,7 @@ public sealed partial class BasicVtProcessor
             GhosttySnapshotPageAllocation? page = first.SnapshotAllocation;
             int end = start;
             while (end < _scrollBottom &&
-                ReferenceEquals(_screen.GetViewportRow(end + 1).SnapshotAllocation, page)) end++;
+                ReferenceEquals(GetActiveRow(end + 1).SnapshotAllocation, page)) end++;
 
             if (end == _scrollBottom)
             {
@@ -74,7 +74,7 @@ public sealed partial class BasicVtProcessor
             }
             _screen.RotateViewportRowsUp(start, end);
             if (end < _scrollBottom)
-                CopyRow(_screen.GetViewportRow(end + 1), first, preserveWrap: true);
+                CopyRow(GetActiveRow(end + 1), first, preserveWrap: true);
             start = end + 1;
         }
         _screen.InvalidateViewport();

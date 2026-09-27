@@ -54,11 +54,15 @@ public sealed class TerminalHyperlinkCollectionTests
     [Fact]
     public void BothBuffersAndUnprintedCursorRemainRootsUnderPressure()
     {
-        TerminalScreen screen = new(8, 2);
+        // Direct screen collection can find unprinted cursor roots through
+        // snapshot tracking. Without it the processor supplies its own tokens.
+        TerminalScreen screen = new(8, 2) { SnapshotScrollbackQuota = new() { PageAlignment = 4096 } };
         using BasicVtProcessor processor = new(screen);
-        Write(processor, Open("primary") + "P" + Close + "\u001b[?47h" + Open("alternate") + "A" + Close + "\u001b[?47l");
+        Write(processor, Open("primary") + "P" + Close + "\u001b[?47h\u001b[H" + Open("alternate") + "A" + Close + "\u001b[?47l");
         int primary = screen.GetSnapshotRows(0)![0].ReadOnlyCells[0].HyperlinkId;
         int alternate = screen.GetSnapshotRows(1)![0].ReadOnlyCells[0].HyperlinkId;
+        Assert.NotEqual(0, primary);
+        Assert.NotEqual(0, alternate);
         Churn(processor, 768);
         Write(processor, Open("cursor"));
         int cursor = screen.SnapshotCursorHyperlinkToken(0, 0);

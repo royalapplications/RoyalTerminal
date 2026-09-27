@@ -90,7 +90,7 @@ public sealed partial class BasicVtProcessor
             if (_scrollLeft != 0 || _delayedWrap) return 0;
             if (_cursorCol > 0)
             {
-                TerminalRow previous = _screen.GetViewportRow(_cursorRow);
+                TerminalRow previous = GetActiveRow(_cursorRow);
                 int left = _cursorCol - 1;
                 if (left >= previous.Columns) return 0;
                 if (previous.ReadOnlyCells[left].Width == 0 && left > 0) left--;
@@ -103,7 +103,7 @@ public sealed partial class BasicVtProcessor
         ConsumeDelayedWrapBeforePrint();
         ClampCursor();
         if ((uint)_cursorRow >= (uint)_screen.ViewportRows || (uint)_cursorCol >= (uint)_screen.Columns) return 0;
-        TerminalRow row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = GetActiveRow(_cursorRow);
         int available = Math.Min(row.Columns, CursorRightLimit + 1) - _cursorCol;
         int limit = Math.Min(available / width, codepoints.Length);
         if (limit <= 0) return 0; // Scalar handles wide spacers and one-column screens.

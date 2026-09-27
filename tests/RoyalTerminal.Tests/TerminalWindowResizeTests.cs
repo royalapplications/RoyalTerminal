@@ -149,15 +149,29 @@ public sealed class TerminalWindowResizeTests(ITestOutputHelper output)
         Assert.Throws<ObjectDisposedException>(() => native.WindowResizeCallback = callback);
     }
 
-    [Fact]
-    public void RawC1CsiIsAcceptedButUtf8EncodedC1IsNotAControl()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GroundC1DoesNotRequestResizeButParserStateC1Does(bool native)
     {
-        using BasicVtProcessor processor = new(new TerminalScreen(12, 5, 0));
+        if (native && !GhosttyVtProcessor.IsAvailable())
+        {
+            output.WriteLine("Native C1 resize differential unavailable.");
+            return;
+        }
+        TerminalScreen screen = new(12, 5, 0);
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
         List<TerminalWindowResizeRequest> requests = [];
-        processor.WindowResizeCallback = requests.Add;
+        ((ITerminalWindowResizeSource)processor).WindowResizeCallback = requests.Add;
+        // Ghostty stream.next decodes ground-state high bytes as UTF-8. Raw C1
+        // is an invalid scalar, not CSI; encoded C1 is ignored. C1 transitions
+        // still apply when already inside the VT parser (e.g. after ESC).
+        processor.Process([0x9B, (byte)'8', (byte)';', (byte)'4', (byte)';', (byte)'5', (byte)'t']);
+        Assert.Empty(requests);
+        processor.Process(Encoding.UTF8.GetBytes("\u009b8;4;5t"));
+        Assert.Empty(requests);
+        processor.Process("\u001b"u8);
         processor.Process([0x9B, (byte)'8', (byte)';', (byte)'4', (byte)';', (byte)'5', (byte)'t']);
         Assert.Equal(new TerminalWindowResizeRequest(5, 4), Assert.Single(requests));
-        processor.Process(Encoding.UTF8.GetBytes("\u009b8;4;5t"));
-        Assert.Single(requests);
     }
 }

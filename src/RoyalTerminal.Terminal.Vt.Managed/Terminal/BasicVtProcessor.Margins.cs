@@ -51,7 +51,7 @@ public sealed partial class BasicVtProcessor
         {
             int destination = down ? bottom - index : top + index;
             int source = destination + (down ? -count : count);
-            TerminalRow row = _screen.GetViewportRow(destination);
+            TerminalRow row = GetActiveRow(destination);
             // Match rowWillBeShifted's destination-then-source traversal.
             // A whole-region prepass releases suffixes in future rows too
             // early, potentially suppressing native cross-page copy growth.
@@ -59,7 +59,7 @@ public sealed partial class BasicVtProcessor
             ClearPreservedCellsForMutation(row);
             if (source >= top && source <= bottom)
             {
-                TerminalRow sourceRow = _screen.GetViewportRow(source);
+                TerminalRow sourceRow = GetActiveRow(source);
                 PrepareRectangleRowForShift(sourceRow);
                 using GhosttySnapshotPageTracker.RowEdit sourceStyles = _screen.EditSnapshotRowMetadata(sourceRow);
                 using GhosttySnapshotPageTracker.RowEdit destinationStyles = _screen.EditSnapshotRowMetadata(row);

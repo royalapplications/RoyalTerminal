@@ -54,7 +54,7 @@ public sealed partial class BasicVtProcessor
     private void EraseProtectedLine(int mode)
     {
         if (mode is < 0 or > 2) return;
-        TerminalRow row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = GetActiveRow(_cursorRow);
         (int start, int end) = GetLineEraseRange(row, mode);
         if (mode != 1) ResetCursorRowSoftWrap(row);
         ClearUnprotectedCells(_cursorRow, start, end);
@@ -63,7 +63,7 @@ public sealed partial class BasicVtProcessor
 
     private void EraseProtectedCharacters(int count)
     {
-        TerminalRow row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = GetActiveRow(_cursorRow);
         int end = Math.Min(row.Columns, _cursorCol + count);
         if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
         // Match Ghostty eraseChars: split boundary pairs before considering ISO
@@ -107,7 +107,7 @@ public sealed partial class BasicVtProcessor
 
     private void ClearUnprotectedCells(int rowIndex, int start, int end)
     {
-        TerminalRow row = _screen.GetViewportRow(rowIndex);
+        TerminalRow row = GetActiveRow(rowIndex);
         ClearPreservedCellsForMutation(row);
         // Preserve protected cells and their complete style/link/grapheme data.
         // Batch only unprotected ranges so raster clearing also respects holes.

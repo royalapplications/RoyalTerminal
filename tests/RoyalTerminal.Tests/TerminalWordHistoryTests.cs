@@ -4,6 +4,7 @@
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Unicode;
 using Xunit;
 
 namespace RoyalTerminal.Tests;
@@ -108,24 +109,42 @@ public sealed class TerminalWordHistoryTests
             .ReadBufferSelection(new(4, 0, 1, 1), unwrap: true));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void NonAsciiUnicodeWhitespaceUsesSharedHostPolicy(bool native)
+    public static TheoryData<bool, int> UnicodeWhitespaceCases
     {
-        int[] whitespace = [0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
-            0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000];
-        foreach (int scalar in whitespace)
+        get
         {
-            using IVtProcessor processor = Create(native, new(5, 2, 100));
-            string separator = char.ConvertFromUtf32(scalar);
-            processor.Process(Encoding.UTF8.GetBytes("aaaaa" + separator + "zzzzzzzzzz"));
-            Assert.True(((ITerminalWordSelectionSource)processor).TryGetWordExtent(new(0, 1), "", out var extent));
-            Assert.Equal(new TerminalGridPosition(0, 1), extent.Start);
-            Assert.Equal(1, extent.End.Row);
-            Assert.Equal(separator, ((ITerminalBufferSelectionExportSource)processor)
-                .ReadBufferSelection(new(extent.Start.Column, extent.Start.Row, extent.End.Column - 1, extent.End.Row), true));
+            TheoryData<bool, int> data = new();
+            int[] whitespace = [0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+                0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000];
+            foreach (bool native in new[] { false, true })
+                foreach (int scalar in whitespace) data.Add(native, scalar);
+            return data;
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(UnicodeWhitespaceCases))]
+    public void NonAsciiUnicodeWhitespaceUsesSharedHostPolicy(bool native, int scalar)
+    {
+        using IVtProcessor processor = Create(native, new(5, 2, 100));
+        string separator = char.ConvertFromUtf32(scalar);
+        processor.Process(Encoding.UTF8.GetBytes("aaaaa" + separator + "zzzzzzzzzz"));
+        Assert.True(((ITerminalWordSelectionSource)processor).TryGetWordExtent(new(0, 1), "", out var extent));
+        if (scalar is 0x2028 or 0x2029)
+        {
+            // Ghostty's Unicode widths make these zero-width grapheme data,
+            // not independently selectable whitespace cells (mode 2027 off).
+            Assert.Equal(0, TerminalCellWidthCalculator.GetCodepointWidth(scalar));
+            Assert.Equal(new TerminalWordExtent(new(0, 0), new(5, 2)), extent);
+            Assert.Equal("aaaaa" + separator + "zzzzzzzzzz", ((ITerminalBufferSelectionExportSource)processor)
+                .ReadBufferSelection(new(0, 0, 4, 2), true));
+            return;
+        }
+        Assert.InRange(TerminalCellWidthCalculator.GetCodepointWidth(scalar), 1, 2);
+        Assert.Equal(new TerminalGridPosition(0, 1), extent.Start);
+        Assert.Equal(1, extent.End.Row);
+        Assert.Equal(separator, ((ITerminalBufferSelectionExportSource)processor)
+            .ReadBufferSelection(new(extent.Start.Column, extent.Start.Row, extent.End.Column - 1, extent.End.Row), true));
     }
 
     [Theory]

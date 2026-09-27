@@ -116,6 +116,11 @@ public sealed class TerminalImageOverscanTests
             new(2, layer, 0, 4, 0, 0, 10, 30, 0, 0, 1, 1, 10, 10));
         using SkiaTerminalRenderer renderer = Renderer();
         using SKSurface surface = SKSurface.Create(new SKImageInfo(40, 90));
+        // Expose all three layers for the clipping assertion. Opaque cell
+        // backgrounds correctly obscure BelowBackground image placements.
+        renderer.BackgroundOpacityEnabled = true;
+        renderer.BackgroundOpacityCells = true;
+        renderer.BackgroundOpacity = 0;
         surface.Canvas.Clear(SKColors.Magenta);
         surface.Canvas.Translate(0, 30);
         renderer.Render(surface.Canvas, screen, new TerminalRenderOverscan(10, 10), forceFullRedraw: true);

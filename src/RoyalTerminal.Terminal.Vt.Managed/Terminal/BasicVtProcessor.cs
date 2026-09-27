@@ -421,6 +421,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _tabStopColumns = _screen.Columns;
     }
 
+    // Cursor coordinates belong to the active screen, never the user's
+    // scrolled render viewport (Ghostty .active, xterm.js ybase + cursor.y).
+    private TerminalRow GetActiveRow(int row)
+        => _screen.GetRow(_screen.TotalRows - _screen.ViewportRows + row);
+
     /// <summary>
     /// Processes a span of raw terminal output bytes.
     /// Unrecoverable row-copy allocation failure faults this processor and its
@@ -1275,7 +1280,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
         if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
 
-        TerminalRow row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = GetActiveRow(_cursorRow);
         if (_cursorCol >= row.Columns) return;
         ClearPreservedCellsForMutation(row);
 
@@ -1301,7 +1306,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
             if (_cursorRow < 0 || _cursorRow >= _screen.ViewportRows) return;
             if (_cursorCol < 0 || _cursorCol >= _screen.Columns) return;
-            row = _screen.GetViewportRow(_cursorRow);
+            row = GetActiveRow(_cursorRow);
             if (_cursorCol >= row.Columns) return;
             ClearPreservedCellsForMutation(row);
         }
@@ -1309,7 +1314,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (_insertMode)
         {
             InsertCharacters(width);
-            row = _screen.GetViewportRow(_cursorRow);
+            row = GetActiveRow(_cursorRow);
             if (_cursorCol < 0 || _cursorCol >= row.Columns)
             {
                 return;
@@ -1388,7 +1393,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int targetRowIndex = _cursorRow;
         int targetColIndex = _autoWrap && _delayedWrap ? _cursorCol : _cursorCol - 1;
         if (useBoundaries && !_autoWrap && _cursorCol == CursorRightLimit &&
-            _screen.GetViewportRow(_cursorRow).ReadOnlyCells[_cursorCol].HasContent)
+            GetActiveRow(_cursorRow).ReadOnlyCells[_cursorCol].HasContent)
         {
             targetColIndex = _cursorCol;
         }
@@ -1398,7 +1403,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        TerminalRow targetRow = _screen.GetViewportRow(targetRowIndex);
+        TerminalRow targetRow = GetActiveRow(targetRowIndex);
         while (targetColIndex >= 0 && targetRow.ReadOnlyCells[targetColIndex].Width == 0 &&
             !targetRow.ReadOnlyCells[targetColIndex].IsWideSpacerHead)
         {
@@ -1594,7 +1599,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ClearWideSpacerHeadAt(int rowIndex)
     {
         if (rowIndex < 0 || rowIndex >= _screen.ViewportRows) return;
-        TerminalRow previous = _screen.GetViewportRow(rowIndex);
+        TerminalRow previous = GetActiveRow(rowIndex);
         if (!previous.ReadOnlyCells[^1].IsWideSpacerHead) return;
         using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(previous);
         ref TerminalCell head = ref previous[previous.Columns - 1];
@@ -1622,7 +1627,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_cursorRow >= 0 && _cursorRow < _screen.ViewportRows)
         {
-            if (wrapForced) _screen.GetViewportRow(_cursorRow).WrapsToNext = true;
+            if (wrapForced) GetActiveRow(_cursorRow).WrapsToNext = true;
         }
 
         if (_cursorRow == _scrollBottom && CursorInsideHorizontalMargins)
@@ -1637,7 +1642,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         AdvanceSemanticLine(softWrap || wrapForced);
         if (wrapForced)
         {
-            TerminalRow row = _screen.GetViewportRow(_cursorRow);
+            TerminalRow row = GetActiveRow(_cursorRow);
             row.IsWrapContinuation = true;
             row.IsDirty = true;
         }
@@ -1776,8 +1781,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             int destination = down ? bottom - index : top + index;
             int source = destination + (down ? -count : count);
-            TerminalRow row = _screen.GetViewportRow(destination);
-            if (source >= top && source <= bottom) CopyRow(_screen.GetViewportRow(source), row);
+            TerminalRow row = GetActiveRow(destination);
+            if (source >= top && source <= bottom) CopyRow(GetActiveRow(source), row);
             else
             {
                 // A preceding cross-page copy may have defaulted the cursor
@@ -4102,7 +4107,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ClearScreen()
     {
         for (var r = 0; r < _screen.ViewportRows; r++)
-            ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
+            ClearRow(GetActiveRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
         ResetDelayedWrap();
         _cursorCol = 0;
         _cursorRow = 0;
@@ -4127,7 +4132,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 0: // From cursor to end
                 EraseInLine(0);
                 for (var r = _cursorRow + 1; r < _screen.ViewportRows; r++)
-                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
+                    ClearRow(GetActiveRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow + 1 < _screen.ViewportRows)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4143,7 +4148,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 // of a wide glyph, before retiring metadata in earlier rows.
                 EraseInLine(1);
                 for (var r = 0; r < _cursorRow && r < _screen.ViewportRows; r++)
-                    ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
+                    ClearRow(GetActiveRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 if (_cursorRow > 0)
                 {
                     _screen.ClearRasterGraphicsInViewportRectangle(
@@ -4159,12 +4164,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 {
                     ScrollClearDisplay();
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
+                        ClearRow(GetActiveRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                 }
                 else
                 {
                     for (var r = 0; r < _screen.ViewportRows; r++)
-                        ClearRow(_screen.GetViewportRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
+                        ClearRow(GetActiveRow(r), _currentFg, _currentBg, CurrentBackgroundIdentity);
                     _screen.ClearRasterGraphics();
                 }
                 break;
@@ -4191,7 +4196,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     }
 
     private bool ShouldScrollOnEraseDisplay() => !_inAltScreen && (ScrollOnEraseInDisplay ||
-        _screen.GetViewportRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None);
+        GetActiveRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None);
 
     private void ScrollClearDisplay()
     {
@@ -4220,7 +4225,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        var row = _screen.GetViewportRow(_cursorRow);
+        var row = GetActiveRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
         (int start, int end) = GetLineEraseRange(row, mode);
         switch (mode)
@@ -4310,7 +4315,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (!CursorInsideHorizontalMargins) return;
         count = Math.Min(count, RightMargin - _cursorCol + 1);
 
-        var row = _screen.GetViewportRow(_cursorRow);
+        var row = GetActiveRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
         // Ghostty clears split pairs before swapping. Repairing afterward can
         // join an old head to an unrelated tail and retain dead metadata.
@@ -4356,7 +4361,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (!CursorInsideHorizontalMargins) return;
         count = Math.Min(count, RightMargin - _cursorCol + 1);
 
-        var row = _screen.GetViewportRow(_cursorRow);
+        var row = GetActiveRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
         SplitCharacterEditBoundary(row, _cursorCol);
         SplitCharacterEditBoundary(row, _cursorCol + count);
@@ -4394,7 +4399,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
-        var row = _screen.GetViewportRow(_cursorRow);
+        var row = GetActiveRow(_cursorRow);
         ClearPreservedCellsForMutation(row);
         int end = Math.Min(row.Columns, _cursorCol + count);
         if (end < row.Columns && row.ReadOnlyCells[end - 1].Width == 2) end++;
@@ -4709,7 +4714,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             case SessionScreenResetMode.ClearViewport:
                 for (var r = 0; r < _screen.ViewportRows; r++)
-                    ClearRow(_screen.GetViewportRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
+                    ClearRow(GetActiveRow(r), _screen.DefaultForeground, _screen.DefaultBackground);
                 _screen.ClearRasterGraphics();
                 break;
 

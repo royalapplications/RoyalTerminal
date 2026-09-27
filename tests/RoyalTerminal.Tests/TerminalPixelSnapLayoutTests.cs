@@ -139,8 +139,11 @@ public sealed class TerminalPixelSnapLayoutTests
                 Assert.Equal(source.GetPixel(column, row), actual.GetPixel(left + column, top + row));
             }
         }
-        Assert.Equal(SKColors.Transparent, actual.GetPixel(left - 1, top));
-        Assert.Equal(SKColors.Transparent, actual.GetPixel(left + source.Width, top));
+        // Premultiplied storage canonicalizes alpha-zero pixels to transparent
+        // black; SKColors.Transparent is transparent white before premultiply.
+        SKColor transparentPixel = new(0, 0, 0, 0);
+        Assert.Equal(transparentPixel, actual.GetPixel(left - 1, top));
+        Assert.Equal(transparentPixel, actual.GetPixel(left + source.Width, top));
     }
 
     [Fact]

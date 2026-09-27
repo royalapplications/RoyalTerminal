@@ -9,10 +9,6 @@ public sealed partial class BasicVtProcessor
     public Action<TerminalWindowResizeRequest>? WindowResizeCallback { get; set; }
 
     private int _unknownSequenceMaxBytes = 4096;
-    // Stream-effect state, not screen/snapshot state. Track it even without a
-    // callback, like Ghostty Handler.progress_active. The C reset API does not
-    // reset this handler flag; only protocol RIS clears active host progress.
-    private bool _progressActive;
 
     /// <inheritdoc />
     public int UnknownSequenceMaxBytes
@@ -34,14 +30,14 @@ public sealed partial class BasicVtProcessor
 
     private void PublishProgressReport(TerminalProgressReport report)
     {
-        _progressActive = report.State != TerminalProgressState.Remove;
         ProgressReportCallback?.Invoke(report);
     }
 
     private void ClearActiveProgressReport()
     {
-        if (!_progressActive) return;
-        _progressActive = false;
+        // Ghostty stream_terminal.Handler emits remove on every protocol RIS,
+        // including when no progress report has been observed by this handler.
+        // Programmatic grid reset and snapshot restoration emit no host effect.
         ProgressReportCallback?.Invoke(new TerminalProgressReport(TerminalProgressState.Remove, null));
     }
 }

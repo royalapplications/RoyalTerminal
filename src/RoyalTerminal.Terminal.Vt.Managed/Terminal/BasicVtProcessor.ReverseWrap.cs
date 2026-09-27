@@ -48,7 +48,7 @@ public sealed partial class BasicVtProcessor
             {
                 // Above the region, extended mode stops at physical row zero.
                 // Neither mode can reverse into scrollback or scroll the screen.
-                if (_cursorRow == 0 || (!extended && !_screen.GetViewportRow(_cursorRow - 1).WrapsToNext)) return;
+                if (_cursorRow == 0 || (!extended && !GetActiveRow(_cursorRow - 1).WrapsToNext)) return;
                 _cursorRow--;
             }
             _cursorCol = RightMargin;

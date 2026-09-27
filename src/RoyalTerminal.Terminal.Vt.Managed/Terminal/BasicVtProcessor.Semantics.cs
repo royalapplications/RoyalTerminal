@@ -147,7 +147,7 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
 
     private void SetCurrentRowSemanticPrompt(TerminalSemanticPrompt value)
     {
-        TerminalRow row = _screen.GetViewportRow(_cursorRow);
+        TerminalRow row = GetActiveRow(_cursorRow);
         if (row.SemanticPrompt == value) return;
         row.SemanticPrompt = value;
         row.IsDirty = true;
