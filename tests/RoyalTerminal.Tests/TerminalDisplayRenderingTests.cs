@@ -47,7 +47,10 @@ public sealed class TerminalDisplayRenderingTests
             TextRenderDiagnostics diagnostics = renderer.GetTextRenderDiagnostics();
             Assert.True(diagnostics.PretextRuns > 0);
             Assert.Equal(0, diagnostics.ShapedRuns);
-            Assert.Equal(0, diagnostics.PretextFallbackRuns);
+            // A single replacement glyph in a double-width cell must retain
+            // the pipeline's cell-anchored fallback instead of stretching it.
+            if (width == 2) Assert.True(diagnostics.PretextFallbackRuns > 0);
+            else Assert.Equal(0, diagnostics.PretextFallbackRuns);
         }
     }
 
