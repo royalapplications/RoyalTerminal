@@ -199,6 +199,7 @@ public sealed class TerminalRow
     private TerminalCell[] _cells;
     private int _columns;
     private byte _rowMetadata;
+    private TerminalSearchChangeToken? _searchChanges;
     private bool CellsAreShared
     {
         get => (_rowMetadata & 1) != 0;
@@ -212,7 +213,16 @@ public sealed class TerminalRow
     /// Whether this row soft-wraps into the following row.
     /// Explicit line feeds keep this false.
     /// </summary>
-    public bool WrapsToNext { get; set; }
+    public bool WrapsToNext
+    {
+        get => (_rowMetadata & 16) != 0;
+        set
+        {
+            if (WrapsToNext == value) return;
+            _searchChanges?.Invalidate();
+            _rowMetadata = (byte)(value ? _rowMetadata | 16 : _rowMetadata & ~16);
+        }
+    }
 
     /// <summary>
     /// Whether this physical row continues a soft-wrapped predecessor. This is
@@ -221,7 +231,12 @@ public sealed class TerminalRow
     public bool IsWrapContinuation
     {
         get => (_rowMetadata & 8) != 0;
-        set => _rowMetadata = (byte)(value ? _rowMetadata | 8 : _rowMetadata & ~8);
+        set
+        {
+            if (IsWrapContinuation == value) return;
+            _searchChanges?.Invalidate();
+            _rowMetadata = (byte)(value ? _rowMetadata | 8 : _rowMetadata & ~8);
+        }
     }
 
     /// <summary>Shell prompt marker; it can be present even on an otherwise empty row.</summary>
@@ -307,6 +322,16 @@ public sealed class TerminalRow
 
     internal object SearchStorageIdentity => _cells;
 
+    internal void TrackSearchChanges(TerminalSearchChangeToken changes)
+    {
+        if (ReferenceEquals(_searchChanges, changes)) return;
+        // A wrapper may be transferred or aliased between buffers. Its former
+        // observer must fall back to a full capture and reacquire observation.
+        // State-copy wrappers intentionally never inherit this observer.
+        _searchChanges?.Invalidate();
+        _searchChanges = changes;
+    }
+
     /// <summary>Access a cell by column index.</summary>
     public ref TerminalCell this[int column]
     {
@@ -323,6 +348,7 @@ public sealed class TerminalRow
         ArgumentOutOfRangeException.ThrowIfNegative(columns);
 
         EnsureCapacity(columns, defaultFg, defaultBg);
+        if (_columns != columns) _searchChanges?.Invalidate();
         _columns = columns;
         IsDirty = true;
     }
@@ -376,6 +402,8 @@ public sealed class TerminalRow
     {
         if (_columns != other._columns || _cells.Length != _columns || other._cells.Length != other._columns)
             throw new InvalidOperationException("Active storage swaps require equal, unhidden widths.");
+        _searchChanges?.Invalidate();
+        other._searchChanges?.Invalidate();
         // Swap ownership, not payload. Each retained COW reader keeps its arrays;
         // swapping the shared flags with them avoids a copy until a later write.
         (_cells, other._cells) = (other._cells, _cells);
@@ -509,6 +537,7 @@ public sealed class TerminalRow
 
     private void ResizePreservedStorage(int columns, uint defaultFg, uint defaultBg)
     {
+        _searchChanges?.Invalidate();
         SnapshotAllocationUnmodified = false;
         SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
         if (columns == _cells.Length)
@@ -529,6 +558,7 @@ public sealed class TerminalRow
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureWritableCells()
     {
+        _searchChanges?.Invalidate();
         SnapshotAllocationUnmodified = false;
         SnapshotMetadataRevision = unchecked(SnapshotMetadataRevision + 1);
         if (!CellsAreShared)
@@ -548,6 +578,7 @@ internal sealed class TerminalRowBuffer
 {
     private TerminalRow?[] _items;
     private int _head;
+    private TerminalSearchChangeToken? _searchChanges;
 
     public TerminalRowBuffer(int capacity = 0)
     {
@@ -557,6 +588,14 @@ internal sealed class TerminalRowBuffer
     }
 
     public int Count { get; private set; }
+
+    internal TerminalSearchChangeToken GetSearchChangeToken()
+    {
+        if (_searchChanges is not null) return _searchChanges;
+        TerminalSearchChangeToken changes = new();
+        for (int i = 0; i < Count; i++) this[i].TrackSearchChanges(changes);
+        return _searchChanges = changes;
+    }
 
     public TerminalRow this[int index]
     {
@@ -568,6 +607,8 @@ internal sealed class TerminalRowBuffer
         set
         {
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+            ArgumentNullException.ThrowIfNull(value);
+            TrackAddedRow(value);
             _items[PhysicalIndex(index)] = value;
         }
     }
@@ -577,6 +618,7 @@ internal sealed class TerminalRowBuffer
         ArgumentNullException.ThrowIfNull(row);
 
         EnsureCapacity(Count + 1);
+        TrackAddedRow(row);
         _items[PhysicalIndex(Count)] = row;
         Count++;
     }
@@ -605,7 +647,10 @@ internal sealed class TerminalRowBuffer
         EnsureCapacity(count); // All fallible work precedes mutation.
         int head = (int)(((long)_head + _items.Length - rows.Length % _items.Length) % _items.Length);
         for (int i = 0; i < rows.Length; i++)
+        {
+            TrackAddedRow(rows[i]);
             _items[(int)(((long)head + i) % _items.Length)] = rows[i];
+        }
         _head = head;
         Count = count;
     }
@@ -617,6 +662,7 @@ internal sealed class TerminalRowBuffer
             return;
         }
 
+        _searchChanges?.Invalidate();
         if (_head + Count <= _items.Length)
         {
             Array.Clear(_items, _head, Count);
@@ -641,6 +687,7 @@ internal sealed class TerminalRowBuffer
             return;
         }
 
+        _searchChanges?.Invalidate();
         ClearPhysicalRange(_head, count);
         _head = Count == count ? 0 : (_head + count) % _items.Length;
         Count -= count;
@@ -673,6 +720,7 @@ internal sealed class TerminalRowBuffer
         }
 
         Compact();
+        _searchChanges?.Invalidate();
         Array.Copy(
             _items,
             index + count,
@@ -693,6 +741,7 @@ internal sealed class TerminalRowBuffer
 
     private void RemoveTail(int count)
     {
+        _searchChanges?.Invalidate();
         ClearPhysicalRange(PhysicalIndex(Count - count), count);
         Count -= count;
         if (Count == 0)
@@ -762,6 +811,13 @@ internal sealed class TerminalRowBuffer
     }
 
     private int PhysicalIndex(int logicalIndex) => (_head + logicalIndex) % _items.Length;
+
+    private void TrackAddedRow(TerminalRow row)
+    {
+        if (_searchChanges is not { } changes) return;
+        changes.Invalidate();
+        row.TrackSearchChanges(changes);
+    }
 }
 
 /// <summary>

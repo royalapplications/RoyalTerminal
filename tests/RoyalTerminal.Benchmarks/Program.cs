@@ -47,6 +47,12 @@ if (args.Contains("--managed-snapshot-style-rebuild", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
+{
+    ManagedSearchCaptureBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-print", StringComparer.Ordinal))
 {
     ManagedPrintBenchmark.Run();

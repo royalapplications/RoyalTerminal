@@ -307,6 +307,49 @@ palette changes/resets and immutable palette copies. Allocation and timing
 comparisons with the previous implementation remain deferred to final validation;
 no measured speedup is claimed.
 
+## Managed search capture invalidation
+
+The search-only COW capture now has a lazy, buffer-specific change token. An
+unchanged capture checks token identity/revision, columns, viewport height and
+screen selection in constant time without allocating or walking history. The
+first search capture attaches row observers; terminals that have never searched
+do not allocate a token. Writes through row spans/indexers, width/wrap changes,
+cell-storage swaps and structural row-buffer changes invalidate it independently
+of renderer dirty acknowledgments. Read-only access, unchanged layout setters
+and semantic-only row metadata do not invalidate search.
+
+Changed captures still check exact cell-storage and layout identities across
+all rows, reuse immutable 64-row reference blocks and maintain the weak storage
+cache. That path remains O(history rows); this change does not claim constant-time
+active-output capture. Conservative invalidations may publish a new capture
+with the same row blocks. A stamp never changes after publication, so one search
+consumer cannot advance another consumer's view.
+
+Tokens contain no owner references and are not copied into COW row wrappers.
+Snapshots therefore do not retain live screens/history through their observer.
+Transferring observation of an aliased row invalidates its previous token; a full
+capture reattaches even rows in unchanged blocks. Retired rows can conservatively
+invalidate a former owner without retaining it. Revision saturation permanently
+disables the shortcut rather than risking stale equality after rollover. The
+existing screen-lock/no-retained-writable-cell-reference contract is unchanged.
+
+[Ghostty search](https://github.com/ghostty-org/ghostty/pull/14097) retains history
+work, gates active search on content dirtiness and tracks screen generations.
+[Windows Terminal's mutation ID](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
+and [xterm.js's line-cache invalidation](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-search/src/SearchLineCache.ts)
+also avoid treating renderer state as search validity. The managed token is a
+CLR-specific invalidation mechanism, not a transplant of Ghostty's page allocator
+or xterm.js's event/timeout cache.
+
+New cases cover row/structure mutations, aliased wrappers, independent COW
+owners/consumers, adoption, both sides of storage swaps, renderer acknowledgment,
+screen/viewport transitions, slices, saturation and weak ownership. These cases
+and `--managed-search-capture` are authored but unrun. The benchmark separates
+idle, tail edits, wrap changes and scrolling at 1,024/16,384 rows, plus a paired
+observed/unobserved write loop to quantify notification overhead. Before/after
+profiling, allocation measurements and all validation remain deferred; no
+measured speedup is claimed.
+
 ## Managed snapshot record scratch
 
 The managed binary snapshot encoder follows Ghostty's

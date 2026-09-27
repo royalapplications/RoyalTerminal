@@ -38,7 +38,7 @@ internal sealed class ManagedSearchRows
     }
 
     internal static ManagedSearchRows Capture(TerminalScreen screen, ManagedSearchRows? previous,
-        ConditionalWeakTable<object, TerminalRow> storage)
+        ConditionalWeakTable<object, TerminalRow> storage, TerminalSearchChangeToken changes)
     {
         int count = screen.TotalRows;
         int blockCount = (int)(((long)count + BlockSize - 1) / BlockSize);
@@ -52,7 +52,13 @@ internal sealed class ManagedSearchRows
             if (oldBlock is not null)
             {
                 int same = 0;
-                while (same < length && screen.GetRow(start + same).HasSameSearchContent(oldBlock[same])) same++;
+                while (same < length)
+                {
+                    TerminalRow live = screen.GetRow(start + same);
+                    live.TrackSearchChanges(changes);
+                    if (!live.HasSameSearchContent(oldBlock[same])) break;
+                    same++;
+                }
                 if (same == length)
                 {
                     if (blocks is not null) blocks[blockIndex] = oldBlock;
@@ -65,6 +71,7 @@ internal sealed class ManagedSearchRows
             {
                 int index = start + offset;
                 TerminalRow live = screen.GetRow(index);
+                live.TrackSearchChanges(changes);
                 TerminalRow? frozen = previous is not null && index < previous.Length ? previous[index] : null;
                 if (frozen is null || !live.HasSameSearchContent(frozen))
                 {

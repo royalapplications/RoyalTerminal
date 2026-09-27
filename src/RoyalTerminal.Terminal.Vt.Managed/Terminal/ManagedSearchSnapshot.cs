@@ -10,15 +10,19 @@ namespace RoyalTerminal.Terminal;
 internal sealed class ManagedSearchSnapshot
 {
     private readonly ConditionalWeakTable<object, TerminalRow> _storage;
+    private readonly TerminalSearchChangeToken? _changes;
+    private readonly ulong _revision;
 
     private ManagedSearchSnapshot(ManagedSearchRows rows, int columns, int viewportRows, bool alternate,
-        ConditionalWeakTable<object, TerminalRow> storage)
+        ConditionalWeakTable<object, TerminalRow> storage, TerminalSearchChangeToken? changes = null)
     {
         Rows = rows;
         Columns = columns;
         ViewportRows = viewportRows;
         Alternate = alternate;
         _storage = storage;
+        _changes = changes;
+        _revision = changes?.Revision ?? 0;
     }
 
     internal ManagedSearchRows Rows { get; }
@@ -31,11 +35,16 @@ internal sealed class ManagedSearchSnapshot
     {
         bool compatible = previous is not null && previous.Columns == screen.Columns &&
             previous.Alternate == screen.AlternateBufferActive;
-        ConditionalWeakTable<object, TerminalRow> storage = compatible ? previous!._storage : new();
-        ManagedSearchRows rows = ManagedSearchRows.Capture(screen, compatible ? previous!.Rows : null, storage);
-        if (compatible && ReferenceEquals(rows, previous!.Rows) && previous.ViewportRows == screen.ViewportRows)
+        TerminalSearchChangeToken changes = screen.GetSnapshotRows(screen.AlternateBufferActive ? 1 : 0)!
+            .GetSearchChangeToken();
+        if (compatible && previous!.ViewportRows == screen.ViewportRows &&
+            ReferenceEquals(changes, previous._changes) && changes.Matches(previous._revision))
             return previous;
-        return new(rows, screen.Columns, screen.ViewportRows, screen.AlternateBufferActive, storage);
+        ConditionalWeakTable<object, TerminalRow> storage = compatible ? previous!._storage : new();
+        ManagedSearchRows rows = ManagedSearchRows.Capture(screen, compatible ? previous!.Rows : null, storage, changes);
+        // Even a conservative invalidation publishes a new immutable stamp. Old
+        // captures remain valid for independent consumers and worker threads.
+        return new(rows, screen.Columns, screen.ViewportRows, screen.AlternateBufferActive, storage, changes);
     }
 
     internal int CommonPrefix(ManagedSearchSnapshot? other)
