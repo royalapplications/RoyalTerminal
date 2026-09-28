@@ -1197,8 +1197,9 @@ preferred IDs, same-page moves, COW storage, chunk reuse and native capacities;
 automated execution and isolated measurements are recorded in the validation results below.
 
 Snapshot-aware reflow, row retirement and style/grapheme/hyperlink mutation hooks
-are connected, but complete mutation-time parity still requires the remaining
-failure/degradation audit. Live grapheme append now keeps the previous suffix if
+are connected. The supported mutation-time contract covers observable state,
+quotas and deterministic failure boundaries, not exhaustive CLR/Zig allocation
+failure equivalence. Live grapheme append now keeps the previous suffix if
 growth or its single retry fails, while retaining earlier width, tail and cursor
 edits. Cross-page widening copies retain the source and only the accepted scalar
 prefix on failure, stopping before the tail and final scalar; completed same-page
@@ -1931,19 +1932,20 @@ permissions and notification policy remain environment-specific release checks.
 ## Closeout validation and performance
 
 The current-version closeout was validated on macOS arm64 / .NET 10 Release on
-2026-09-28. Dependency pins and existing native extension sources did not change.
-The last complete three-platform CI baseline is
-[`8c242a3b`](https://github.com/royalapplications/RoyalTerminal/actions/runs/36357950148);
-the current PR checks are authoritative for subsequent commits.
+2026-09-28, including the notification callback lifetime fix at `feca1475`.
+Dependency pins and existing native extension sources did not change.
+The complete three-platform CI baseline at
+[`adcdc666`](https://github.com/royalapplications/RoyalTerminal/actions/runs/36384735201)
+predates that fix; current PR checks are authoritative for subsequent commits.
 
 | Check | Result / scope |
 | --- | --- |
-| Local full suite | 7,733 unit/headless passes, 16 existing skips, zero failures; 257 required-native integration passes and six startup passes, no skips. |
+| Local full suite | At `feca1475`: 7,733 unit/headless passes, 16 existing skips, zero failures; 259 required-native integration passes and six startup passes, no skips. |
 | Software fallback | 128 checksum/grid/animation-failure tests pass with `DOTNET_EnableHWIntrinsic=0`, zero failures/skips. |
 | Native ABI / generated colors | 161 ABI types and 27 callback signatures match; 782 generated X11 color names verified. |
 | Build | Release solution passes; four existing `TextBox.Watermark` obsolescence warnings, zero errors. |
 | Benchmark execution | All 38 named benchmark modes complete; source-defined warm-up/sample counts are retained. Checksum, grid and animation benchmarks also run with managed hardware intrinsics disabled. |
-| Review | Current-version capability gating, native validation entry points, snapshot owner-local failure/retirement, and Kitty frame preparation/COW boundaries were reviewed. Existing failure and native-differential assertions are retained. |
+| Review | Current-version capability gating, native validation entry points, snapshot owner-local failure/retirement, and Kitty frame preparation/COW boundaries were reviewed. Disposing a native wrapper now unregisters its notification callback before a borrowed or leased terminal can outlive the managed delegate; both lifetime orders have regression coverage. Existing failure and native-differential assertions are retained. |
 | Desktop qualification | Automated tests are not evidence of real IME/candidate placement, OS notification permission/activation, secure input or GPU/compositor certification on every platform. These environmental limitations are not implemented via private dependency hooks. |
 
 The following are isolated medians from the existing harnesses. Setup is excluded
