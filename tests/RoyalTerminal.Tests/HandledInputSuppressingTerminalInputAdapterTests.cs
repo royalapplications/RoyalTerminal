@@ -14,6 +14,26 @@ namespace RoyalTerminal.Tests;
 
 public sealed class HandledInputSuppressingTerminalInputAdapterTests
 {
+    [Fact]
+    public void CompositionBypassesWrapperWin32ShortcutsAndForwardsLateRelease()
+    {
+        RecordingTerminalInputAdapter inner = new();
+        HandledInputSuppressingTerminalInputAdapter adapter = new(inner);
+        TestTerminalSessionService session = new(new TestModeSource(new TerminalModeState { Win32InputMode = true }));
+        adapter.SetComposing(true);
+        Assert.True(inner.IsComposing);
+        Assert.True(adapter.HandleKeyDown(CreateKeyEventArgs(Key.LeftShift), session, null));
+        Assert.Empty(session.SentText);
+        Assert.Equal(1, inner.KeyDownCount);
+        adapter.SetComposing(false);
+        Assert.True(adapter.HandleKeyUp(CreateKeyEventArgs(Key.LeftShift), session));
+        Assert.Empty(session.SentText);
+        Assert.Equal(1, inner.KeyUpCount);
+        adapter.SetComposing(true);
+        adapter.ResetInputState();
+        Assert.False(inner.IsComposing);
+    }
+
     private const int KittyReportEvents = 0x02;
     private const int KittyReportAllKeysAsEscapeCodes = 0x08;
 
@@ -310,8 +330,11 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
         return args;
     }
 
-    private sealed class RecordingTerminalInputAdapter : ITerminalInputAdapter
+    private sealed class RecordingTerminalInputAdapter : ITerminalInputAdapter, ITerminalCompositionInputAdapter, IResettableTerminalInputAdapter
     {
+        public bool IsComposing { get; private set; }
+        public void SetComposing(bool composing) => IsComposing = composing;
+        public void ResetInputState() => IsComposing = false;
         public int KeyDownCount { get; private set; }
 
         public int KeyUpCount { get; private set; }

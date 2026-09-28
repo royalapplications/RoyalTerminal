@@ -226,6 +226,9 @@ public sealed record TerminalSessionAppearanceSettings
     /// </summary>
     public string? FontFilePath { get; init; }
 
+    /// <summary>Ordered per-style family overrides; empty lists preserve legacy font selection.</summary>
+    public TerminalFontFamilySettings FontFamilies { get; init; } = TerminalFontFamilySettings.Default;
+
     /// <summary>
     /// Font size in points.
     /// </summary>
@@ -327,6 +330,9 @@ public sealed record TerminalSessionBehaviorSettings
     /// Whether buffered terminal lines reflow when the terminal width changes.
     /// </summary>
     public bool ReflowOnResize { get; init; } = true;
+
+    /// <summary>Allows CSI 8 t window resizing for a single terminal in a normal resizable window. Disabled by default.</summary>
+    public bool AllowVtWindowResize { get; init; }
 
     /// <summary>
     /// Whether managed VT sixel graphics decoding is enabled.

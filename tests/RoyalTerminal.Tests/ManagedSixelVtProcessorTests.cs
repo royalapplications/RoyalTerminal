@@ -13,6 +13,20 @@ public sealed class ManagedSixelVtProcessorTests
 {
     private const string RedPixelSixel = "\u001bPq#1;2;100;0;0#1@\u001b\\";
 
+    [Theory]
+    [InlineData(0x18, false)]
+    [InlineData(0x1A, false)]
+    [InlineData(0x1B, true)]
+    public void SixelUnhookDiscardsCancellationButCommitsOnEscape(int exit, bool committed)
+    {
+        TerminalScreen screen = new(10, 4, 10);
+        using BasicVtProcessor processor = new(screen) { SixelGraphicsEnabled = true };
+        processor.NotifyResize(10, 4, 100, 40);
+        processor.Process("\u001bPq#1;2;100;0;0#1@"u8);
+        processor.Process(new byte[] { (byte)exit });
+        Assert.Equal(committed, screen.HasRasterGraphics);
+    }
+
     [Fact]
     public void BasicVtProcessor_ManagedSixelDisabled_IgnoresSixelPayload()
     {

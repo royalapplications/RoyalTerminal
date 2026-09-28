@@ -84,6 +84,7 @@ internal sealed partial class WindowsKeyboardLayoutTextInputProbe : IWindowsKeyb
 
         uint scanCode = MapVirtualKeyEx(virtualKey, MapVkToVsc, keyboardLayout);
         Span<byte> keyState = stackalloc byte[KeyboardStateLength];
+        keyState.Clear();
         ApplyModifierState(keyState, e.KeyModifiers);
 
         return TranslateKey(virtualKey, scanCode, keyState, keyboardLayout);
@@ -109,6 +110,35 @@ internal sealed partial class WindowsKeyboardLayoutTextInputProbe : IWindowsKeyb
                 keyboardLayout);
 
             return result != 0;
+        }
+    }
+
+    internal static string? Translate(KeyEventArgs key, KeyModifiers modifiers) => Translate(key, modifiers, out _);
+
+    internal static bool IsDeadKey(KeyEventArgs key)
+    {
+        Translate(key, key.KeyModifiers, out bool dead);
+        return dead;
+    }
+
+    private static unsafe string? Translate(KeyEventArgs key, KeyModifiers modifiers, out bool dead)
+    {
+        dead = false;
+        ushort vk = WindowsKeyboardLayoutTextInputProbeKeyMap.GetVirtualKey(key.Key);
+        if (vk == 0) return null;
+        nint layout = GetKeyboardLayout(0);
+        if (layout == 0) return null;
+        Span<byte> state = stackalloc byte[KeyboardStateLength];
+        state.Clear();
+        ApplyModifierState(state, modifiers);
+        Span<char> text = stackalloc char[8];
+        fixed (byte* keys = state)
+        fixed (char* chars = text)
+        {
+            int count = ToUnicodeEx(vk, MapVirtualKeyEx(vk, MapVkToVsc, layout), keys, chars,
+                text.Length, ToUnicodeExDoNotChangeKeyboardState, layout);
+            dead = count < 0;
+            return count > 0 && count <= text.Length ? new string(text[..count]) : null;
         }
     }
 

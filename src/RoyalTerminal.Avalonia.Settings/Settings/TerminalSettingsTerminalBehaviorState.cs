@@ -17,6 +17,7 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
             nameof(TerminalSettingsPanelState.BackspaceSendsControlH),
             nameof(TerminalSettingsPanelState.EnableTextShaping),
             nameof(TerminalSettingsPanelState.ReflowOnResize),
+            nameof(TerminalSettingsPanelState.AllowVtWindowResize),
             nameof(TerminalSettingsPanelState.SixelGraphicsEnabled),
             nameof(TerminalSettingsPanelState.EnableLigatures),
             nameof(TerminalSettingsPanelState.SelectedPasteSafetyPolicy),
@@ -56,6 +57,13 @@ public sealed class TerminalSettingsTerminalBehaviorState : TerminalSettingsCate
     {
         get => Owner.ReflowOnResize;
         set => Owner.ReflowOnResize = value;
+    }
+
+    /// <summary>Explicit opt-in to CSI 8 t window resize requests.</summary>
+    public bool AllowVtWindowResize
+    {
+        get => Owner.AllowVtWindowResize;
+        set => Owner.AllowVtWindowResize = value;
     }
 
     public bool SixelGraphicsEnabled

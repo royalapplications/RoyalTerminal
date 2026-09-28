@@ -7,7 +7,8 @@ using RoyalTerminal.Avalonia.Rendering;
 namespace RoyalTerminal.Terminal;
 
 /// <summary>
-/// Viewport-relative text selection range.
+/// Inclusive text selection range. Rows are viewport-relative unless the
+/// consuming API explicitly specifies absolute buffer coordinates.
 /// </summary>
 /// <param name="StartColumn">Selection start column.</param>
 /// <param name="StartRow">Selection start row.</param>
@@ -48,7 +49,23 @@ public interface ITerminalSelectionExportSource
     /// <summary>
     /// Reads the supplied viewport-relative selection.
     /// </summary>
+    /// <remarks>Built-in engines return plain text with LF line endings and inclusive whole-glyph
+    /// boundaries. Empty selections return an empty string; null indicates an unavailable selection.</remarks>
     string? ReadSelection(in TerminalSelectionRange selection);
+}
+
+/// <summary>Optional text export over a processor's complete accessible buffer.</summary>
+public interface ITerminalBufferSelectionExportSource
+{
+    /// <summary>
+    /// Reads an inclusive, absolute, top-anchored selection without changing the
+    /// viewport. Rows are clamped to the current buffer's host-visible history.
+    /// The caller must serialize access with input and buffer mutations.
+    /// </summary>
+    /// <param name="selection">Selection in absolute buffer coordinates.</param>
+    /// <param name="unwrap">Whether soft-wrapped rows should be joined; ignored for rectangular selections.</param>
+    /// <returns>Selected text, or null if unavailable. Empty text is a successful result.</returns>
+    string? ReadBufferSelection(in TerminalSelectionRange selection, bool unwrap);
 }
 
 /// <summary>

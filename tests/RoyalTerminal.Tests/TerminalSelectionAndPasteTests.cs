@@ -69,7 +69,7 @@ public class TerminalSelectionAndPasteTests
                 new TerminalSnapshotExportOptions(Unwrap: true, TrimTrailingWhitespace: true),
                 out string snapshot));
 
-        Assert.Equal("ABCDE" + Environment.NewLine + "Z", snapshot);
+        Assert.Equal("ABCDE\nZ", snapshot);
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class TerminalSelectionAndPasteTests
         string? selection = ((ITerminalSelectionExportSource)processor)
             .ReadSelection(new TerminalSelectionRange(1, 0, 2, 1, Rectangle: true));
 
-        Assert.Equal("BC" + Environment.NewLine + "FG", selection);
+        Assert.Equal("BC\nFG", selection);
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public class TerminalSelectionAndPasteTests
             Selection: new TerminalSelectionRange(0, 0, 0, 1, Rectangle: true));
 
         Assert.True(exporter.TryExportSnapshot(TerminalSnapshotExportFormat.PlainText, options, out string snapshot));
-        Assert.Equal("A" + Environment.NewLine + "E", snapshot);
+        Assert.Equal("A\nE", snapshot);
     }
 
     [Fact]

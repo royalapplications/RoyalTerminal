@@ -10,4 +10,20 @@
     <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="runtimes/osx/native/royalterminal-pty-spawn" Pack="true" PackagePath="runtimes/osx/native/"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="royalterminal-pty-spawn"
+          Condition="$([MSBuild]::IsOSPlatform('OSX')) Or Exists('runtimes/osx/native/royalterminal-pty-spawn')" />
+  </ItemGroup>
+  <Target Name="BuildUnixPtyLauncher" BeforeTargets="PrepareForBuild"
+          Inputs="$(MSBuildProjectDirectory)/../../native/unix-pty/spawn-helper.c;$(MSBuildProjectDirectory)/../../scripts/build-unix-pty.sh"
+          Outputs="$(MSBuildProjectDirectory)/runtimes/osx/native/royalterminal-pty-spawn"
+          Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Exec Command="bash &quot;$(MSBuildProjectDirectory)/../../scripts/build-unix-pty.sh&quot;" />
+  </Target>
+  <Target Name="RequireUnixPtyLauncherForPack" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/runtimes/osx/native/royalterminal-pty-spawn')"
+           Text="Build the macOS PTY launcher with scripts/build-unix-pty.sh on macOS (or download its CI artifact) before packing." />
+  </Target>
+
 </Project>

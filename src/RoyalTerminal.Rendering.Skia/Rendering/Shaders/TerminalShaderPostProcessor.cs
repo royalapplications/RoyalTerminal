@@ -174,14 +174,15 @@ public sealed class TerminalShaderPostProcessor : IDisposable
     internal static SKSurface? CreateRenderSurface(
         SKImageInfo imageInfo,
         GRContext? grContext,
-        out bool isGpuBacked)
+        out bool isGpuBacked,
+        bool budgeted = true)
     {
         isGpuBacked = false;
         if (CanUseGpuRenderSurface(grContext))
         {
             try
             {
-                SKSurface? surface = SKSurface.Create(grContext, true, imageInfo);
+                SKSurface? surface = SKSurface.Create(grContext, budgeted, imageInfo);
                 if (surface is not null)
                 {
                     isGpuBacked = true;
@@ -200,7 +201,7 @@ public sealed class TerminalShaderPostProcessor : IDisposable
     }
 
     internal static bool CanUseGpuRenderSurface(GRContext? grContext)
-        => grContext is not null && !grContext.IsAbandoned;
+        => grContext is not null && grContext.Handle != IntPtr.Zero && !grContext.IsAbandoned;
 
     /// <inheritdoc />
     public void Dispose()

@@ -1,206 +1,65 @@
 #!/usr/bin/env bash
-# run-integration-tests.sh — Build native lib and run integration tests
-#
-# Usage:
-#   ./scripts/run-integration-tests.sh              # Build + test
-#   ./scripts/run-integration-tests.sh --skip-build  # Skip native build, run tests only
-#   ./scripts/run-integration-tests.sh --verbose     # Verbose test output
-
+# Build the pinned RoyalTerminal native integration and run required-native tests.
+# --skip-build reuses the installed native artifact; it never permits missing APIs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-GHOSTTY_DIR="$ROOT_DIR/external/ghostty"
-ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
-
 SKIP_BUILD=false
-VERBOSE=""
+VERBOSITY=minimal
+CONFIGURATION="${ROYALTERMINAL_TEST_CONFIGURATION:-Release}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-build) SKIP_BUILD=true; shift ;;
-        --verbose)    VERBOSE="--verbosity normal"; shift ;;
+        --verbose) VERBOSITY=normal; shift ;;
         --help)
-            echo "Usage: $0 [--skip-build] [--verbose] [--help]"
-            echo ""
-            echo "Build the native libghostty-vt library and run integration tests."
-            echo ""
-            echo "Options:"
-            echo "  --skip-build  Skip native Zig build, use existing library"
-            echo "  --verbose     Show detailed test output"
-            echo "  --help        Show this help"
-            exit 0
-            ;;
-        *) error "Unknown option: $1"; exit 1 ;;
+            echo "Usage: $0 [--skip-build] [--verbose]"
+            echo "Build RoyalTerminal's pinned Ghostty extensions and run required-native integration tests."
+            exit 0 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
-# Detect platform
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-
-case "$OS" in
-    Darwin)
-        if [ "$ARCH" = "arm64" ]; then
-            RID="osx-arm64"
-        else
-            RID="osx-x64"
-        fi
-        LIB_NAME="libghostty-vt.dylib"
-        ;;
-    Linux)
-        LIB_NAME="libghostty-vt.so"
-        case "$ARCH" in
-            x86_64|amd64)
-                RID="linux-x64"
-                ZIG_TARGET="x86_64-linux-gnu"
-                ;;
-            aarch64|arm64)
-                RID="linux-arm64"
-                ZIG_TARGET="aarch64-linux-gnu"
-                ;;
-            *)
-                error "Unsupported Linux architecture: $ARCH"
-                exit 1
-                ;;
-        esac
-        ;;
-    *)
-        error "Unsupported platform: $OS"
-        exit 1
-        ;;
+case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64) RID=osx-arm64; LIB_NAME=libghostty-vt.dylib ;;
+    Darwin/x86_64) RID=osx-x64; LIB_NAME=libghostty-vt.dylib ;;
+    Linux/x86_64|Linux/amd64) RID=linux-x64; LIB_NAME=libghostty-vt.so ;;
+    Linux/aarch64|Linux/arm64) RID=linux-arm64; LIB_NAME=libghostty-vt.so ;;
+    *) echo "Unsupported platform; use the Windows CI/native build path." >&2; exit 1 ;;
 esac
 
-NATIVE_LIB="$ROOT_DIR/native/$RID/$LIB_NAME"
-
-# ─────────────────── Step 1: Build Native Library ────────────────────
-
-if [ "$SKIP_BUILD" = false ]; then
-    step "1/4 — Building native libghostty-vt..."
-
-    if ! command -v zig &>/dev/null; then
-        error "Zig not found in PATH. Install with: brew install zig"
-        exit 1
-    fi
-
-    info "Zig version: $(zig version)"
-
-    if [ ! -d "$GHOSTTY_DIR" ] || [ ! -f "$GHOSTTY_DIR/build.zig" ]; then
-        error "Ghostty submodule not found. Run: git submodule update --init"
-        exit 1
-    fi
-
-    cd "$GHOSTTY_DIR"
-    info "Building libghostty-vt with ReleaseFast..."
-    ZIG_BUILD_ARGS=(
-        build
-        -Doptimize=ReleaseFast
-        -Dapp-runtime=none
-        -Demit-lib-vt=true
-        -Demit-xcframework=false
-    )
-    if [ -n "${ZIG_TARGET:-}" ]; then
-        ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
-    else
-        ZIG_BUILD_ARGS+=("-Dtarget=native")
-    fi
-    if [ "$OS" = "Linux" ]; then
-        ZIG_BUILD_ARGS+=("-Dsimd=false")
-    fi
-    "$ZIG_COMPAT" "${ZIG_BUILD_ARGS[@]}" 2>&1
-
-    # Find the built library
-    BUILT_LIB=$(find zig-out -name "libghostty-vt*" -type f \( -name "*.dylib" -o -name "*.so" \) | head -1)
-    if [ -z "$BUILT_LIB" ]; then
-        error "libghostty-vt not found after build"
-        exit 1
-    fi
-
-    info "Built: $BUILT_LIB"
-    mkdir -p "$ROOT_DIR/native/$RID"
-    cp "$BUILT_LIB" "$NATIVE_LIB"
-    info "Copied to: $NATIVE_LIB"
-
-    # Also copy headers
-    if [ -d "zig-out/include/ghostty" ]; then
-        mkdir -p "$ROOT_DIR/native/include"
-        cp -r zig-out/include/ghostty "$ROOT_DIR/native/include/"
-        info "Headers copied to: $ROOT_DIR/native/include/"
-    fi
-
-    cd "$ROOT_DIR"
-else
-    step "1/4 — Skipping native build (--skip-build)"
+cd "$ROOT_DIR"
+if [[ "$SKIP_BUILD" == false ]]; then
+    # The plain upstream build omits RoyalTerminal exports/overlays. Always use
+    # the same entry point as shipping packages and the CI native integration.
+    "$SCRIPT_DIR/build-native.sh" --release
 fi
-
-# ─────────────────── Step 2: Verify Native Library ───────────────────
-
-step "2/4 — Verifying native library..."
-
-if [ ! -f "$NATIVE_LIB" ]; then
-    error "Native library not found: $NATIVE_LIB"
-    error "Run without --skip-build to build it first."
+NATIVE_LIB="$ROOT_DIR/native/$RID/$LIB_NAME"
+if [[ ! -f "$NATIVE_LIB" ]]; then
+    echo "Missing native library: $NATIVE_LIB. Run without --skip-build." >&2
     exit 1
 fi
 
-info "Library: $(file "$NATIVE_LIB")"
-
-# Verify expected symbols
-EXPECTED_SYMBOLS=("ghostty_paste_is_safe" "ghostty_osc_new" "ghostty_sgr_new" "ghostty_key_encoder_new" "ghostty_key_event_new")
-MISSING=0
-for sym in "${EXPECTED_SYMBOLS[@]}"; do
-    if ! nm -gU "$NATIVE_LIB" 2>/dev/null | grep -q "_$sym"; then
-        error "Missing symbol: $sym"
-        MISSING=$((MISSING + 1))
+# Match complete export names, including our extension and current upstream ABI.
+# Capture nm first: piping nm into grep -q can fail with SIGPIPE under pipefail.
+if [[ "$RID" == osx-* ]]; then
+    symbols="$(nm -gU "$NATIVE_LIB" | awk '{print $NF}' | sed 's/^_//')"
+else
+    symbols="$(nm -D --defined-only "$NATIVE_LIB" | awk '{print $NF}')"
+fi
+for symbol in ghostty_terminal_new ghostty_render_state_set ghostty_snapshot_encode_buf \
+    ghostty_royal_notification_callback ghostty_royal_window_resize_callback; do
+    if ! grep -Fx "$symbol" <<< "$symbols" >/dev/null; then
+        echo "Missing required native export: $symbol ($NATIVE_LIB)" >&2
+        exit 1
     fi
 done
 
-if [ $MISSING -gt 0 ]; then
-    error "$MISSING expected symbols missing from native library"
-    exit 1
-fi
-
-TOTAL_SYMBOLS=$(nm -gU "$NATIVE_LIB" 2>/dev/null | grep ' T _ghostty' | wc -l | tr -d ' ')
-info "All expected symbols present ($TOTAL_SYMBOLS total exports)"
-
-# ─────────────────── Step 3: Build Test Project ──────────────────────
-
-step "3/4 — Building integration test project..."
-
-cd "$ROOT_DIR"
-dotnet build tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Debug 2>&1
-
-# Verify native lib was copied to output
-OUTPUT_DIR="tests/RoyalTerminal.IntegrationTests/bin/Debug/net10.0"
-if [ -f "$OUTPUT_DIR/$LIB_NAME" ]; then
-    info "Native library present in test output: $OUTPUT_DIR/$LIB_NAME"
-else
-    warn "Native library not in test output, copying manually..."
-    cp "$NATIVE_LIB" "$OUTPUT_DIR/"
-    info "Copied native library to test output"
-fi
-
-# ─────────────────── Step 4: Run Integration Tests ───────────────────
-
-step "4/4 — Running native integration tests..."
-
-dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj \
-    $VERBOSE \
-    --no-build \
-    2>&1
-
-echo ""
-info "=== All integration tests passed! ==="
-info "Native library: $NATIVE_LIB"
-info "Platform: $OS/$ARCH ($RID)"
+project=tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj
+dotnet build "$project" -c "$CONFIGURATION"
+# Do not reuse a stale output library merely because it exists.
+output="tests/RoyalTerminal.IntegrationTests/bin/$CONFIGURATION/net10.0"
+cp "$NATIVE_LIB" "$output/$LIB_NAME"
+ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1 dotnet test "$project" \
+    -c "$CONFIGURATION" --no-build --verbosity "$VERBOSITY"
