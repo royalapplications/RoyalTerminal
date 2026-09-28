@@ -18,8 +18,13 @@ internal sealed class TerminalKeyboardLayout : ITerminalKeyboardLayout
         // Avalonia's Wayland/X11 event has no native keymap or consumed mask.
         // Hosts with that metadata can inject ITerminalKeyboardLayout. Do not
         // manufacture an unshifted symbol by applying US physical-key rules.
-        return new(key.KeyModifiers == KeyModifiers.None ? Scalar(key.KeySymbol) : 0, TerminalModifiers.None);
+        return ResolvePublicEvent(key);
     }
+
+    // A current-version fallback, not a replacement native keymap. Keeping this
+    // projection independent of the running OS makes its no-guess contract testable.
+    internal static TerminalKeyboardLayoutInfo ResolvePublicEvent(KeyEventArgs key)
+        => new(key.KeyModifiers == KeyModifiers.None ? Scalar(key.KeySymbol) : 0, TerminalModifiers.None);
 
     internal static TerminalKeyboardLayoutInfo Resolve(KeyEventArgs key, Func<KeyEventArgs, KeyModifiers, string?> translate)
     {

@@ -23,7 +23,9 @@ The native refresh includes [word-selection hard-break fixes](https://github.com
 [packed glyph/codepoint cache keys](https://github.com/ghostty-org/ghostty/pull/14300),
 opt-in [window resize requests](https://github.com/ghostty-org/ghostty/pull/14375),
 and [render overscan](https://github.com/ghostty-org/ghostty/pull/14400).
-Source parity work for the newly added managed/host behaviors is still in progress.
+The shared-host implementation includes these behaviors within the current
+dependency APIs. The supported boundary below distinguishes delivered behavior
+from deliberately unsupported platform capabilities.
 
 `GhosttyRenderState` exposes the [new overscan/row-identity ABI](https://github.com/ghostty-org/ghostty/pull/14404):
 `SetOverscan`, requested/captured counts, signed current-row viewport Y and an
@@ -33,13 +35,35 @@ height excludes overscan. Dirty iterator indices start at the highest captured
 row, so callers requesting overscan must use signed viewport Y for placement.
 IDs support equality/hash lookup only; reusing a row cache also requires a clear
 dirty flag. Existing callers request zero overscan and retain their viewport-only
-iteration contract. Native rebuilding, ABI manifest regeneration and authored
-regression execution remain deferred to final validation.
+iteration contract. Native builds, the 161-type/27-callback ABI manifest and
+regression execution passed in the current integration validation.
 
 The desktop action mirror also includes the appended `CopyTitleToClipboard`,
 `MoveTabToNewWindow` and `ResizeWindow` tags and the window-size union payload.
-This raw action binding does not enable application-driven window resizing in
-RoyalTerminal; the new opt-in shared-host policy still needs implementation.
+The raw action binding alone does not enable application-driven resizing.
+RoyalTerminal also implements the separate opt-in shared-host resize policy.
+
+## Supported implementation boundary
+
+The dependency versions are fixed for this delivery: no Avalonia or other
+dependency upgrade, fork, reflection into private framework state, or new
+third-party patch is required. The existing pinned Ghostty integration and its
+already-reviewed extension overlays are retained unchanged.
+
+| Area | Supported behavior and boundary |
+| --- | --- |
+| Linux keyboard layout | Existing public key/text events are processed normally. Modified-key unshifted symbols and consumed modifiers require an explicitly supplied `ITerminalKeyboardLayout`; the default host does not invent them from a US layout or a later keymap state. This is the final current-version fallback, not pending framework-patch work. |
+| Native Wayland notification focus | Notifications can be delivered and reported, but focus is not advertised without a supported activation API. Actual X11/XWayland XID handles retain the existing focus path. No private compositor or framework API is used. |
+| Managed snapshots and graphics | Quotas, lifecycle, COW ownership and failure boundaries are covered by deterministic and native differential tests. CLR allocation/storage need not reproduce Zig's mmap/hash layout or every native out-of-memory instruction. Exact allocator identity and exhaustive failure equivalence are not acceptance criteria. |
+| Rendering | Both engines use the shared Avalonia/Skia renderer, including overscan, stable row identity, fractional scrolling and image damage. Ghostty's standalone Metal/OpenGL/DisplayLink/DMA-BUF implementation is not embedded. |
+| Validation | Build, ABI, parser/graphics/snapshot differentials and headless tests establish automated coverage. They do not establish interactive IME, notification permission/desktop policy, secure-input OS ownership, compositor or six-architecture runtime certification. |
+
+The implementation is evaluated against the pinned Ghostty behavior, with Windows
+Terminal and xterm.js references recorded at the relevant sections. PowerShell
+output is preserved rather than heuristically deleting styled trailing spaces.
+Physical desktop/device certification remains a release-environment check, not a
+reason to add unsupported dependency hooks. Performance results are isolated
+workloads, not an exhaustive upstream-performance or whole-application speed claim.
 
 ## Untrusted hyperlink dispatch
 
@@ -99,9 +123,9 @@ directories; ordinary directory execute permission does not prohibit opening.
 Missing platform inspection APIs fail closed. Native resources and handles are
 released within the inspection operation, before its result is published.
 
-These platform implementations, canonical blocked-target previews, safe-file
-dispatch and their authored native-filesystem/host/policy/cancellation cases are
-awaiting final execution. As with the upstream path-based OS opener, same-user filesystem or
+The native-filesystem, canonical preview, safe-file dispatch, host, policy and
+cancellation cases pass the automated suites. Real desktop associations remain
+host-dependent. As with the upstream path-based OS opener, same-user filesystem or
 association changes can race inspection and dispatch; this is not an atomic
 open-by-verified-handle security boundary.
 
@@ -141,7 +165,7 @@ RoyalTerminal follows Ghostty's unchanged web spelling instead.
 similarly invalidates link hover when the rendered viewport changes, leaving
 presentation to its embedder. Both-engine
 headless, coordinator ordering/lifetime, native-path and allocation cases are
-authored but unrun; complete #13634/platform sign-off is still unverified.
+included in automated validation; complete #13634/platform sign-off is still unverified.
 
 For comparison,
 [Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalApp/TerminalPage.cpp)
@@ -150,8 +174,7 @@ filters supported/safe URIs before confirmation, and
 defaults to web schemes unless an embedder supplies a link handler. RoyalTerminal
 follows Ghostty's scheme/Unicode policy with an application-owned decision UI,
 rather than treating every absolute URI as safe. Focused classifier, host,
-view-model, headless-dialog and both-engine click cases are authored; they have
-not yet been executed.
+view-model, headless-dialog and both-engine click cases are included in automated validation.
 
 ## Font discovery and startup
 
@@ -311,8 +334,8 @@ Ghostty's FreeType/CoreText backends. A caller-supplied emoji-only collection st
 usable without synthetic text, rather than rejecting the whole configuration when
 Ghostty's text-base completion reports `DefaultUnavailable`; a focused test records
 this deliberate borrowed-collection compatibility choice. Profiles, live settings,
-compiled controls and split panes persist all three toggles. Regression tests are
-written; execution is deferred to the final validation stage.
+compiled controls and split panes persist all three toggles. Regression tests pass
+in the automated suites; this does not imply pixel-identical platform rendering.
 
 Ordinary printable ASCII uses lazy 95-entry tables per used style for the first
 lookup culture. Other cultures, explicit presentation selectors and Unicode
@@ -323,9 +346,8 @@ also retain positive/negative scalar results rather than repeating native glyph
 coverage on every draw. Configuration validation no longer constructs parsed
 range arrays or family strings when callers only need validity. The
 `--font-lookup` benchmark compares warmed direct-table and general-cache queries
-with the same ASCII/style/face workload. **Execution and before/after performance
-validation are deferred until the implementation batch is complete; no measured
-speedup is claimed yet.**
+with the same ASCII/style/face workload. The harness completed during closeout;
+paired microbenchmarks do not establish an end-to-end application speedup.
 
 Fallback discovery now continues beyond a rejected first platform match, as
 Ghostty's [candidate loop](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/font/CodepointResolver.zig)
@@ -366,8 +388,8 @@ fonts; there is no claimed overall discovery speedup.
 The `--font-candidates` workload measures fresh mixed-presentation/unsupported
 queries separately from warmed hits/misses. Candidate iteration, ownership,
 failure cleanup, ranking/trait parsing, native descriptor smoke and collection
-header tests are written. **Execution, native platform sign-off and before/after
-performance measurement remain deferred to final validation.** The separate font
+header tests are included in automated validation. Native desktop certification
+and historic before/after comparisons are not implied. The separate font
 discovery benchmark compares single-face discovery with loaded-collection reuse;
 neither isolated workload proves end-to-end rendering performance.
 
@@ -441,10 +463,10 @@ override-mask/configuration contract; the immutable caching is a CLR-specific
 equivalent, not a transplant of native palette storage. Eighteen new cases cover
 sharing, repeat allocations, dynamic changes, equal defaults, configuration,
 reset, invalid batches, defensive ownership, snapshot installation and held/COW
-publication. These tests and `--managed-colors` are authored but unrun. Its six
+publication. These tests and `--managed-colors` are included in automated validation. Its six
 scenarios separate repeated OSC colors, cursor changes with an overridden palette,
 palette changes/resets and immutable palette copies. Allocation and timing
-comparisons with the previous implementation remain deferred to final validation;
+comparisons with the previous implementation are not inferred from current-build measurements;
 no measured speedup is claimed.
 
 ## Managed mode-state storage
@@ -473,7 +495,7 @@ defaults, zero-allocation container operations and first snapshot installation.
 `--managed-mode-state` pairs the former hash-set/scan representation with packed
 storage for creation, known flags, numeric queries and toggling. `--managed-print`
 also includes mode-churn and grapheme-mode workloads for actual processor costs.
-Tests, before/after profiling and CI inspection remain deferred to final validation;
+Tests and CI results are recorded below; historic before/after profiling is not claimed;
 neither a measured throughput gain nor a whole-terminal heap reduction is claimed.
 
 ## Managed tabstop storage and controls
@@ -512,8 +534,8 @@ wrap, margins, both snapshot formats, resize rollback and native differentials.
 `--managed-tabstops` compares hash-set and packed creation, sparse forward/backward
 navigation, ordered export and bitmap export at 80/512/521/4096 columns. The
 expected gains are smaller storage, fewer lookup operations and removal of
-temporary export arrays; no measured speedup is claimed. Tests, before/after
-profiling and CI execution/inspection remain deferred to final validation.
+temporary export arrays. Tests, benchmark execution and CI are recorded below;
+current measurements alone do not establish a historic before/after speedup.
 
 ## Unknown APC policy and progress lifecycle
 
@@ -559,8 +581,8 @@ results, scratch retention, cancellation, identifier storage and glyph-body
 delivery. `--managed-unknown-apc` pairs the former reusable-list capture with
 the bounded owner for six small/full/clipped/fragmented/large workloads. Expected
 benefits are no identifier heap storage, no small scratch regrowth and no idle
-large unknown buffer. Measurements, test execution and CI remain deferred;
-no measured throughput or allocation improvement is claimed.
+large unknown buffer. Measurements, test execution and CI are recorded below;
+no end-to-end throughput improvement is inferred.
 
 Managed OSC 9;4 progress reports are host effects, not snapshot state. Every
 protocol RIS sends a remove report, including repeated resets with no preceding
@@ -623,8 +645,8 @@ limits, mixed/invalid/unknown capability keys, and stack/pool-sized batches.
 `--managed-dcs-replies` pairs the former string/list pipeline with bounded
 formatting for default/palette/RGB SGR and color/boolean/TN capability replies.
 The expected reduction is intermediate allocation and transcoding, not elimination
-of the callback's owned-array cost. Tests, benchmark measurements and CI inspection
-remain deferred; no measured throughput gain is claimed.
+of the callback's owned-array cost. Tests, benchmark measurements and CI results
+are recorded below; no end-to-end throughput gain is claimed.
 
 ## Managed search capture invalidation
 
@@ -679,12 +701,12 @@ owners/consumers, adoption, both sides of storage swaps, renderer acknowledgment
 screen/viewport transitions, slices, saturation and weak ownership. Active-window
 cases add direct-history fallbacks, boundary blocks, both-region aliases, recycled
 membership, stale-consumer capture and cross-boundary search equivalence. These cases
-and `--managed-search-capture` are authored but unrun. The benchmark separates
+and `--managed-search-capture` are included in automated validation. The benchmark separates
 idle, first/last active-row edits, history edits, wrap changes and scrolling at
 1,024/16,384 rows, plus a paired
-observed/unobserved write loop to quantify notification overhead. Before/after
-profiling, allocation measurements and all validation remain deferred; no
-measured speedup is claimed.
+observed/unobserved write loop to quantify notification overhead. Current-build
+allocation and timing results are recorded below; these are not a historical
+before/after speedup claim.
 
 ## Managed snapshot grid transport
 
@@ -723,18 +745,17 @@ whole-prefix failure and duplicate retry order remain intact; raw retention can
 still be longer than live storage. This extends the buffered suffix work in
 [Ghostty's codec change](https://github.com/ghostty-org/ghostty/commit/593762cfa)
 without changing the lossless/raw versus bounded/live contract. New scalar-oracle,
-quota, ownership, duplicate/framing and allocator-replay cases are authored but
-unrun; the grid benchmark adds long-valid and filtered suffix workloads.
+quota, ownership, duplicate/framing and allocator-replay cases are included in automated validation; the grid benchmark adds long-valid and filtered suffix workloads.
 
 [Windows Terminal text export](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
 and [xterm.js serialization](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-serialize/src/SerializeAddon.ts)
 do not define this binary format; Ghostty remains the wire reference. New scalar
 oracle, all-BMP, lane/tail/alignment, sentinel/bounds, width classification, suffix
-batching and zero-allocation cases are authored but unrun. The
+batching and zero-allocation cases are included in automated validation. The
 `--managed-snapshot-grid` harness separates encode/decode for blank, ASCII, BMP,
 styled, linked, wide and dense/sparse-grapheme grids. Before/after measurements,
-hardware-disabled execution, native golden/round-trip tests and the full suite
-remain deferred; no measured speedup or cross-platform sign-off is claimed.
+hardware-disabled execution, native golden/round-trip tests and full-suite results
+are recorded below; automated checks are not interactive platform sign-off.
 
 ## Managed snapshot software checksum
 
@@ -757,8 +778,7 @@ forced software and automatic selection over eleven payload sizes. Run it both
 normally and with `DOTNET_EnableHWIntrinsic=0` in the final validation phase.
 New bitwise-oracle, high-power matrix, alignment/tail, 4096-byte threshold,
 streaming, golden-record, corruption, concurrency and warm-allocation tests are
-authored but unrun. Full-suite, native round-trip and platform sign-off remain
-deferred. Windows Terminal text export and xterm.js SerializeAddon, linked above,
+included in automated validation. Full-suite and native round-trip results are recorded below; interactive platform sign-off is separate. Windows Terminal text export and xterm.js SerializeAddon, linked above,
 have no equivalent binary checksum format; Ghostty remains the wire reference.
 
 ## Managed snapshot record scratch
@@ -933,8 +953,8 @@ unchanged byte setter on every batch. Host row rotation can interleave allocatio
 identities: their connected prefix remains indivisible, and a byte-growth recycle
 cannot remove multiple allocations solely to work around that host representation.
 These conservative cases can remain over quota. Runtime-limit, streaming, resize,
-ownership and native continuation regression cases are authored; execution and
-profiling remain deferred.
+ownership and native continuation regression cases are included in automated
+validation; isolated measurements do not establish a whole-application speedup.
 
 Column reflow now carries source-page allocation provenance through logical lines,
 including lines that cross PAGE boundaries. The first destination inherits the
@@ -966,8 +986,8 @@ are visible-layout references but do not define Ghostty's page-local allocator.
 Sixteen new cases cover map-versus-bitmap pressure, separate string rounding,
 duplicate scratch, growth/rehash cleanup, retained owners and repeated native
 resize comparisons. `--managed-snapshot-reflow` adds four snapshot-tracked
-workloads alongside the existing untracked reflow harness. Test execution,
-before/after profiling and CI remain deferred to the final validation phase.
+workloads alongside the existing untracked reflow harness. Test execution and
+current-build measurements are recorded below; historical speedup is not inferred.
 
 Reflow now handles the native page-growth ceiling without marking a representable
 destination as overflow. A later-row refusal clones the current row into a new
@@ -990,7 +1010,7 @@ additional authored cases cover 4/16-KiB growth ceilings, five metadata pressure
 types, retained sources, split-prefix ownership, grouped/scalar/wide payload
 filtering, row-clone rollback with anchors, and bounded adversarial set retries.
 Sparse logical capacities avoid allocating four-GiB pages in these cases.
-These changes and tests have not yet been executed or profiled.
+Automated execution is recorded below; no four-GiB native allocation or exhaustive working-set equivalence is claimed.
 
 Managed style copy now looks up each occupied source chunk once, scans equal-ID
 runs with bounded span operations and fills destination chunks in bulk. Grouped
@@ -1016,7 +1036,7 @@ The native source overlay terminates that same formerly unbounded retry, release
 the unlinked page and restores this source chunk's pins before rollback cleanup.
 This does not claim whole-terminal native rollback after earlier source chunks
 have committed. Twelve managed rollback/recovery cases and two native collision/
-pin regressions are authored but unrun. Rebuild the native extension before
+pin regressions are included in automated validation. Rebuild the native extension before
 executing the native regressions: the previous library loops on their fixture.
 
 Quota capacity measurement now obtains styles, grapheme cells/bytes and hyperlink
@@ -1028,20 +1048,19 @@ owners remain authoritative; dirty/untracked pages retain the existing cell-base
 fallback. This reduces revision walks and weak-table lookups without changing
 Ghostty's native allocation accounting or growth projection. Twelve new counter,
 single-pass, invalidation, identity, COW, host-write and warm-allocation cases are
-authored but unrun. `--managed-snapshot-usage` compares one combined query against
+included in automated validation. `--managed-snapshot-usage` compares one combined query against
 three indexed queries for current and dirty-tail pages at four row counts; that
 paired baseline isolates traversal work, not the old enumerator allocations.
 Full checkpoint costs and before/after profiling remain unmeasured.
 
-This is not yet exact mutable allocator parity: the full failure/degradation and
-mutation-order audit remains unfinished. Cursor-style pressure splitting uses
+This models observable page pressure and supported failure policies, not exact CLR/Zig allocator identity or proof over all allocation failures. Cursor-style pressure splitting uses
 exact live row-layout selection, keeps the upper allocator and clones the suffix
 before publication. Migrating links precede the style retry; failed SGR retries its
 previous pen while cursor restoration/movement falls back to default. Other
 unconnected paths cannot reconstruct allocator history from final cells.
 Boundary, COW, recycling, source-provenance,
-blank/wrapped reflow, growth-ceiling and native admission comparison tests are added;
-execution and profiling are pending the full validation phase.
+blank/wrapped reflow, growth-ceiling and native admission comparison tests pass
+in the automated suites. These cases do not prove arbitrary allocator-failure parity.
 
 Live snapshot restore shares Ghostty's 64-suffix-codepoint bound with terminal
 input, excluding the base scalar. Valid scalars beyond that bound are ignored only
@@ -1050,7 +1069,7 @@ consumes the complete suffix and enforces caller decode limits. Unlike xterm.js'
 combined-string appends and Windows Terminal's row/text storage, the managed engine
 uses Ghostty's bound so snapshot restore cannot create a larger live cluster than
 terminal input. Bounded UTF-16 scratch covers even supplementary base and suffix
-scalars. Wire-preservation, limit and native continuation tests are added but unrun.
+scalars. Wire-preservation, limit and native continuation tests are included in automated validation.
 
 Grapheme restore also models native allocation pressure while consuming entries in
 their original wire order. The native map limit and 16-byte bitmap chunks apply;
@@ -1062,7 +1081,7 @@ live outcomes. The temporary bitmap materializes words only for actual bounded
 content, never in proportion to an untrusted capacity hint, and is released after
 parsing. Invalid scalars/targets do not consume logical storage. Whole-prefix
 failure, duplicate recovery, wire-order, huge-hint and seeded native comparison
-tests are added; execution remains pending.
+tests are included in automated validation.
 
 Style and hyperlink restore now honor native table/string pressure too. Logical
 reference-counted sets reproduce Robin Hood probing, the 31-probe insertion guard,
@@ -1088,7 +1107,7 @@ entries and allocation proportional to absent prefixes or capacity hints.
 The style-storage lifecycle model includes cursor-only release/add, cell
 write/erase, native rehash-versus-growth failure reasons, preferred-ID insertion
 and row-major rebuilds. A rebuild drops dead entries and leaves cursor restoration
-to its owner. Unit and native cursor/write/erase comparisons are added but unrun.
+to its owner. Unit and native cursor/write/erase comparisons are included in automated validation.
 The processor now uses the model for each changed SGR parameter/group, including
 intermediate styles reset later in the same CSI, and for primary/alternate SCREEN
 cursor restoration. New styles are charged before printing and retain their
@@ -1100,8 +1119,7 @@ Ordinary non-snapshot/non-quota terminals do not create the tracker.
 Live allocator entries use weak page keys and fork on COW mutation. Style-only
 changes do not copy terminal cell arrays; synchronized-output publication transfers
 the private allocator state with its row ownership. New empty/collision pressure,
-rehash, transient-write, cursor-restore and COW/publication comparisons are added
-but unrun. The immutable seed remains decode/rebuild-time state, separate from
+rehash, transient-write, cursor-restore and COW/publication comparisons are included in automated validation. The immutable seed remains decode/rebuild-time state, separate from
 the tracker owned by the mutable screen.
 
 Cursor movement now transfers the style reference on page changes, including
@@ -1149,7 +1167,7 @@ rollback. Mode 1049 clears reset the dormant pending-wrap flag before a failed
 copy; a successful copy retains the entering cursor's wrap state. Erase operations
 own their wrap reset, including mode-switch clears, while history-only ED3 and
 ignored ED/EL parameters leave it unchanged. Cursor-copy, COW, split, output-hold
-and native wrap-continuation tests are authored but unrun.
+and native wrap-continuation tests are included in automated validation.
 
 Streaming tail line feeds assign slots using an owner-local high-water mark
 instead of measuring the full history for every new row. Checkpoint-assigned
@@ -1157,7 +1175,7 @@ slots update that mark, and COW forks preserve independent ownership. Page
 transitions still reconcile row groups; this is not an end-to-end performance
 claim. Discarding alternate storage releases its retained cursor-page entry;
 clearing all storage drops the tracker. Movement, screen-switch, tail-slot,
-Sixel, host-clear and native capacity comparisons are added but unrun.
+Sixel, host-clear and native capacity comparisons are included in automated validation.
 
 Live row edits now update style references before their cell changes. Printing,
 wide-cell cleanup, ED/EL/ECH, protected erase runs, hidden-column removal, prompt
@@ -1176,7 +1194,7 @@ single reusable empty 256-cell chunk avoids repeated allocations when replacing
 the last styled cell. Untracked screens do not allocate the style tracker. Added
 tests cover identical-background erasure, protected holes, transient copy growth,
 preferred IDs, same-page moves, COW storage, chunk reuse and native capacities;
-execution and performance measurement remain pending.
+automated execution and isolated measurements are recorded in the validation results below.
 
 Snapshot-aware reflow, row retirement and style/grapheme/hyperlink mutation hooks
 are connected, but complete mutation-time parity still requires the remaining
@@ -1199,8 +1217,8 @@ indices before publishing either. This follows `Screen.startHyperlinkOnce`'s
 pending-value cleanup, preventing repeated refused OSC 8 values from accumulating
 URI/identity objects for the screen's lifetime. It does not introduce general
 pruning of successful public registrations. New refusal/retry, migration,
-resize, held-output, exception, collision/COW and weak-lifetime cases are authored
-but unrun; allocation and throughput profiling remain deferred.
+resize, held-output, exception, collision/COW and weak-lifetime cases are included
+in automated validation; isolated registry measurements are recorded below.
 [Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/buffer/out/textBuffer.cpp)
 prunes unreachable hyperlink IDs as rows retire, while
 [xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/common/services/OscLinkService.ts)
@@ -1208,7 +1226,7 @@ uses line-marker lifetimes. Neither defines the native PAGE refusal contract;
 Ghostty defines that boundary here, with stable public registrations preserved.
 None of these refusals marks an otherwise representable page as
 overflowed. Focused near-four-GiB logical-capacity, COW and recovery cases are
-authored but unrun; fixtures do not allocate huge native pages. These boundaries
+included in automated validation; fixtures do not allocate huge native pages. These boundaries
 follow Ghostty `Screen.appendGrapheme`, `startHyperlink`, `cursorSetHyperlink` and
 `Terminal.print`; Windows Terminal and xterm.js have different storage models.
 
@@ -1219,8 +1237,7 @@ restoration once. A COW-owned notification updates active/dormant pen registers,
 including snapshot capture and later input, without discarding cell styles or
 protection. Explicit later SGR may establish a new pen. Deterministic crowded-probe
 regressions cover grapheme/link-driven growth, independent cursor details, saved
-cursors and COW ownership without forcing process OOM. These tests are authored
-but unrun; no new performance claim is made.
+cursors and COW ownership without forcing process OOM. These tests are included in automated validation; no new performance claim is made.
 
 Exhausted cross-page row-copy retries are now fatal to the managed terminal
 owner, rather than falling through as a successful copy of the source payload.
@@ -1234,7 +1251,7 @@ published by timeout or disposal. Cursor accounting skips exception unwinding;
 the existing output worker propagates the failure and stops its drain. Successful
 capacity growth still retries the copy. Twenty-four full-width/rectangular,
 grapheme/style/link-map/string-pressure, COW, lifecycle, held-publication and worker
-regression cases are authored but unrun.
+regression cases are included in automated validation.
 
 CLR allocation failures in scalar/batched printing, grapheme append/transfer,
 character shifts, row/cell erasure, hidden-cell retirement, raster text clearing,
@@ -1252,7 +1269,7 @@ title/bell/response observers may fail after a valid mutation, and a failed stag
 resize must still roll back to its usable original owner. Instance-local
 allocation tripwires cover partial metadata edits, held-output nonpublication,
 revision cleanup, copied failures and resize rollback; those new tests are
-authored, not yet executed. Wider allocator/publication failure auditing remains.
+included in automated validation. These tests exercise the supported owner-fault/publication policy; exhaustive failure equivalence is not claimed.
 
 Character insertion/deletion now reuse one writable span per row, avoiding
 repeated COW checks and metadata revision increments per shifted cell. Printing,
@@ -1295,9 +1312,8 @@ The chosen visibility behavior follows Ghostty's renderer suspension and timer,
 and [xterm.js's buffered refresh/timeout](https://github.com/xtermjs/xterm.js/blob/master/src/browser/services/RenderService.ts).
 The managed host additionally needs explicit COW publication safety because its
 published rows are shared with independent readers. Twenty publication/quota/
-history/ownership failure and retry cases are authored but unrun. The
-`--managed-print` benchmark adds tracked/untracked hold cycles; final build, test,
-benchmark and CI execution remains deferred. This is not yet a completed audit
+history/ownership failure and retry cases are included in automated validation. The
+`--managed-print` benchmark adds tracked/untracked hold cycles; final build, test, benchmark and CI results are recorded below. This is not yet a completed audit
 of every allocator failure or platform path.
 
 Screen-only buffer switching now prepares missing rows and raster collections
@@ -1324,9 +1340,8 @@ without a temporary deletion list. This scratch is not snapshot state and is not
 shared by COW owners. Replacement reserves registry/list capacity before deleting
 overlap or clearing text. Thirty structural/cursor/raster regression cases and a
 `--managed-raster` benchmark (1/2/8/64 live images, warmed replacement, seven samples)
-are authored but unrun. Expected savings are fewer temporary collections and
-unnecessary source scans, not a measured throughput claim; before/after profiling
-and all execution remain in the final validation stage.
+are included in automated validation. Expected savings are fewer temporary collections and
+unnecessary source scans, not a measured throughput claim; execution and current-build measurements are recorded below; no historic before/after ratio is inferred.
 
 Snapshot metadata coordination now reuses two bounded row-group buffers and one
 retained-slot set per tracker. Leases clear row references on both success and
@@ -1350,10 +1365,10 @@ Terminal's `ROW` and xterm.js's `BufferLine` remain row-storage references, not
 definitions of Ghostty's PAGE allocation contract.
 
 Twenty-two new revision/retirement, allocation, seed, COW, collision and weak-owner
-lifetime cases are authored but unrun. `--managed-print` adds isolated snapshot
+lifetime cases are included in automated validation. `--managed-print` adds isolated snapshot
 pen changes and 128-row cross-page cursor cycles. Expected benefits are fewer
 temporary collections, metadata scans and per-style wrapper allocations; timings,
-allocation measurements and regression execution remain deferred to final validation.
+allocation measurements and regression execution are included in automated validation.
 
 Full-width IL/DL now clamp the count to the affected rows and traverse once in
 the native direction, copying directly from the requested distance. In-place
@@ -1372,7 +1387,7 @@ also scrolls a bounded rectangle, whereas
 [`xterm.js`](https://github.com/xtermjs/xterm.js/blob/master/src/common/InputHandler.ts)
 uses repeated line splices and has no Ghostty PAGE allocator. Forty-two new
 large-count, discarded-metadata, pressure, COW, anchor/raster and pending-wrap
-cases are authored, including native comparisons, but remain unrun. The expected
+cases are included in automated native-comparison coverage. The expected
 gain is one row traversal instead of one traversal per requested line; no measured
 speedup is claimed before profiling.
 
@@ -1390,8 +1405,7 @@ does not create a spurious hyperlink migration. Fatal boundary copies retain the
 existing owner-fault/no-publication behavior. Reverse index preserves pending
 wrap when it scrolls, but clears it on its cursor-up fallback, including a clamped
 row-zero move. Forty additional cursor,
-rotation, COW, background, single-row and native differential cases are authored
-but unrun. These decisions follow Ghostty `Terminal.scrollUp/scrollDown/index`,
+rotation, COW, background, single-row and native differential cases are included in automated validation. These decisions follow Ghostty `Terminal.scrollUp/scrollDown/index`,
 `Screen.cursorScrollRegionUp` and `PageList.eraseRow[Bounded]`; Windows Terminal
 rectangle scrolling and xterm.js line splices do not supply the per-page cursor
 contract. No throughput or allocation benchmark claim is made yet.
@@ -1409,7 +1423,7 @@ per-cell sort. Source and destination strides are independent and the existing
 host hidden-column policy is retained. These decisions follow Ghostty
 `Page.cloneFrom/clonePartialRowFrom`; WT ROW and xterm.js BufferLine do not define
 its page allocator contract. Forty additional mapping, retry, failure, COW,
-tail-reuse, huge-hint and native continuation cases are authored, pending execution.
+tail-reuse, huge-hint and native continuation cases pass in the automated suites.
 Top-origin history scrolling with a bottom margin now also rotates within each
 page. It first appends the tail and migrates the cursor to its next logical row,
 then visits the stationary suffix tail-first, cloning only the rows that cross
@@ -1431,24 +1445,21 @@ the page contract; Windows Terminal pans then scrolls the suffix, and
 [xterm.js BufferService.scroll](https://github.com/xtermjs/xterm.js/blob/master/src/common/services/BufferService.ts)
 inserts a line without page-local allocators. New ownership, pruning, COW, hold,
 pressure/failure and native continuation cases cover fresh and reused tails.
-The remaining mutation audit and performance profiling are still outstanding.
+The final review covers the implemented mutation, publication and failure boundaries; exhaustive allocator-failure equivalence is not claimed.
 
 Unrepresentable allocation state rejects additional
 history rather than wrapping a capacity or undercharging it; quota eviction can
 remove such a page only once it is wholly historical. A subsequent representable
-content checkpoint can recover admission. Builds, native comparisons and allocation/
-throughput profiling of these paths remain pending.
+content checkpoint can recover admission. Builds and native comparisons are covered by automated validation; isolated performance results do not establish whole-application throughput.
 
 Managed bitmap searches safely reject an oversized span at the last word rather
 than reading past the bitmap. A hash-checked native correctness overlay now applies
 the same end check to the pinned allocator, without changing its allocation order
 or consuming bits on failure. Native/managed regressions cover oversized URI and
-explicit-ID spans, occupied prefixes and complete reuse after failure; the native
-rebuild and execution remain pending. Windows Terminal and xterm.js do not use this native
+explicit-ID spans, occupied prefixes and complete reuse after failure; the existing native overlay is included in the validated builds. Windows Terminal and xterm.js do not use this native
 PAGE contract, so Ghostty defines these restore decisions. Golden hash vectors,
 bitmap/set lifecycle cases, adversarial hash collisions, seeded native comparisons
-and post-restore overwrite tests are added but unrun. Event-level accounting and
-pressure-driven splitting for subsequent live mutations are still unfinished.
+and post-restore overwrite tests are included in automated validation. Event-level accounting and pressure-driven splitting for live mutations are implemented through the owner-local page tracker described above.
 
 ## Font thickening
 
@@ -1506,9 +1517,8 @@ reference; managed small-buffer reuse is an explicit allocation strategy choice.
 Fifty-one new cases cover fault stages, verbosity, FIFO eviction/replacement,
 parser recovery, bounded retention, observer ordering, lazy empty storage and
 byte-for-byte reply formatting/ownership. `--glyph-replies` adds six paired
-string-versus-byte encoding workloads. Tests, benchmark measurements and CI are
-deferred to final validation; reduced temporary allocation is the expected
-benefit, not a measured end-to-end performance claim.
+string-versus-byte encoding workloads. Tests and the benchmark harness pass;
+reduced temporary allocation is not an end-to-end performance claim.
 
 ## Graphics scene publication
 
@@ -1550,8 +1560,9 @@ Twenty focused cases are authored for preparation/projection failures, retry,
 pixel-only scratch reuse, COW readers, raster ownership, hold release and resize
 rollback, including both backend adapters. `--graphics-publication` measures six
 full-scene/pixel-only workloads (1/32/256 images); the identical harness can run
-against pre-change `b340f5a1` for a baseline. Test, benchmark and CI execution remain
-deferred to final validation; no measured performance gain is claimed.
+against pre-change `b340f5a1` for a baseline. Tests and the current-build harness
+pass. Closeout results below record paired allocation and latency trade-offs;
+they are not a historical-build or end-to-end comparison.
 
 ## Kitty image storage
 
@@ -1578,7 +1589,8 @@ buffers and caller-retained publications are not charged to protocol storage.
 Unrendered RGB payloads retain three rather than four bytes per pixel; rendered
 RGB images can hold both source and cached view. No whole-application memory or
 speed improvement is claimed. Allocation, ownership, quota and cross-engine tests
-are included; execution and profiling are pending implementation-phase validation.
+pass in the automated suites. The closeout benchmarks do not establish
+whole-application memory or speed improvements.
 
 Kitty APC control fields are parsed incrementally into a fixed-size table and
 an eleven-byte temporary field, following Ghostty rather than xterm.js's fixed
@@ -1589,7 +1601,7 @@ and transfers ownership. Failed/disabled commands discard subsequent bytes witho
 retaining a large APC buffer. Rejected commands neither cancel a previously
 accepted chunked image nor change its quiet policy. Normal APC exit/cancellation,
 reset and parser-continuation behavior are preserved. Focused split-input, resource
-and ownership tests are added; allocation measurements and execution remain pending.
+and ownership tests are added; execution and allocation measurements are recorded in the validation results below.
 
 Image-loader allocation failures now follow
 [Ghostty's execution error and transfer lifecycle](https://github.com/ghostty-org/ghostty/blob/622b4eecd7d2ce1a10930537c17f0d61abdba817/src/terminal/kitty/graphics_exec.zig)
@@ -1613,7 +1625,7 @@ ownership. The closest
 and [Windows Terminal image slices](https://github.com/microsoft/terminal/blob/main/src/buffer/out/ImageSlice.cpp)
 do not define Ghostty's pending Kitty transfer/quiet/error contract; we follow the
 pinned native implementation here. Sixty-two new failure/ownership cases and six
-`--kitty-image-loader` workloads are authored but unrun. The identical loader
+`--kitty-image-loader` workloads are included in automated validation. The identical loader
 harness can run against `317610d3` for before/after profiling in final validation;
 reduced object churn is expected, not a measured throughput or working-set claim.
 
@@ -1631,7 +1643,7 @@ not rolled-back transactions. A successfully admitted image remains available wh
 its subsequent display fails. The eviction scan enumerates dictionary entries
 directly to avoid a first-use value-collection allocation after preparation.
 Twenty-six focused admission, replacement, relative/virtual placement, anchor,
-retained-screen and processor retry cases are authored but unrun. Later animation
+retained-screen and processor retry cases are included in automated validation. Later animation
 editing and graphics publication remain separate failure boundaries. No measured
 performance improvement or complete allocation-failure parity is claimed.
 
@@ -1663,9 +1675,9 @@ whose storage/rendering paths do not define this Kitty animation contract.
 Sixty-eight new failure, ownership, alignment/tail and pixel cases are authored,
 including all 65,536 source/destination-alpha pairs in one reference comparison.
 `--kitty-animation` adds eighteen workloads; the same harness runs against
-`bb6d33ae` for before/after profiling. Execution, SIMD-disabled coverage,
-cross-platform sign-off and performance measurements remain deferred to final
-validation; no throughput gain or exhaustive mutation-failure parity is claimed.
+`bb6d33ae` for historical before/after profiling. Automated execution,
+software-fallback coverage and current-build measurements are recorded below;
+interactive sign-off and exhaustive mutation-failure parity are not claimed.
 
 Kitty parser state is now stored by value in the processor, removing a separate
 heap parser owner for each APC while retaining one independently owned command.
@@ -1694,8 +1706,7 @@ Thirty-six new failure/ownership/formatting cases are authored, including reject
 continuation/retransmission quiet inheritance, all scalar-field maxima and parser
 owner allocation. `--kitty-parser` adds four ingestion workloads; the identical
 harness can run against pre-change `2f5c325f` for its heap-parser baseline.
-`--kitty-replies` adds six paired StringBuilder/byte-encoding workloads. These
-tests and benchmarks remain unrun, along with CI; fewer parser/response temporary
+`--kitty-replies` adds six paired StringBuilder/byte-encoding workloads. Automated tests and isolated benchmark workloads cover these changes; fewer parser/response temporary
 objects are expected, but measured end-to-end gains remain unproven.
 
 Graphics payload decoding follows Ghostty's default simdutf forgiving-base64
@@ -1716,7 +1727,7 @@ lets the remainder of that write run before the next tick. Idle deadlines and
 external resize still refresh animations. Deleting an earlier frame preserves the
 displayed frame's identity and elapsed gap, including when it was the last frame;
 the reviewed native frame-deletion overlay now covers that case as well. Fake-clock
-cross-engine tests and a raw-native generation regression are added but unrun.
+cross-engine tests and a raw-native generation regression are included in automated validation.
 
 ## Kitty drag and drop
 
@@ -1805,7 +1816,7 @@ fallbacks, including user `.disabled` overrides. Both `sound-name` and resolved
 not the former. All standard sounds are advertised only when available locally
 (or explicitly disabled by the user); otherwise only system/silent are advertised.
 
-Wayland activation-token integration remains unfinished. Avalonia 12.1.1's
+Native Wayland activation-token integration is outside the supported current-version API boundary. Avalonia 12.1.1's
 [native Wayland activation is a no-op](https://github.com/AvaloniaUI/Avalonia/blob/12.1.1/src/Avalonia.Wayland/WindowImplBase.cs)
 and exposes no token-aware activation feature. Linux focus capability is therefore
 advertised only for an actual X11/XWayland window handle, not inferred from session
@@ -1818,7 +1829,7 @@ Additional tests cover XDG root/name/theme order, desktop-entry masking, all ico
 and sound aliases, locale and disabled sounds, cache invalidation, bounded lookup,
 path traversal rejection and backend-specific focus capability.
 An isolated loopback D-Bus peer exercises actual message serialization without
-contacting the user's desktop bus. These tests have not yet been executed.
+contacting the user's desktop bus. Automated coverage includes these loopback tests; real desktop-server policy is a separate release-environment check.
 
 Reference decision: the pinned Ghostty OSC 99 implementation supplies a parser
 but no stream/desktop delivery. Windows Terminal's OSC dispatcher has no OSC 99
@@ -1826,7 +1837,7 @@ handler and xterm.js exposes host registration through `registerOscHandler`.
 RoyalTerminal follows the [Kitty desktop notification protocol](https://sw.kovidgoyal.net/kitty/desktop-notifications/)
 for the shared host lifecycle. Three reviewed native overlays expose the parsed
 command without adding an upstream action enum value. Callback, protocol and
-headless lifecycle tests have been added; execution awaits full validation.
+headless lifecycle tests are included in automated validation.
 Linux resource resolution follows the [icon theme specification](https://specifications.freedesktop.org/icon-theme/latest/)
 and [sound theme specification](https://specifications.freedesktop.org/sound-theme/latest-single/).
 
@@ -1865,9 +1876,9 @@ An OS add completion that exceeds the bounded shutdown wait remains natively own
 and removes its own late request, without retaining a managed callback or handle.
 Objective-C tests use a fake center for replacement/cancellation/delegate lifetimes;
 managed tests use a fake transport. The universal bridge build and native tests are
-wired into macOS CI and its artifact into cross-platform NuGet packaging. Build,
-test execution, package inspection and real permission/activation sign-off remain
-pending until the full validation phase.
+wired into macOS CI and its artifact into cross-platform NuGet packaging. Automated
+builds and tests pass; package inspection applies only to the audited artifacts
+identified in the PR. Real permission/activation sign-off remains device-specific.
 
 The Windows presenter uses a separate C++/WinRT host bridge for x64 and arm64,
 sharing the source-generated command transport, managed ownership and cancellation
@@ -1913,9 +1924,54 @@ Windows bridge source builds require Visual C++ build tools (x64 and ARM64) and 
 Windows SDK, via `scripts/build-windows-notifications.ps1`. CI builds both architectures
 and has a fake-platform native lifecycle harness plus cross-platform managed tests;
 these tests do not register shortcuts or show desktop notifications. CI and release
-packaging include both Windows DLLs and the universal macOS dylib. All new build,
-test, packaging and real Windows activation/sign-off work awaits the full validation
-phase; source implementation is not evidence of platform success.
+packaging include both Windows DLLs and the universal macOS dylib. Build, test
+and packaging results are recorded below. Real Windows desktop activation,
+permissions and notification policy remain environment-specific release checks.
+
+## Closeout validation and performance
+
+The current-version closeout was validated on macOS arm64 / .NET 10 Release on
+2026-09-28. Dependency pins and existing native extension sources did not change.
+The last complete three-platform CI baseline is
+[`8c242a3b`](https://github.com/royalapplications/RoyalTerminal/actions/runs/36357950148);
+the current PR checks are authoritative for subsequent commits.
+
+| Check | Result / scope |
+| --- | --- |
+| Local full suite | 7,733 unit/headless passes, 16 existing skips, zero failures; 257 required-native integration passes and six startup passes, no skips. |
+| Software fallback | 128 checksum/grid/animation-failure tests pass with `DOTNET_EnableHWIntrinsic=0`, zero failures/skips. |
+| Native ABI / generated colors | 161 ABI types and 27 callback signatures match; 782 generated X11 color names verified. |
+| Build | Release solution passes; four existing `TextBox.Watermark` obsolescence warnings, zero errors. |
+| Benchmark execution | All 38 named benchmark modes complete; source-defined warm-up/sample counts are retained. Checksum, grid and animation benchmarks also run with managed hardware intrinsics disabled. |
+| Review | Current-version capability gating, native validation entry points, snapshot owner-local failure/retirement, and Kitty frame preparation/COW boundaries were reviewed. Existing failure and native-differential assertions are retained. |
+| Desktop qualification | Automated tests are not evidence of real IME/candidate placement, OS notification permission/activation, secure input or GPU/compositor certification on every platform. These environmental limitations are not implemented via private dependency hooks. |
+
+The following are isolated medians from the existing harnesses. Setup is excluded
+where each harness says so; no whole-application/GPU speedup or historical
+before/after ratio is inferred from a current-build-only workload. Allocation
+counts are managed bytes, not native working-set measurements. Small workloads
+can trade reduced allocation for higher CPU time; those results are retained.
+
+| Workload | Observed result |
+| --- | --- |
+| Image-row damage, 2,400 rows / 20 updates | Damage-limited 0.978 ms versus full invalidation 298.632 ms; both allocate 2,080 bytes. This compares two modes of the same software-Skia harness. |
+| Kitty reply, maximum fields / 100,000 replies | Bounded encoder: 3.776 ms / 10.4 MB versus StringBuilder: 10.529 ms / 87.2 MB. |
+| Kitty reply, image-only / 100,000 replies | Bounded encoder: 4.809 ms / 4.0 MB versus StringBuilder: 3.676 ms / 19.2 MB. Lower allocation, slower in this small case. |
+| Snapshot metadata, 215 rows / 4,651 queries | Combined query: 2.151 ms versus three indexed queries: 8.348 ms; both allocate zero bytes. At one row the corresponding 1,000,000-query sample was slower: 28.977 versus 21.988 ms. |
+| Graphics publication, 256 images / 2,000 updates | Pixel-only: 7.986 ms / zero bytes versus full-scene: 35.582 ms / 4.144 MB. At 32 images pixel-only was slower (8.646 versus 3.485 ms), while still allocating zero rather than 560 KB. |
+| Kitty range deletion | All six 16/256/4,096-image cases allocate zero bytes during the measured 16-scene mutation loop. Scene/COW setup is excluded. |
+| Search after history prepend | Only 128 rows scanned in all six 1,024/16,384-row cases. Result materialization still allocates in proportion to match count; it is not an allocation-free search claim. |
+| Managed printing / 25,000 feeds | ASCII/Unicode/wide, styled, charset, edit, snapshot-pen and cross-page cursor workloads have zero measured allocation. Grapheme storage and synchronized-output COW workloads still allocate. |
+| Snapshot palette / 1,000 installs, no overrides | Shared canonical/host palette: 72,000 bytes; owned palette: 1,432,000 bytes. These are different ownership workloads, not proof that all restores save the same amount. |
+
+Reproduce using `dotnet build RoyalTerminal.slnx -c Release`, then
+`dotnet run --project tests/RoyalTerminal.Benchmarks -c Release --no-build -- <mode>`.
+The named modes and their fixture sizes live in the benchmark program; use identical
+harness inputs when comparing revisions. `scripts/validate-macos.sh` builds the
+shipping native integration and runs isolated Release batches, startup and required-native
+checks. `--skip-native-build` reuses an already-built artifact but still checks
+required RoyalTerminal exports. `scripts/run-integration-tests.sh --skip-build`
+also requires native availability and stages the validated library into test output.
 
 ## Ghostty-compatible shaders
 

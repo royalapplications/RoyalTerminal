@@ -18,6 +18,29 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalCompositionTests
 {
+    // Ghostty GTK supplies event-owned keymap/consumed metadata; Windows Terminal
+    // uses native virtual/scancodes; xterm.js uses the DOM event. Avalonia's public
+    // Linux event lacks the former fields, so preserve unknown values, not a US
+    // physical-key guess or a later/current native keyboard state.
+    [Theory]
+    [InlineData("ä", KeyModifiers.None, 0xE4U)]
+    [InlineData("😀", KeyModifiers.None, 0x1F600U)]
+    [InlineData(" ", KeyModifiers.None, 32U)]
+    [InlineData("A", KeyModifiers.Shift, 0U)]
+    [InlineData("@", KeyModifiers.Control | KeyModifiers.Alt, 0U)]
+    [InlineData("a", KeyModifiers.Control, 0U)]
+    [InlineData("a", KeyModifiers.Meta, 0U)]
+    [InlineData("a\u0301", KeyModifiers.None, 0U)]
+    [InlineData("\u001b", KeyModifiers.None, 0U)]
+    [InlineData(null, KeyModifiers.None, 0U)]
+    public void PublicEventFallbackDoesNotInventLayoutOrConsumedModifiers(string? symbol, KeyModifiers modifiers, uint unshifted)
+    {
+        KeyEventArgs key = new() { Key = Key.A, PhysicalKey = PhysicalKey.Q, KeySymbol = symbol, KeyModifiers = modifiers };
+        Assert.Equal(new TerminalKeyboardLayoutInfo(unshifted, TerminalModifiers.None), TerminalKeyboardLayout.ResolvePublicEvent(key));
+        Assert.Equal(symbol, key.KeySymbol);
+        Assert.Equal(modifiers, key.KeyModifiers);
+    }
+
     [AvaloniaFact]
     public async Task FocusedControlClearsOverlayOnCommitCancelAndFocusLoss()
     {
