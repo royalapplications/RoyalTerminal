@@ -13,6 +13,8 @@ public sealed partial class GhosttyTerminal
     /// <summary>
     /// Sets and roots the OSC 99 callback, or unregisters with null. Serialize with
     /// parser access and disposal. The callback must not throw or retain borrowed pointers.
+    /// This wrapper exclusively owns the registration until removal or disposal;
+    /// do not replace it through another wrapper or the raw API in the meantime.
     /// </summary>
     public void SetNotificationCallback(GhosttyVtNative.RoyalNotificationCallback? callback)
     {

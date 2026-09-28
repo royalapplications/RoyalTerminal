@@ -11,6 +11,52 @@ namespace RoyalTerminal.IntegrationTests;
 
 public sealed class GhosttyNotificationTests
 {
+    // The native notification effect borrows its callback just like Ghostty's
+    // other effects. Match WT ConptyConnection.Close's no-callback-after-close
+    // guarantee and xterm.js's disposable OSC registrations: a surviving native
+    // terminal must not call a disposed managed registration owner.
+    [GhosttyNativeFact]
+    public unsafe void BorrowedWrapperDisposalUnregistersNotificationsAndResetCallbacks()
+    {
+        using GhosttyTerminal owner = new(10, 4);
+        using GhosttyTerminal borrowed = new(owner.Handle);
+        int requests = 0;
+        GhosttyVtNative.RoyalNotificationCallback callback = (_, _, _, _, _, _, _) => requests++;
+        borrowed.SetNotificationCallback(callback);
+        owner.Write("\x1b]99;;before\a"u8);
+        Assert.Equal(1, requests);
+
+        borrowed.Dispose();
+        borrowed.Dispose();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        owner.Write("\x1b]99;;after\a\u001bc"u8);
+        // Keep a root in this regression even on a broken build, so failure is
+        // an assertion rather than an unmanaged call to a collected delegate.
+        GC.KeepAlive(callback);
+        Assert.Equal(1, requests);
+        Assert.True(owner.IsValid);
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void LeasedTerminalDisposalUnregistersNotificationsBeforeNativeFree()
+    {
+        using GhosttyTerminal owner = new(10, 4);
+        using GhosttyTerminal.NativeLifetimeLease lease = owner.AcquireNativeLifetimeLease();
+        using GhosttyTerminal borrowed = new(owner.Handle);
+        int requests = 0;
+        GhosttyVtNative.RoyalNotificationCallback callback = (_, _, _, _, _, _, _) => requests++;
+        owner.SetNotificationCallback(callback);
+
+        owner.Dispose();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        borrowed.Write("\x1b]99;;after\a"u8);
+        GC.KeepAlive(callback);
+        Assert.Equal(0, requests);
+        Assert.False(owner.IsValid);
+    }
+
     [GhosttyNativeFact]
     public unsafe void CallbackUsesBorrowedSlicesAndSurvivesCollectionUntilUnregistered()
     {

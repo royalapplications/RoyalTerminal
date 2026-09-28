@@ -1207,6 +1207,15 @@ public sealed partial class GhosttyTerminal : IDisposable
             }
 
             _disposed = true;
+            if (_royalNotificationCallback is not null && _handle != nint.Zero)
+            {
+                // The native terminal may survive this wrapper through a lease
+                // or a separate owner. Revoke its borrowed function pointer
+                // before allowing the managed callback root to be collected.
+                GhosttyVtNative.SetRoyalNotificationCallback(_handle, 0, 0);
+                GC.KeepAlive(_royalNotificationCallback);
+                _royalNotificationCallback = null;
+            }
             if (_royalWindowResizeCallback is not null && _handle != nint.Zero)
             {
                 // Borrowed wrappers and leased terminals may outlive this
