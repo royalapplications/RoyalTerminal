@@ -20,7 +20,9 @@ namespace RoyalTerminal.Avalonia.Controls;
 public class TerminalPresenter : Control
 {
     private readonly Action _completeCompositionCommit;
+    private readonly TerminalVisibilityObserver _visibility;
     private CompositionCustomVisual? _compositionVisual;
+    internal TerminalDrawHandler? DrawHandler { get; private set; }
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private IReadOnlyList<TerminalShaderSource>? _shaderSources;
@@ -35,6 +37,7 @@ public class TerminalPresenter : Control
     public TerminalPresenter()
     {
         _completeCompositionCommit = CompleteCompositionCommit;
+        _visibility = new TerminalVisibilityObserver(this, SendVisibility);
     }
 
     /// <summary>
@@ -45,12 +48,14 @@ public class TerminalPresenter : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _visibility.Attach();
         InitializeComposition();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        _visibility.Dispose();
         if (_compositionVisual is not null)
         {
             _compositionVisual.SendHandlerMessage(new TerminalDrawHandler.DisposeMessage());
@@ -58,8 +63,10 @@ public class TerminalPresenter : Control
         }
 
         _compositionVisual = null;
+        DrawHandler = null;
         _compositionCommitPending = false;
         _compositionCommitQueued = false;
+        _compositionCommitRequestedWhilePending = false;
     }
 
     private void InitializeComposition()
@@ -73,8 +80,10 @@ public class TerminalPresenter : Control
         if (compositionVisual is null) return;
 
         var compositor = compositionVisual.Compositor;
-        _compositionVisual = compositor.CreateCustomVisual(new TerminalDrawHandler());
+        DrawHandler = new TerminalDrawHandler();
+        _compositionVisual = compositor.CreateCustomVisual(DrawHandler);
         ElementComposition.SetElementChildVisual(this, _compositionVisual);
+        SendVisibility(_visibility.IsVisible);
 
         UpdateVisualSize();
 
@@ -87,8 +96,15 @@ public class TerminalPresenter : Control
     {
         if (_compositionVisual is null)
             InitializeComposition();
-        UpdateVisualSize();
         return base.ArrangeOverride(finalSize);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        // Bounds is assigned after ArrangeOverride returns. Using its old value
+        // inside ArrangeOverride leaves the custom visual one layout behind.
+        if (change.Property == BoundsProperty) UpdateVisualSize();
     }
 
     public override void Render(DrawingContext context)
@@ -129,7 +145,8 @@ public class TerminalPresenter : Control
         IReadOnlyList<TerminalShaderSource>? shaderSources,
         bool animationEnabled)
     {
-        _shaderSources = shaderSources;
+        // Messages cross threads and hidden sources can outlive the caller's list.
+        _shaderSources = shaderSources?.ToArray();
         _shaderAnimationEnabled = animationEnabled;
         SendShaderUpdate();
     }
@@ -159,6 +176,9 @@ public class TerminalPresenter : Control
     /// </summary>
     public void Invalidate(bool fullRedraw = false, bool dirtyRowsOnly = false)
     {
+        // Resume always redraws the full latest state. Hidden cursor/output
+        // invalidations need neither composition messages nor UI render passes.
+        if (!_visibility.IsVisible) return;
         if (_compositionVisual is null)
         {
             InitializeComposition();
@@ -240,6 +260,13 @@ public class TerminalPresenter : Control
             new TerminalDrawHandler.ShaderStateMessage(
                 _shaderSources,
                 _shaderAnimationEnabled));
+        RequestCompositionCommit();
+    }
+
+    private void SendVisibility(bool visible)
+    {
+        _compositionVisual?.SendHandlerMessage(new TerminalDrawHandler.VisibilityMessage(visible));
+        RequestCompositionCommit();
     }
 
     private void CompleteCompositionCommit()

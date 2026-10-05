@@ -26,21 +26,14 @@ public sealed class TerminalMouseModeTracker
     private bool _privateMode;
     private char _intermediate;
 
-    private bool _mode1000;
-    private bool _mode1002;
-    private bool _mode1003;
-    private bool _mode1005;
-    private bool _mode1006;
-    private bool _mode1015;
-    private bool _mode1016;
-    private bool _mode9;
+    private byte _modeBits;
+    private byte _savedModeBits;
+    private TerminalMouseModeState _mouseModeState;
 
     /// <summary>
     /// Gets the current mouse mode snapshot.
     /// </summary>
-    public TerminalMouseModeState ModeState => new(
-        GetTrackingMode(),
-        GetEncodingMode());
+    public TerminalMouseModeState ModeState => _mouseModeState;
 
     /// <summary>
     /// Resets parser state and all tracked mouse modes.
@@ -202,6 +195,17 @@ public sealed class TerminalMouseModeTracker
                 ApplyPrivateMode(_parameters[i], set);
             }
         }
+        else if (_privateMode && finalByte is 's' or 'r')
+        {
+            for (int i = 0; i < _parameterCount; i++)
+            {
+                int index = TerminalMouseModeTransitions.Modes.IndexOf(_parameters[i]);
+                if (index < 0) continue;
+                int bit = 1 << index;
+                if (finalByte == 'r') ApplyPrivateMode(_parameters[i], (_savedModeBits & bit) != 0);
+                else _savedModeBits = (byte)((_savedModeBits & ~bit) | (_modeBits & bit));
+            }
+        }
         else if (_intermediate == '!' && finalByte == 'p') // DECSTR
         {
             ResetMouseModes();
@@ -213,33 +217,11 @@ public sealed class TerminalMouseModeTracker
 
     private void ApplyPrivateMode(int mode, bool set)
     {
-        switch (mode)
-        {
-            case 1000:
-                _mode1000 = set;
-                break;
-            case 1002:
-                _mode1002 = set;
-                break;
-            case 1003:
-                _mode1003 = set;
-                break;
-            case 1005:
-                _mode1005 = set;
-                break;
-            case 1006:
-                _mode1006 = set;
-                break;
-            case 1015:
-                _mode1015 = set;
-                break;
-            case 1016:
-                _mode1016 = set;
-                break;
-            case 9:
-                _mode9 = set;
-                break;
-        }
+        int index = TerminalMouseModeTransitions.Modes.IndexOf(mode);
+        if (index < 0) return;
+        int bit = 1 << index;
+        _modeBits = (byte)(set ? _modeBits | bit : _modeBits & ~bit);
+        _mouseModeState = TerminalMouseModeTransitions.Apply(_mouseModeState, mode, set);
     }
 
     private void BeginCsi()
@@ -279,63 +261,7 @@ public sealed class TerminalMouseModeTracker
 
     private void ResetMouseModes()
     {
-        _mode1000 = false;
-        _mode1002 = false;
-        _mode1003 = false;
-        _mode1005 = false;
-        _mode1006 = false;
-        _mode1015 = false;
-        _mode1016 = false;
-        _mode9 = false;
-    }
-
-    private TerminalMouseTrackingMode GetTrackingMode()
-    {
-        if (_mode1003)
-        {
-            return TerminalMouseTrackingMode.AnyMotion;
-        }
-
-        if (_mode1002)
-        {
-            return TerminalMouseTrackingMode.ButtonMotion;
-        }
-
-        if (_mode1000)
-        {
-            return TerminalMouseTrackingMode.PressRelease;
-        }
-
-        if (_mode9)
-        {
-            return TerminalMouseTrackingMode.X10Press;
-        }
-
-        return TerminalMouseTrackingMode.None;
-    }
-
-    private TerminalMouseEncoding GetEncodingMode()
-    {
-        if (_mode1016)
-        {
-            return TerminalMouseEncoding.SgrPixels;
-        }
-
-        if (_mode1006)
-        {
-            return TerminalMouseEncoding.Sgr;
-        }
-
-        if (_mode1015)
-        {
-            return TerminalMouseEncoding.Urxvt;
-        }
-
-        if (_mode1005)
-        {
-            return TerminalMouseEncoding.Utf8;
-        }
-
-        return TerminalMouseEncoding.Default;
+        _modeBits = _savedModeBits = 0;
+        _mouseModeState = default;
     }
 }

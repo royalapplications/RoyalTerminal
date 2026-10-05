@@ -363,6 +363,16 @@ public struct GhosttyInitialSize
     public uint Height;
 }
 
+/// <summary>Window resize action data; zero preserves that dimension.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct GhosttyResizeWindow
+{
+    /// <summary>Requested width in application-runtime surface units.</summary>
+    public uint Width;
+    /// <summary>Requested height in application-runtime surface units.</summary>
+    public uint Height;
+}
+
 /// <summary>Cell size action data.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct GhosttyCellSize
@@ -577,6 +587,8 @@ public struct GhosttyActionValue
     [FieldOffset(0)] public GhosttySizeLimit SizeLimit;
     /// <summary>Native field <c>InitialSize</c>.</summary>
     [FieldOffset(0)] public GhosttyInitialSize InitialSize;
+    /// <summary>Native window resize action data.</summary>
+    [FieldOffset(0)] public GhosttyResizeWindow ResizeWindow;
     /// <summary>Native field <c>CellSize</c>.</summary>
     [FieldOffset(0)] public GhosttyCellSize CellSize;
     /// <summary>Native field <c>Scrollbar</c>.</summary>

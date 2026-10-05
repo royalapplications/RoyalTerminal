@@ -1021,6 +1021,12 @@ public enum GhosttyActionTag
     SearchSelected,
     /// <summary><c>Readonly</c> enum value.</summary>
     Readonly,
+    /// <summary>Copies the current terminal title to the clipboard.</summary>
+    CopyTitleToClipboard,
+    /// <summary>Moves the current tab to a new application window.</summary>
+    MoveTabToNewWindow,
+    /// <summary>Requests a new application window content size.</summary>
+    ResizeWindow,
 }
 
 /// <summary>IPC target type.</summary>

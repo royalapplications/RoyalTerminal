@@ -525,6 +525,12 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     public static readonly StyledProperty<bool> ReflowOnResizeProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(ReflowOnResize), true);
 
+    /// <summary>Explicit opt-in to VT window resizing; not a styled preference.</summary>
+    public static readonly DirectProperty<TerminalSettingsPanelState, bool> AllowVtWindowResizeProperty =
+        AvaloniaProperty.RegisterDirect<TerminalSettingsPanelState, bool>(nameof(AllowVtWindowResize),
+            state => state.AllowVtWindowResize, (state, value) => state.AllowVtWindowResize = value);
+    private bool _allowVtWindowResize;
+
     public static readonly StyledProperty<bool> SixelGraphicsEnabledProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(SixelGraphicsEnabled), true);
 
@@ -579,6 +585,14 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             nameof(FontEmbolden),
             TerminalFontRenderingSettings.Default.Embolden);
 
+    /// <summary>macOS smoothing toggle shared with terminal controls.</summary>
+    public static readonly StyledProperty<bool> FontThickenProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(nameof(FontThicken), false);
+
+    /// <summary>macOS smoothing strength shared with terminal controls.</summary>
+    public static readonly StyledProperty<byte> FontThickenStrengthProperty =
+        AvaloniaProperty.Register<TerminalSettingsPanelState, byte>(nameof(FontThickenStrength), 255);
+
     public static readonly StyledProperty<bool> FontForceAutoHintingProperty =
         AvaloniaProperty.Register<TerminalSettingsPanelState, bool>(
             nameof(FontForceAutoHinting),
@@ -623,6 +637,11 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     public TerminalSettingsPanelState()
     {
+        FontFamiliesEditor.PropertyChanged += (_, _) =>
+        {
+            if (!_suppressDirtyTracking) IsDirty = true;
+            UpdateCommandStates();
+        };
         Profiles = [];
 
         TransportModes =
@@ -686,7 +705,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         DuplicateProfileCommand = new RelayCommand(DuplicateProfile, CanModifySelectedProfile);
         DeleteProfileCommand = new RelayCommand(DeleteSelectedProfile, CanDeleteSelectedProfile);
         SetDefaultProfileCommand = new RelayCommand(SetSelectedAsDefault, CanModifySelectedProfile);
-        ApplyCommand = new RelayCommand(Apply, CanModifySelectedProfile);
+        ApplyCommand = new RelayCommand(Apply, CanApplyDocument);
         SaveCommand = new RelayCommand(Save, CanSaveDocument);
         BrowseFontFileCommand = new RelayCommand(RequestBrowseFontFile);
         AddTextHighlightRuleCommand = new RelayCommand(AddTextHighlightRule);
@@ -1074,6 +1093,13 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         set => SetValue(ReflowOnResizeProperty, value);
     }
 
+    /// <summary>Whether a permitted terminal program may request a host window resize.</summary>
+    public bool AllowVtWindowResize
+    {
+        get => _allowVtWindowResize;
+        set => SetAndRaise(AllowVtWindowResizeProperty, ref _allowVtWindowResize, value);
+    }
+
     public bool SixelGraphicsEnabled
     {
         get => GetValue(SixelGraphicsEnabledProperty);
@@ -1109,6 +1135,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
         get => GetValue(FontFilePathProperty);
         set => SetValue(FontFilePathProperty, value);
     }
+
+    /// <summary>Edits the current profile's ordered per-style family overrides.</summary>
+    public TerminalFontFamilyEditorViewModel FontFamiliesEditor { get; } = new();
 
     public double FontSize
     {
@@ -1150,6 +1179,20 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
     {
         get => GetValue(FontEmboldenProperty);
         set => SetValue(FontEmboldenProperty, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing for normal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => GetValue(FontThickenProperty);
+        set => SetValue(FontThickenProperty, value);
+    }
+
+    /// <summary>Gets or sets macOS smoothing strength (0–255).</summary>
+    public byte FontThickenStrength
+    {
+        get => GetValue(FontThickenStrengthProperty);
+        set => SetValue(FontThickenStrengthProperty, value);
     }
 
     public bool FontForceAutoHinting
@@ -1475,6 +1518,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private void Apply()
     {
+        if (FontFamiliesEditor.HasCodepointMapError) return;
         CaptureEditorIntoSelectedProfile();
         ApplyRequested?.Invoke(this, EventArgs.Empty);
         LastOperationStatus = "Applied settings to runtime.";
@@ -1483,6 +1527,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private void Save()
     {
+        if (FontFamiliesEditor.HasCodepointMapError) return;
         CaptureEditorIntoSelectedProfile();
         SaveRequested?.Invoke(this, EventArgs.Empty);
         UpdateCommandStates();
@@ -1527,7 +1572,9 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
 
     private bool CanDeleteSelectedProfile() => SelectedProfile is not null && _profiles.Count > 1;
 
-    private bool CanSaveDocument() => _profiles.Count > 0 && SelectedProfile is not null;
+    private bool CanApplyDocument() => SelectedProfile is not null && !FontFamiliesEditor.HasCodepointMapError;
+
+    private bool CanSaveDocument() => _profiles.Count > 0 && CanApplyDocument();
 
     private TerminalFontRenderingSettings BuildFontRenderingSettings()
     {
@@ -1539,6 +1586,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             BaselineSnap = FontBaselineSnap,
             EmbeddedBitmaps = FontEmbeddedBitmaps,
             Embolden = FontEmbolden,
+            Thicken = FontThicken,
+            ThickenStrength = FontThickenStrength,
             ForceAutoHinting = FontForceAutoHinting,
             LinearMetrics = FontLinearMetrics,
         }.Normalize();
@@ -1612,6 +1661,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                     ? TerminalFontSource.File
                     : TerminalFontSource.System,
                 FontFamilyName = NormalizeOptional(FontFamilyName) ?? GetDefaultMonospaceFont(),
+                FontFamilies = FontFamiliesEditor.BuildSettings(),
                 FontFilePath = SelectedFontSource == TerminalFontSource.File
                     ? NormalizeOptional(FontFilePath)
                     : null,
@@ -1629,6 +1679,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
                 BackspaceSendsControlH = BackspaceSendsControlH,
                 EnableTextShaping = EnableTextShaping,
                 ReflowOnResize = ReflowOnResize,
+                AllowVtWindowResize = AllowVtWindowResize,
                 SixelGraphicsEnabled = SixelGraphicsEnabled,
                 EnableLigatures = EnableLigatures,
                 PasteSafetyPolicy = SelectedPasteSafetyPolicy.ToString(),
@@ -1788,6 +1839,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             BackspaceSendsControlH = profile.Behavior.BackspaceSendsControlH;
             EnableTextShaping = profile.Behavior.EnableTextShaping;
             ReflowOnResize = profile.Behavior.ReflowOnResize;
+            AllowVtWindowResize = profile.Behavior.AllowVtWindowResize;
             SixelGraphicsEnabled = profile.Behavior.SixelGraphicsEnabled;
             EnableLigatures = profile.Behavior.EnableLigatures;
             SelectedPasteSafetyPolicy = ParsePasteSafetyPolicy(profile.Behavior.PasteSafetyPolicy);
@@ -1795,6 +1847,7 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             SelectedFontSource = profile.Appearance.FontSource;
             FontFamilyName = profile.Appearance.FontFamilyName;
             FontFilePath = profile.Appearance.FontFilePath ?? string.Empty;
+            FontFamiliesEditor.Load(profile.Appearance.FontFamilies);
             FontSize = profile.Appearance.FontSize;
             TerminalFontRenderingSettings fontRendering = profile.Appearance.FontRendering.Normalize();
             FontSubpixelPositioning = fontRendering.SubpixelPositioning;
@@ -1803,6 +1856,8 @@ public sealed class TerminalSettingsPanelState : AvaloniaObject
             FontBaselineSnap = fontRendering.BaselineSnap;
             FontEmbeddedBitmaps = fontRendering.EmbeddedBitmaps;
             FontEmbolden = fontRendering.Embolden;
+            FontThicken = fontRendering.Thicken;
+            FontThickenStrength = fontRendering.ThickenStrength;
             FontForceAutoHinting = fontRendering.ForceAutoHinting;
             FontLinearMetrics = fontRendering.LinearMetrics;
             AutoScroll = profile.Appearance.AutoScroll;

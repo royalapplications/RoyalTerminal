@@ -11,6 +11,234 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--managed-search-prepend", StringComparer.Ordinal))
+{
+    ManagedSearchPrependBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--snapshot-palette", StringComparer.Ordinal))
+{
+    SnapshotPaletteBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-delete", StringComparer.Ordinal))
+{
+    KittyDeletionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--hyperlink-collection", StringComparer.Ordinal))
+{
+    HyperlinkCollectionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--image-row-damage", StringComparer.Ordinal))
+{
+    ImageRowDamageBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--fractional-scroll", StringComparer.Ordinal))
+{
+    FractionalScrollBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-overscan-projection", StringComparer.Ordinal))
+{
+    KittyOverscanProjectionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--native-render-overscan", StringComparer.Ordinal))
+{
+    NativeRenderOverscanBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--render-row-identity", StringComparer.Ordinal))
+{
+    RenderRowIdentityBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--selection-projection", StringComparer.Ordinal))
+{
+    SelectionProjectionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--font-candidates", StringComparer.Ordinal))
+{
+    FontCandidateBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--font-cache-keys", StringComparer.Ordinal))
+{
+    FontCacheKeyBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--font-lookup", StringComparer.Ordinal))
+{
+    FontLookupBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--font-discovery", StringComparer.Ordinal))
+{
+    FontDiscoveryBenchmark.Run(args.Contains("--warm-font-registry", StringComparer.Ordinal));
+    return;
+}
+
+if (args.Contains("--managed-snapshot-encode", StringComparer.Ordinal))
+{
+    ManagedSnapshotEncodeBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-snapshot-grid", StringComparer.Ordinal))
+{
+    ManagedSnapshotGridBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-snapshot-checksum", StringComparer.Ordinal))
+{
+    ManagedSnapshotChecksumBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-snapshot-usage", StringComparer.Ordinal))
+{
+    ManagedSnapshotUsageBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-snapshot-reflow", StringComparer.Ordinal))
+{
+    ManagedSnapshotReflowBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-snapshot-style-rebuild", StringComparer.Ordinal))
+{
+    ManagedSnapshotStyleRebuildBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-search-capture", StringComparer.Ordinal))
+{
+    ManagedSearchCaptureBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-animation", StringComparer.Ordinal))
+{
+    KittyAnimationBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-image-loader", StringComparer.Ordinal))
+{
+    KittyImageLoaderBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-parser", StringComparer.Ordinal))
+{
+    KittyParserBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--kitty-replies", StringComparer.Ordinal))
+{
+    KittyReplyBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--glyph-replies", StringComparer.Ordinal))
+{
+    GlyphReplyBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--graphics-publication", StringComparer.Ordinal))
+{
+    GraphicsPublicationBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-unknown-apc", StringComparer.Ordinal))
+{
+    ManagedUnknownApcBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-dcs-replies", StringComparer.Ordinal))
+{
+    ManagedDcsReplyBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-tabstops", StringComparer.Ordinal))
+{
+    ManagedTabStopsBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-mode-state", StringComparer.Ordinal))
+{
+    ManagedModeStateBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-print", StringComparer.Ordinal))
+{
+    ManagedPrintBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-raster", StringComparer.Ordinal))
+{
+    ManagedRasterBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--managed-colors", StringComparer.Ordinal))
+{
+    ManagedColorBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--apc-ingestion", StringComparer.Ordinal))
+{
+    ApcIngestionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--ghostty-render-metadata", StringComparer.Ordinal))
+{
+    GhosttyRenderMetadataBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--pty-output", StringComparer.Ordinal))
+{
+    PtyOutputBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--terminal-reflow", StringComparer.Ordinal))
+{
+    TerminalReflowBenchmark.Run();
+    return;
+}
+
 BenchmarkOptions options = BenchmarkOptions.Parse(args);
 
 BenchmarkScenario[] defaultRenderScenarios =

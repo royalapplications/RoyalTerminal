@@ -91,6 +91,14 @@ public sealed record TerminalFontRenderingSettings
     /// </summary>
     public bool Embolden { get; init; }
 
+    /// <summary>Gets whether macOS CoreText font smoothing thickens monochrome glyphs, including preedit.</summary>
+    /// <remarks>Independent of synthetic bold. Unsupported platforms retain their normal rasterization.</remarks>
+    public bool Thicken { get; init; }
+
+    /// <summary>Gets the macOS smoothing strength, from 0 (lightest thickening) to 255 (strongest).</summary>
+    /// <remarks>Ignored when <see cref="Thicken"/> is false. Zero still enables smoothing.</remarks>
+    public byte ThickenStrength { get; init; } = 255;
+
     /// <summary>
     /// Gets whether auto-hinting is forced instead of using native font hints.
     /// </summary>
@@ -102,15 +110,18 @@ public sealed record TerminalFontRenderingSettings
     public bool LinearMetrics { get; init; }
 
     /// <summary>
-    /// Returns a copy with unsupported enum values replaced by defaults.
+    /// Replaces unsupported enum values with defaults. Already-normalized settings
+    /// retain their immutable instance without allocating a copy.
     /// </summary>
     public TerminalFontRenderingSettings Normalize()
     {
-        TerminalFontRenderingSettings defaults = Default;
+        bool validEdging = (uint)Edging <= (uint)TerminalFontEdging.SubpixelAntialias;
+        bool validHinting = (uint)Hinting <= (uint)TerminalFontHinting.Full;
+        if (validEdging && validHinting) return this;
         return this with
         {
-            Edging = Enum.IsDefined(Edging) ? Edging : defaults.Edging,
-            Hinting = Enum.IsDefined(Hinting) ? Hinting : defaults.Hinting,
+            Edging = validEdging ? Edging : Default.Edging,
+            Hinting = validHinting ? Hinting : Default.Hinting,
         };
     }
 }

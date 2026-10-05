@@ -101,6 +101,15 @@ Ghostty's mode table defines the default state. The important defaults for resta
 | Ignore keypad with numlock | On |
 | Alt escape prefix | On |
 
+RoyalTerminal hosts can override Ghostty's safe policy subset through
+`ITerminalModeDefaults.TrySetDefaultMode(mode, enabled, ansi: false)` on either
+processor. For example, `TrySetDefaultMode(2004, true)` enables bracketed paste now
+and after reset. Pass `ansi: true` for ANSI modes. The method returns `false`
+without changing state for unknown or transition-dependent modes. These settings
+survive both full reset and history-preserving session preparation; saved modes
+are independently reset to their built-in initial values. Configuring policy does
+not execute terminal commands or emit their side effects.
+
 ### Termio Side Effects
 
 Ghostty's `StreamHandler.fullReset` wraps `terminal.fullReset` and also:

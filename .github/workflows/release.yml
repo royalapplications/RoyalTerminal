@@ -34,18 +34,41 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build macOS PTY launcher
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-unix-pty.sh
+
+      - name: Build macOS notification bridge
+        if: matrix.arch == 'arm64'
+        run: bash scripts/build-macos-notifications.sh
+
+      - name: Upload macOS notification bridge
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/libroyalterminal-notifications.dylib
+          if-no-files-found: error
+
+      - name: Upload macOS PTY launcher
+        if: matrix.arch == 'arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unix-pty-launcher
+          path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/royalterminal-pty-spawn
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false
+            zig build -Doptimize=ReleaseFast
           else
-            zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true -Demit-xcframework=false -Demit-macos-app=false -Dtarget=x86_64-macos
+            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
           fi
 
       - name: Build ghostty-renderer-capi
@@ -60,7 +83,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          find external/ghostty/zig-out -name "libghostty-vt*.dylib" -exec cp -L {} artifacts/ \;
+          find native/ghostty-vt-extensions/zig-out -name "libghostty-vt*.dylib" -exec cp -L {} artifacts/ \;
           if [ -f native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib ]; then
             cp -L native/ghostty-renderer-capi/zig-out/lib/libghostty-renderer-capi.dylib artifacts/
           fi
@@ -132,7 +155,7 @@ jobs:
           version: 0.16.0
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         run: |
           # Keep Linux native packages on a portable CPU baseline. A runner-native
           # Ghostty build can SIGILL during terminal/PageList startup on another
@@ -141,8 +164,6 @@ jobs:
           build_args=(
             build
             -Doptimize=ReleaseFast
-            -Dapp-runtime=none
-            -Demit-lib-vt=true
             -Dtarget=${{ matrix.zig-target }}
             -Dsimd=false
           )
@@ -157,7 +178,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/ \;
+          find native/ghostty-vt-extensions/zig-out -name "libghostty-vt.so*" -exec cp -L {} artifacts/ \;
           find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} artifacts/ \; || true
           for base in libghostty-vt libghostty-renderer-capi; do
             if [ ! -f "artifacts/${base}.so" ]; then
@@ -201,13 +222,26 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build Windows notification bridge
+        shell: pwsh
+        run: ./scripts/build-windows-notifications.ps1 -Arch ${{ matrix.arch }}
+
+      - name: Upload Windows notification bridge
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-notifications-${{ matrix.arch }}
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-${{ matrix.arch }}/native/royalterminal-notifications.dll
+          if-no-files-found: error
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          # Match CI: restored Windows caches referenced missing build.exe files.
+          use-cache: false
 
       - name: Build libghostty-vt
-        working-directory: external/ghostty
+        working-directory: native/ghostty-vt-extensions
         shell: bash
         run: |
           cpu=""
@@ -227,7 +261,7 @@ jobs:
             cpu="-Dcpu=x86_64-vzeroupper"
             simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast -Dapp-runtime=none -Demit-lib-vt=true ${target} ${cpu} ${simd}
+          zig build -Doptimize=ReleaseFast ${target} ${cpu} ${simd}
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -246,7 +280,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/win-${{ matrix.arch }}
-          find external/ghostty/zig-out \( -name "ghostty-vt.dll" -o -name "libghostty-vt.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
+          find native/ghostty-vt-extensions/zig-out \( -name "ghostty-vt.dll" -o -name "libghostty-vt.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \;
           find native/ghostty-renderer-capi/zig-out \( -name "ghostty-renderer-capi.dll" -o -name "libghostty-renderer-capi.dll" \) -exec cp -L {} artifacts/win-${{ matrix.arch }}/ \; || true
           for base in ghostty-vt ghostty-renderer-capi; do
             if [ ! -f "artifacts/win-${{ matrix.arch }}/${base}.dll" ] && [ -f "artifacts/win-${{ matrix.arch }}/lib${base}.dll" ]; then
@@ -383,6 +417,30 @@ jobs:
           echo "VERSION=${version}" >> "$GITHUB_OUTPUT"
 
       # Download native artifacts into package runtime directories
+      - name: Download macOS PTY launcher
+        uses: actions/download-artifact@v8
+        with:
+          name: unix-pty-launcher
+          path: src/RoyalTerminal.Terminal.Pty.Unix/runtimes/osx/native/
+
+      - name: Download macOS notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-notifications
+          path: src/RoyalTerminal.Avalonia.App/runtimes/osx/native/
+
+      - name: Download Windows x64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-x64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-x64/native/
+
+      - name: Download Windows arm64 notification bridge
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-notifications-arm64
+          path: src/RoyalTerminal.Avalonia.App/runtimes/win-arm64/native/
+
       - name: Download macOS arm64
         uses: actions/download-artifact@v8
         with:

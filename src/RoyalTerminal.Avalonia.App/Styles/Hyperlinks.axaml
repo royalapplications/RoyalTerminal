@@ -1,0 +1,9 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:terminal="using:RoyalTerminal.Avalonia.Controls">
+  <Style Selector=":is(terminal|TerminalControl)" x:DataType="terminal:TerminalControl">
+    <Setter Property="ToolTip.Tip"
+            Value="{CompiledBinding HoveredLinkDisplayText, RelativeSource={RelativeSource Self}, Mode=OneWay}" />
+    <Setter Property="ToolTip.ShowDelay" Value="0" />
+  </Style>
+</Styles>

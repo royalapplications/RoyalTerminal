@@ -61,6 +61,24 @@ public sealed class GhosttyNativeRuntimeDependencyTests
     }
 
     [Fact]
+    public void NativeBindingPackage_ProvidesLinuxPngDecoderRuntimeWithoutAvalonia()
+    {
+        string projectPath = Path.Combine(FindRepositoryRoot(), "src",
+            "RoyalTerminal.GhosttySharp", "RoyalTerminal.GhosttySharp.csproj");
+        XDocument project = XDocument.Load(projectPath);
+        XElement runtime = Assert.Single(project.Descendants(), element =>
+            element.Name.LocalName == "PackageReference" &&
+            element.Attribute("Include")?.Value == "SkiaSharp.NativeAssets.Linux");
+
+        // The package must work when packed on macOS/Windows and consumed on
+        // Linux, and the native decoder dependency must reach consumers.
+        Assert.Null(runtime.Attribute("Condition"));
+        Assert.Null(runtime.Parent?.Attribute("Condition"));
+        Assert.Null(runtime.Attribute("PrivateAssets"));
+        Assert.DoesNotContain(runtime.Elements(), element => element.Name.LocalName == "PrivateAssets");
+    }
+
+    [Fact]
     public void RuntimeJsonTarget_PacksGeneratedRuntimeJsonAtPackageRoot()
     {
         string repoRoot = FindRepositoryRoot();

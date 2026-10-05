@@ -10,7 +10,7 @@ using RoyalTerminal.Terminal.Services;
 
 namespace RoyalTerminal.Avalonia.App.Services;
 
-internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInputAdapter, IResettableTerminalInputAdapter
+internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInputAdapter, IResettableTerminalInputAdapter, ITerminalCompositionInputAdapter
 {
     private const int KittyReportEvents = 0x02;
     private const int KittyReportAllKeysAsEscapeCodes = 0x08;
@@ -23,6 +23,8 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
     private const uint ShiftPressed = 0x0010;
 
     private readonly ITerminalInputAdapter _inner;
+    private bool _isComposing;
+    private readonly HashSet<Key> _compositionKeys = [];
     private KeyModifiers _kittyReportedModifierKeyDown;
     private KeyModifiers _terminalModifierKeyState;
 
@@ -33,6 +35,12 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
 
     public bool HandleKeyDown(KeyEventArgs e, ITerminalSessionService sessionService, IVtProcessor? vtProcessor)
     {
+        if (_isComposing)
+        {
+            _compositionKeys.Add(e.Key);
+            return _inner is ITerminalCompositionInputAdapter && _inner.HandleKeyDown(e, sessionService, vtProcessor);
+        }
+        _compositionKeys.Remove(e.Key);
         if (e.Handled && !CanForwardHandledKey(e.Key, sessionService, vtProcessor))
             return false;
 
@@ -70,6 +78,9 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
 
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
+        bool compositionKey = _compositionKeys.Remove(e.Key);
+        if (_isComposing || compositionKey)
+            return _inner is ITerminalCompositionInputAdapter && _inner.HandleKeyUp(e, sessionService);
         if (e.Handled && !CanForwardHandledKeyUp(e.Key, sessionService))
             return false;
 
@@ -115,11 +126,19 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
 
     public void ResetInputState()
     {
+        _isComposing = false;
+        _compositionKeys.Clear();
         _kittyReportedModifierKeyDown = KeyModifiers.None;
         _terminalModifierKeyState = KeyModifiers.None;
 
         if (_inner is IResettableTerminalInputAdapter resettableInner)
             resettableInner.ResetInputState();
+    }
+
+    public void SetComposing(bool composing)
+    {
+        _isComposing = composing;
+        if (_inner is ITerminalCompositionInputAdapter composition) composition.SetComposing(composing);
     }
 
     private static bool IsIsolatedModifierKey(Key key) =>

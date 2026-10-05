@@ -26,11 +26,16 @@ public sealed class GlyphCache : IDisposable
     private readonly SKTypeface? _boldTypeface;
     private readonly SKTypeface? _italicTypeface;
     private readonly SKTypeface? _boldItalicTypeface;
+    private readonly bool _ownsTypefaces = true;
+    private readonly ConfiguredFontFamilies? _configuredFamilies;
     private TerminalFontRenderingSettings _fontRenderingSettings;
     private bool _disposed;
 
     /// <summary>The default font used for rendering.</summary>
     public SKTypeface RegularTypeface => _regularTypeface;
+
+    /// <summary>Ordered configured faces, valid for this cache's lifetime.</summary>
+    public TerminalTypefaceCollection TypefaceCollection { get; }
 
     /// <summary>Number of cached glyphs.</summary>
     public int Count => _cache.Count;
@@ -94,6 +99,8 @@ public sealed class GlyphCache : IDisposable
             _boldTypeface = null;
             _italicTypeface = null;
             _boldItalicTypeface = null;
+            TypefaceCollection = new TerminalTypefaceCollection(new TerminalTypefaceEntry(fileTypeface, TerminalTypefaceStyle.Regular))
+                .WithSyntheticStyles();
             return;
         }
 
@@ -101,6 +108,58 @@ public sealed class GlyphCache : IDisposable
         _boldTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Bold);
         _italicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Italic);
         _boldItalicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.BoldItalic);
+        List<TerminalTypefaceEntry> entries = [new(_regularTypeface, TerminalTypefaceStyle.Regular)];
+        if (_boldTypeface is not null && SkiaConfiguredFontFamilyMatcher.MatchesStyle(_boldTypeface, TerminalTypefaceStyle.Bold))
+            entries.Add(new(_boldTypeface, TerminalTypefaceStyle.Bold));
+        if (_italicTypeface is not null && SkiaConfiguredFontFamilyMatcher.MatchesStyle(_italicTypeface, TerminalTypefaceStyle.Italic))
+            entries.Add(new(_italicTypeface, TerminalTypefaceStyle.Italic));
+        if (_boldItalicTypeface is not null && SkiaConfiguredFontFamilyMatcher.MatchesStyle(_boldItalicTypeface, TerminalTypefaceStyle.BoldItalic))
+            entries.Add(new(_boldItalicTypeface, TerminalTypefaceStyle.BoldItalic));
+        TypefaceCollection = new TerminalTypefaceCollection(entries.ToArray()).WithSyntheticStyles();
+    }
+
+    /// <summary>
+    /// Creates a cache using borrowed, ordered faces. The caller must keep these
+    /// faces alive until the cache and all users of its collection are disposed.
+    /// </summary>
+    public static GlyphCache CreateWithTypefaces(TerminalTypefaceCollection typefaces,
+        int maxEntries = 8192, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(typefaces);
+        return new GlyphCache(typefaces, maxEntries, fontRenderingSettings);
+    }
+
+    private GlyphCache(TerminalTypefaceCollection typefaces, int maxEntries,
+        TerminalFontRenderingSettings? fontRenderingSettings, ConfiguredFontFamilies? configuredFamilies = null)
+    {
+        _configuredFamilies = configuredFamilies;
+        _maxEntries = maxEntries;
+        _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
+        _ownsTypefaces = false;
+        TypefaceCollection = typefaces;
+        _regularTypeface = typefaces.GetPrimaryTypeface();
+        _boldTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Bold);
+        _italicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.Italic);
+        _boldItalicTypeface = typefaces.GetPrimaryTypeface(TerminalTypefaceStyle.BoldItalic);
+    }
+
+    /// <summary>
+    /// Creates and owns ordered configured system families. Empty/unavailable
+    /// regular lists retain the legacy family/file selection. Unlike
+    /// <see cref="CreateWithTypefaces"/>, the caller does not own loaded faces.
+    /// </summary>
+    public static GlyphCache CreateWithFontFamilies(TerminalFontFamilySettings families,
+        string fontFamily = "Consolas", TerminalFontSource fontSource = TerminalFontSource.System,
+        string? fontFilePath = null, int maxEntries = 8192, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(families);
+        if (families.IsEmpty) return new(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings);
+        using SKFontManager manager = SKFontManager.CreateDefault();
+        ConfiguredFontFamilies loaded = ConfiguredFontFamilies.Load(families, new SkiaConfiguredFontFamilyMatcher(manager),
+            () => new GlyphCache(fontFamily, fontSource, fontFilePath, maxEntries, fontRenderingSettings),
+            fontSource == TerminalFontSource.System ? (string.IsNullOrWhiteSpace(fontFamily) ? "Consolas" : fontFamily.Trim()) : null);
+        try { return new(loaded.Collection, maxEntries, fontRenderingSettings, loaded); }
+        catch { loaded.Dispose(); throw; }
     }
 
     /// <summary>
@@ -108,10 +167,9 @@ public sealed class GlyphCache : IDisposable
     /// </summary>
     public SKTypeface GetTypeface(bool bold, bool italic)
     {
-        if (bold && italic) return _boldItalicTypeface ?? _boldTypeface ?? _regularTypeface;
-        if (bold) return _boldTypeface ?? _regularTypeface;
-        if (italic) return _italicTypeface ?? _regularTypeface;
-        return _regularTypeface;
+        return TypefaceCollection.GetPrimaryTypeface(bold
+            ? italic ? TerminalTypefaceStyle.BoldItalic : TerminalTypefaceStyle.Bold
+            : italic ? TerminalTypefaceStyle.Italic : TerminalTypefaceStyle.Regular);
     }
 
     /// <summary>
@@ -119,8 +177,9 @@ public sealed class GlyphCache : IDisposable
     /// </summary>
     public SKFont CreateFont(float size, bool bold = false, bool italic = false)
     {
-        var typeface = GetTypeface(bold, italic);
-        return CreateFont(typeface, size, _fontRenderingSettings);
+        TerminalTypefaceStyle style = bold ? (italic ? TerminalTypefaceStyle.BoldItalic : TerminalTypefaceStyle.Bold)
+            : italic ? TerminalTypefaceStyle.Italic : TerminalTypefaceStyle.Regular;
+        return CreateFont(TypefaceCollection.GetPrimaryTypeface(style), size, _fontRenderingSettings, TypefaceCollection.GetSynthesis(style));
     }
 
     /// <summary>
@@ -136,8 +195,15 @@ public sealed class GlyphCache : IDisposable
         SKTypeface typeface,
         float size,
         TerminalFontRenderingSettings? fontRenderingSettings)
+        => CreateFont(typeface, size, fontRenderingSettings, TerminalFontSynthesis.None);
+
+    /// <summary>Creates a font with explicit synthetic outline effects, combined with rendering preferences.</summary>
+    public static SKFont CreateFont(SKTypeface typeface, float size,
+        TerminalFontRenderingSettings? fontRenderingSettings, TerminalFontSynthesis synthesis)
     {
         ArgumentNullException.ThrowIfNull(typeface);
+        if ((synthesis & ~(TerminalFontSynthesis.Bold | TerminalFontSynthesis.Italic)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(synthesis));
         TerminalFontRenderingSettings settings = NormalizeFontRenderingSettings(fontRenderingSettings);
         return new SKFont(typeface, size)
         {
@@ -146,7 +212,8 @@ public sealed class GlyphCache : IDisposable
             Hinting = MapFontHinting(settings.Hinting),
             BaselineSnap = settings.BaselineSnap,
             EmbeddedBitmaps = settings.EmbeddedBitmaps,
-            Embolden = settings.Embolden,
+            Embolden = settings.Embolden || (synthesis & TerminalFontSynthesis.Bold) != 0,
+            SkewX = (synthesis & TerminalFontSynthesis.Italic) != 0 ? -0.267949f : 0,
             ForceAutoHinting = settings.ForceAutoHinting,
             LinearMetrics = settings.LinearMetrics,
         };
@@ -230,10 +297,14 @@ public sealed class GlyphCache : IDisposable
         _disposed = true;
 
         Clear();
-        _regularTypeface.Dispose();
-        _boldTypeface?.Dispose();
-        _italicTypeface?.Dispose();
-        _boldItalicTypeface?.Dispose();
+        if (_ownsTypefaces)
+        {
+            _regularTypeface.Dispose();
+            _boldTypeface?.Dispose();
+            _italicTypeface?.Dispose();
+            _boldItalicTypeface?.Dispose();
+        }
+        _configuredFamilies?.Dispose();
     }
 
     private static SKTypeface CreateSystemTypeface(string fontFamily, SKFontStyle style)

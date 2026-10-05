@@ -19,6 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GHOSTTY_DIR="$ROOT_DIR/external/ghostty"
+GHOSTTY_BUILD_DIR="$ROOT_DIR/native/ghostty-vt-extensions"
 NATIVE_OUT_DIR="$ROOT_DIR/native"
 ZIG_COMPAT="$ROOT_DIR/scripts/zig-compat.sh"
 
@@ -139,8 +140,8 @@ if [ -n "${ZIG_TARGET:-}" ]; then
     info "Target: $ZIG_TARGET"
 fi
 
-# Enter Ghostty source directory
-cd "$GHOSTTY_DIR"
+# Build the pinned upstream C API and RoyalTerminal extensions together.
+cd "$GHOSTTY_BUILD_DIR"
 
 # Clean if requested
 if [ "$CLEAN" = true ]; then
@@ -153,9 +154,6 @@ info "Building libghostty-vt..."
 ZIG_BUILD_ARGS=(
     build
     "${OPTIMIZE_ARGS[@]}"
-    -Dapp-runtime=none
-    -Demit-lib-vt=true
-    -Demit-xcframework=false
 )
 if [ -n "${ZIG_TARGET:-}" ]; then
     ZIG_BUILD_ARGS+=("-Dtarget=$ZIG_TARGET")
@@ -212,19 +210,22 @@ info "Copied to: $NATIVE_OUT_DIR/$RID/$LIB_NAME"
 # Copy header
 HEADER_DEST="$NATIVE_OUT_DIR/include"
 mkdir -p "$HEADER_DEST"
-if [ -d "include/ghostty/vt" ]; then
+if [ -d "$GHOSTTY_DIR/include/ghostty/vt" ]; then
     mkdir -p "$HEADER_DEST/ghostty"
     rm -rf "$HEADER_DEST/ghostty/vt"
-    cp -R "include/ghostty/vt" "$HEADER_DEST/ghostty/"
+    cp -R "$GHOSTTY_DIR/include/ghostty/vt" "$HEADER_DEST/ghostty/"
+    cp "$GHOSTTY_DIR/include/ghostty/vt.h" "$HEADER_DEST/ghostty/"
+    cp "$GHOSTTY_BUILD_DIR/include/royalterminal_ghostty_vt.h" "$HEADER_DEST/"
     info "Copied official VT headers: $HEADER_DEST/ghostty/vt"
 fi
 
 # Build static library too if requested
 if [ "$BUILD_STATIC" = true ]; then
+    "$ZIG_COMPAT" "${ZIG_BUILD_ARGS[@]}" static
     STATIC_LIB=""
     case "$PLATFORM" in
-        osx) STATIC_LIB="zig-out/lib/libghostty-vt.a" ;;
-        linux) STATIC_LIB="zig-out/lib/libghostty-vt.a" ;;
+        osx) STATIC_LIB="zig-out/lib/libghostty-vt-static.a" ;;
+        linux) STATIC_LIB="zig-out/lib/libghostty-vt-static.a" ;;
     esac
 
     if [ -n "$STATIC_LIB" ] && [ -f "$STATIC_LIB" ]; then

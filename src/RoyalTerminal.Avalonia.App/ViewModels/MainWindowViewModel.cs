@@ -33,6 +33,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private double _fontSize = 14.0;
     private TerminalFontSource _fontSource = TerminalFontSource.System;
     private string _fontFamilyName = GetDefaultMonospaceFont();
+    private TerminalFontFamilySettings _fontFamilies = TerminalFontFamilySettings.Default;
     private string _fontFilePath = string.Empty;
     private bool _fontSubpixelPositioning = TerminalFontRenderingSettings.Default.SubpixelPositioning;
     private TerminalFontEdging _fontEdging = TerminalFontRenderingSettings.Default.Edging;
@@ -40,6 +41,8 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _fontBaselineSnap = TerminalFontRenderingSettings.Default.BaselineSnap;
     private bool _fontEmbeddedBitmaps = TerminalFontRenderingSettings.Default.EmbeddedBitmaps;
     private bool _fontEmbolden = TerminalFontRenderingSettings.Default.Embolden;
+    private bool _fontThicken = TerminalFontRenderingSettings.Default.Thicken;
+    private byte _fontThickenStrength = TerminalFontRenderingSettings.Default.ThickenStrength;
     private bool _fontForceAutoHinting = TerminalFontRenderingSettings.Default.ForceAutoHinting;
     private bool _fontLinearMetrics = TerminalFontRenderingSettings.Default.LinearMetrics;
     private TerminalTextHighlightingMode _textHighlightingMode = TerminalTextHighlightingMode.Static;
@@ -117,6 +120,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private bool _backspaceSendsControlH;
     private bool _enableTextShaping = true;
     private bool _reflowOnResize = true;
+    private bool _allowVtWindowResize;
     private bool _preserveScrollbackOnRestart = true;
     private bool _sixelGraphicsEnabled = true;
     private bool _enableLigatures = true;
@@ -697,6 +701,13 @@ public sealed class MainWindowViewModel : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _fontFilePath, value?.Trim() ?? string.Empty);
     }
 
+    /// <summary>Ordered system families for regular and styled terminal text.</summary>
+    public TerminalFontFamilySettings FontFamilies
+    {
+        get => _fontFamilies;
+        set => this.RaiseAndSetIfChanged(ref _fontFamilies, (value ?? TerminalFontFamilySettings.Default).Normalize());
+    }
+
     public bool FontSubpixelPositioning
     {
         get => _fontSubpixelPositioning;
@@ -731,6 +742,20 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _fontEmbolden;
         set => this.RaiseAndSetIfChanged(ref _fontEmbolden, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing for terminal and preedit text.</summary>
+    public bool FontThicken
+    {
+        get => _fontThicken;
+        set => this.RaiseAndSetIfChanged(ref _fontThicken, value);
+    }
+
+    /// <summary>Gets or sets macOS font smoothing strength (0–255).</summary>
+    public byte FontThickenStrength
+    {
+        get => _fontThickenStrength;
+        set => this.RaiseAndSetIfChanged(ref _fontThickenStrength, value);
     }
 
     public bool FontForceAutoHinting
@@ -1431,6 +1456,13 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         get => _reflowOnResize;
         set => this.RaiseAndSetIfChanged(ref _reflowOnResize, value);
+    }
+
+    /// <summary>Explicit permission for single-terminal CSI 8 t window resizing.</summary>
+    public bool AllowVtWindowResize
+    {
+        get => _allowVtWindowResize;
+        set => this.RaiseAndSetIfChanged(ref _allowVtWindowResize, value);
     }
 
     public bool PreserveScrollbackOnRestart

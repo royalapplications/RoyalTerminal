@@ -138,7 +138,8 @@ public class TerminalScrollData
     /// </summary>
     public int ViewportYToRow(double y)
     {
-        return OffsetRows + (int)(y / CellHeight);
+        if (!double.IsFinite(y) || !double.IsFinite(Offset) || !double.IsFinite(CellHeight) || CellHeight <= 0) return 0;
+        return (int)Math.Clamp(Math.Floor((Offset + y) / CellHeight), int.MinValue, int.MaxValue);
     }
 
     /// <summary>

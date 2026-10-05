@@ -2,9 +2,11 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using RoyalTerminal.GhosttySharp.Native;
-using SkiaSharp;
+using RoyalTerminal.Imaging;
 
 namespace RoyalTerminal.GhosttySharp;
 
@@ -18,6 +20,44 @@ public static class GhosttySys
     private static GhosttyVtNative.GhosttySysLogCallback? s_logCallback;
     private static Action<GhosttySysLogMessage>? s_logSink;
     private static bool s_skiaPngDecoderInstalled;
+
+    /// <summary>
+    /// Uses .NET's cryptographic random source for Ghostty secrets. Configure
+    /// this process-global hook at startup before using terminal instances.
+    /// </summary>
+    public static unsafe void UseManagedSecureRandom()
+    {
+        NativeLibraryLoader.Initialize();
+        ThrowIfFailed(
+            GhosttyVtNative.SysSet(
+                GhosttyVtNative.GhosttySysOption.RandomSecure,
+                (void*)(delegate* unmanaged[Cdecl]<nint, byte*, nuint, byte>)&FillSecureRandom),
+            "ghostty_sys_set(random_secure)");
+    }
+
+    /// <summary>Restores Ghostty's platform cryptographic random source at startup.</summary>
+    public static unsafe void UsePlatformSecureRandom()
+    {
+        NativeLibraryLoader.Initialize();
+        ThrowIfFailed(
+            GhosttyVtNative.SysSet(GhosttyVtNative.GhosttySysOption.RandomSecure, null),
+            "ghostty_sys_set(random_secure)");
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe byte FillSecureRandom(nint userdata, byte* buffer, nuint length)
+    {
+        try
+        {
+            RandomNumberGenerator.Fill(new Span<byte>(buffer, checked((int)length)));
+            return 1;
+        }
+        catch
+        {
+            // Report unavailable entropy without crossing the unmanaged boundary.
+            return 0;
+        }
+    }
 
     /// <summary>
     /// Installs a Skia-backed PNG decoder for Kitty Graphics support.
@@ -86,45 +126,56 @@ public static class GhosttySys
         nuint dataLength,
         GhosttyVtNative.GhosttySysImage* output)
     {
-        if (data is null || output is null || dataLength == 0)
+        if (data is null || output is null || dataLength == 0 || dataLength > BoundedSkiaPngDecoder.MaxImageBytes)
         {
             return 0;
         }
 
-        byte[] pngData = new byte[checked((int)dataLength)];
-        Marshal.Copy((nint)data, pngData, 0, pngData.Length);
-
-        using SKData encoded = SKData.CreateCopy(pngData);
-        using SKCodec? codec = SKCodec.Create(encoded);
-        if (codec is null)
+        byte* pixels = null;
+        nuint rgbaLength = 0;
+        try
         {
+            if (!BoundedSkiaPngDecoder.TryCreate(
+                new ReadOnlySpan<byte>(data, (int)dataLength),
+                BoundedSkiaPngDecoder.MaxImageBytes,
+                BoundedSkiaPngDecoder.MaxImageBytes,
+                out BoundedSkiaPngDecoder? decoder))
+            {
+                return 0;
+            }
+
+            using BoundedSkiaPngDecoder boundedDecoder = decoder;
+            rgbaLength = checked((nuint)decoder.Info.BytesSize);
+            pixels = GhosttyVtNative.Alloc(allocator, rgbaLength);
+            if (pixels is null)
+            {
+                return 0;
+            }
+
+            if (!decoder.TryDecode((nint)pixels))
+            {
+                return 0;
+            }
+
+            output->Width = checked((uint)decoder.Info.Width);
+            output->Height = checked((uint)decoder.Info.Height);
+            output->Data = pixels;
+            output->DataLength = rgbaLength;
+            pixels = null; // Successful decoding transfers ownership to Ghostty.
+            return 1;
+        }
+        catch
+        {
+            // Reject malformed input and allocation/decode failures within the ABI boundary.
             return 0;
         }
-
-        SKImageInfo info = new(
-            codec.Info.Width,
-            codec.Info.Height,
-            SKColorType.Rgba8888,
-            SKAlphaType.Unpremul);
-        nuint rgbaLength = checked((nuint)info.BytesSize);
-        byte* pixels = GhosttyVtNative.Alloc(allocator, rgbaLength);
-        if (pixels is null)
+        finally
         {
-            return 0;
+            if (pixels is not null)
+            {
+                GhosttyVtNative.Free(allocator, pixels, rgbaLength);
+            }
         }
-
-        SKCodecResult result = codec.GetPixels(info, (nint)pixels, info.RowBytes, new SKCodecOptions());
-        if (result != SKCodecResult.Success)
-        {
-            GhosttyVtNative.Free(allocator, pixels, rgbaLength);
-            return 0;
-        }
-
-        output->Width = checked((uint)info.Width);
-        output->Height = checked((uint)info.Height);
-        output->Data = pixels;
-        output->DataLength = rgbaLength;
-        return 1;
     }
 
     private static unsafe void Log(

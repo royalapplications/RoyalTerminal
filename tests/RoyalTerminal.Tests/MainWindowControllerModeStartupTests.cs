@@ -131,6 +131,9 @@ public sealed class MainWindowControllerModeStartupTests
                 terminalHost.Children[0],
                 startupHeader);
             Assert.Equal(TerminalRenderMode.RenderedAuto, startupMode);
+            TerminalControl startupControl = Assert.Single(GetStandaloneControls(terminalHost));
+            Assert.NotNull(startupControl.HyperlinkHost);
+            Assert.NotNull(startupControl.HyperlinkPathPreviewSource);
         }
         finally
         {
@@ -2873,6 +2876,7 @@ public sealed class MainWindowControllerModeStartupTests
                     Appearance = new TerminalSessionAppearanceSettings
                     {
                         FontFamilyName = "Profile A Mono",
+                        FontFamilies = new() { Regular = ["Profile A first", "Profile A second"], Bold = ["Profile A bold"], CodepointMaps = ["U+2611=Profile A symbol"], BoldStyle = "false", ItalicStyle = "Book Oblique", SyntheticItalic = false, SyntheticBoldItalic = false },
                         FontSize = 19.0,
                         FontRendering = new TerminalFontRenderingSettings
                         {
@@ -2882,6 +2886,8 @@ public sealed class MainWindowControllerModeStartupTests
                             BaselineSnap = false,
                             EmbeddedBitmaps = true,
                             Embolden = true,
+                            Thicken = true,
+                            ThickenStrength = 137,
                             ForceAutoHinting = true,
                             LinearMetrics = true,
                         },
@@ -2907,6 +2913,7 @@ public sealed class MainWindowControllerModeStartupTests
                     Appearance = new TerminalSessionAppearanceSettings
                     {
                         FontFamilyName = "Profile B Mono",
+                        FontFamilies = new() { Regular = ["Profile B regular"], CodepointMaps = ["U+2611=Profile B symbol"] },
                         FontSize = 11.0,
                         AutoScroll = true,
                         BackgroundOpacityEnabled = false,
@@ -2970,6 +2977,14 @@ public sealed class MainWindowControllerModeStartupTests
                 GetStandaloneControls(terminalHost),
                 control => !controlsBeforeSplit.Contains(control) && control.TerminalFontSize == 19.0);
             Assert.Equal("Profile A Mono", splitControl.FontFamilyName);
+            Assert.Equal(new[] { "Profile A first", "Profile A second" }, splitControl.FontFamilies.Regular);
+            Assert.Equal(new[] { "Profile A bold" }, splitControl.FontFamilies.Bold);
+            Assert.Equal(new[] { "U+2611=Profile A symbol" }, splitControl.FontFamilies.CodepointMaps);
+            Assert.Equal("false", splitControl.FontFamilies.BoldStyle);
+            Assert.Equal("Book Oblique", splitControl.FontFamilies.ItalicStyle);
+            Assert.False(splitControl.FontFamilies.SyntheticItalic);
+            Assert.False(splitControl.FontFamilies.SyntheticBoldItalic);
+            Assert.True(splitControl.FontFamilies.SyntheticBold);
             Assert.Equal(TerminalFontSource.System, splitControl.FontSource);
             Assert.False(splitControl.FontSubpixelPositioning);
             Assert.Equal(TerminalFontEdging.Alias, splitControl.FontEdging);
@@ -2977,6 +2992,8 @@ public sealed class MainWindowControllerModeStartupTests
             Assert.False(splitControl.FontBaselineSnap);
             Assert.True(splitControl.FontEmbeddedBitmaps);
             Assert.True(splitControl.FontEmbolden);
+            Assert.True(splitControl.FontThicken);
+            Assert.Equal(137, splitControl.FontThickenStrength);
             Assert.True(splitControl.FontForceAutoHinting);
             Assert.True(splitControl.FontLinearMetrics);
             Assert.False(splitControl.AutoScroll);

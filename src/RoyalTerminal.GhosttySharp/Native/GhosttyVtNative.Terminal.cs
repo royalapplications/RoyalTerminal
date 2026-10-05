@@ -121,6 +121,16 @@ public static partial class GhosttyVtNative
         public GhosttyClipboardLocation Location;
         public GhosttyClipboardContent* Contents;
         public nuint ContentsLength;
+        public GhosttyString Name;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Granted;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool CanRemember;
+
+        public nint Context;
+        public nint Reply;
     }
 
     public enum GhosttyClipboardWriteResult : int
@@ -131,6 +141,117 @@ public static partial class GhosttyVtNative
         Busy = 3,
         InvalidData = 4,
         IoError = 5,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyClipboardWriteReply
+    {
+        public nuint Size;
+        public GhosttyClipboardWriteResult Result;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Remember;
+
+        public static GhosttyClipboardWriteReply CreateSized(GhosttyClipboardWriteResult result)
+        {
+            return new GhosttyClipboardWriteReply
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyClipboardWriteReply>(),
+                Result = result,
+            };
+        }
+    }
+
+    public enum GhosttyClipboardReadResult : int
+    {
+        Success = 0,
+        Denied = 1,
+        Unsupported = 2,
+        Busy = 3,
+        IoError = 4,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct GhosttyClipboardReadReply
+    {
+        public nuint Size;
+        public GhosttyClipboardReadResult Result;
+        public GhosttyClipboardContent* Contents;
+        public nuint ContentsLength;
+        public GhosttyString* Available;
+        public nuint AvailableLength;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Remember;
+
+        public static GhosttyClipboardReadReply CreateSized(GhosttyClipboardReadResult result)
+        {
+            return new GhosttyClipboardReadReply
+            {
+                Size = (nuint)Marshal.SizeOf<GhosttyClipboardReadReply>(),
+                Result = result,
+            };
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct GhosttyClipboardRead
+    {
+        public nuint Size;
+        public GhosttyClipboardLocation Location;
+        public GhosttyString* Mimes;
+        public nuint MimesLength;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool List;
+
+        public GhosttyString Name;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Granted;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool CanRemember;
+
+        public nint Context;
+        public nint Reply;
+    }
+
+    public enum GhosttyTerminalUnknownSequenceTag : int
+    {
+        Apc = 0,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyTerminalUnknownStringSequence
+    {
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Truncated;
+
+        public GhosttyString Content;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 128)]
+    public struct GhosttyTerminalUnknownSequenceValue
+    {
+        [FieldOffset(0)]
+        public GhosttyTerminalUnknownStringSequence Apc;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyTerminalUnknownSequence
+    {
+        public GhosttyTerminalUnknownSequenceTag Tag;
+        public GhosttyTerminalUnknownSequenceValue Value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GhosttyTerminalModeConfig
+    {
+        public GhosttyMode Mode;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Value;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -194,10 +315,38 @@ public static partial class GhosttyVtNative
     public delegate void GhosttyTerminalPwdChangedCallback(nint terminal, nint userdata);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public unsafe delegate GhosttyClipboardWriteResult GhosttyTerminalClipboardWriteCallback(
+    public unsafe delegate void GhosttyTerminalClipboardWriteCallback(
         nint terminal,
         nint userdata,
         GhosttyClipboardWrite* write);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void GhosttyClipboardWriteReplyCallback(
+        GhosttyClipboardWrite* write,
+        GhosttyClipboardWriteReply* reply);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void GhosttyTerminalClipboardReadCallback(
+        nint terminal,
+        nint userdata,
+        GhosttyClipboardRead* read);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void GhosttyClipboardReadReplyCallback(
+        GhosttyClipboardRead* read,
+        GhosttyClipboardReadReply* reply);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void GhosttyTerminalUnknownSequenceCallback(
+        nint terminal,
+        nint userdata,
+        GhosttyTerminalUnknownSequence* sequence);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void GhosttyTerminalRenderHoldCallback(
+        nint terminal,
+        nint userdata,
+        [MarshalAs(UnmanagedType.U1)] bool held);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public unsafe delegate void GhosttyTerminalDesktopNotificationCallback(
@@ -244,6 +393,17 @@ public static partial class GhosttyVtNative
         ScrollbackMaxLines = 28,
         DesktopNotification = 29,
         ProgressReport = 30,
+        ContinuationMaxBytes = 31,
+        TitleReport = 32,
+        ModeDefault = 33,
+        Mode = 34,
+        UnknownSequence = 35,
+        UnknownMaxBytes = 36,
+        TerminfoName = 37,
+        ClipboardRead = 38,
+        ClipboardWriteMaxBytes = 39,
+        ResizePullScrollback = 40,
+        RenderHold = 41,
     }
 
     public enum GhosttyTerminalData : int
@@ -284,6 +444,11 @@ public static partial class GhosttyVtNative
         VtProcessingError = 33,
         ScrollbackMaxBytes = 34,
         ScrollbackMaxLines = 35,
+        ContinuationMaxBytes = 36,
+        Mode = 37,
+        VtGround = 38,
+        CursorAtPrompt = 39,
+        ClipboardWriteMaxBytes = 40,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_new")]
@@ -322,6 +487,34 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial void TerminalVtWrite(nint terminal, byte* data, nuint len);
 
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_vt_write_until_ground")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalVtWriteUntilGround(
+        nint terminal,
+        byte* data,
+        nuint length,
+        out nuint consumed);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_continuation_write")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static partial GhosttyResult TerminalContinuationWrite(nint terminal, GhosttyWriter writer);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_continuation_buf")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalContinuationBuffer(
+        nint terminal,
+        byte* buffer,
+        nuint bufferLength,
+        out nuint written);
+
+    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_continuation_alloc")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult TerminalContinuationAlloc(
+        nint terminal,
+        GhosttyAllocator* allocator,
+        byte** output,
+        out nuint outputLength);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_scroll_viewport")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void TerminalScrollViewport(nint terminal, GhosttyTerminalScrollViewport behavior);
@@ -338,20 +531,6 @@ public static partial class GhosttyVtNative
         nint terminal,
         GhosttyTerminalCompressionMode mode,
         out GhosttyTerminalCompressionResult result);
-
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_mode_get")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial GhosttyResult TerminalModeGet(
-        nint terminal,
-        GhosttyMode mode,
-        [MarshalAs(UnmanagedType.U1)] out bool value);
-
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_mode_set")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial GhosttyResult TerminalModeSet(
-        nint terminal,
-        GhosttyMode mode,
-        [MarshalAs(UnmanagedType.U1)] bool value);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_get")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
