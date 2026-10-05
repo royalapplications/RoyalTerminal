@@ -39,7 +39,8 @@ The October 2026 dependency review retains these compatibility constraints:
   updating to Zig 0.17 or a newer upstream development commit requires a coordinated
   native/managed ABI and terminal behavior review.
 - VitePress remains on its latest stable 1.6.4 release. The npm overrides update
-  Vite and its Vue plugin together so the plugin's peer range supports Vite 8.
+  Vite 7 and its Vue plugin together so their peer ranges match. Vite 8 uses
+  Rolldown, which rejects VitePress 1.6.4's bundle mutation during generation.
 
 ReactiveUI 26 uses `Interaction.Handle` for task-based handling. Observable command
 pipelines use `WhenHandled` to keep interaction dispatch tied to subscription.
