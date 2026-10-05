@@ -42,6 +42,27 @@ namespace RoyalTerminal.Tests;
 [Collection("MainWindowControllerHeadlessTests")]
 public class MainWindowViewModelFlowTests
 {
+    [AvaloniaFact]
+    public async Task NewTabCommand_HandlesEachExecutionOnlyAfterSubscription()
+    {
+        MainWindowViewModel viewModel = new();
+        int calls = 0;
+        using IDisposable registration = viewModel.CreateNewTabInteraction.RegisterHandler(context =>
+        {
+            calls++;
+            context.SetOutput(Unit.Default);
+        });
+
+        IObservable<Unit> firstExecution = viewModel.NewTabCommand.Execute();
+        Assert.Equal(0, calls);
+
+        await firstExecution.ToTask();
+        Assert.Equal(1, calls);
+
+        await viewModel.NewTabCommand.Execute().ToTask();
+        Assert.Equal(2, calls);
+    }
+
     [Fact]
     public void SharedShellAssembly_UsesRoyalTerminalProductTitle()
     {
