@@ -94,4 +94,16 @@ public sealed class TerminalDrawHandlerTests
         Assert.Equal(2f, scale.X, precision: 3);
         Assert.Equal(2f, scale.Y, precision: 3);
     }
+
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(1.25f)]
+    [InlineData(2f)]
+    public void GetCanvasScale_DoesNotInterpretAntialiasClipPaddingAsDpi(float dpi)
+    {
+        TerminalDrawHandler.RenderTargetScale scale = TerminalDrawHandler.GetCanvasScale(
+            new Rect(0, 0, 320, 100), new SKRect(-1, -1, 321, 101), SKMatrix.CreateScale(dpi, dpi));
+        Assert.Equal(dpi, scale.X);
+        Assert.Equal(dpi, scale.Y);
+    }
 }

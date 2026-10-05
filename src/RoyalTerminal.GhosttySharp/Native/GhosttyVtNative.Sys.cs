@@ -58,11 +58,20 @@ public static partial class GhosttyVtNative
         byte* message,
         nuint messageLength);
 
+    /// <summary>Fills the complete destination with cryptographically secure random bytes.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public unsafe delegate bool GhosttySysRandomSecureCallback(
+        void* userdata,
+        byte* buffer,
+        nuint length);
+
     public enum GhosttySysOption : int
     {
         Userdata = 0,
         DecodePng = 1,
         Log = 2,
+        RandomSecure = 3,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sys_set")]

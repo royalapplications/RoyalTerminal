@@ -24,7 +24,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private SkiaTerminalRenderer? _renderer;
     private TerminalScreen? _screen;
     private TerminalShaderPostProcessor? _shaderPostProcessor;
-    private SKSurface? _terminalSurface;
+    private TerminalRenderSurface? _terminalSurface;
+    private IReadOnlyList<TerminalShaderSource>? _shaderSources;
+    private bool _visible = true;
+    private bool _disposed;
     private SKImageInfo _terminalSurfaceInfo;
     private GRContext? _terminalSurfaceGrContext;
     private bool _terminalSurfaceGpuBacked;
@@ -40,6 +43,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     private long _lastShaderTimestamp;
     private int _shaderFrame;
     private TerminalCursorRenderSnapshot _lastCursorSnapshot;
+    private double _lastRenderScrollFraction;
     private readonly SKPaint _clearPaint = new()
     {
         IsAntialias = false,
@@ -53,12 +57,15 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     public readonly record struct InvalidateMessage(bool FullRedraw = false, bool DirtyRowsOnly = false);
     public readonly record struct ResizeMessage();
     public readonly record struct DisposeMessage();
+    /// <summary>Suspends rendering and releases retained resources while hidden.</summary>
+    public readonly record struct VisibilityMessage(bool Visible);
     public readonly record struct ShaderStateMessage(
         IReadOnlyList<TerminalShaderSource>? Sources,
         bool AnimationEnabled);
 
     public override void OnMessage(object message)
     {
+        if (_disposed) return;
         switch (message)
         {
             case UpdateMessage update:
@@ -88,12 +95,27 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             case DisposeMessage:
                 DisposeRenderResources();
                 break;
+
+            case VisibilityMessage visibility:
+                _visible = visibility.Visible;
+                if (_visible)
+                {
+                    RequestTerminalFrame(fullRedraw: true, invalidateViewport: true);
+                }
+                else
+                {
+                    _pendingRender = false;
+                    _shaderPostProcessor?.Dispose();
+                    _shaderPostProcessor = null;
+                    ResetCachedFrame();
+                }
+                break;
         }
     }
 
     public override void OnAnimationFrameUpdate()
     {
-        if (_pendingRender)
+        if (_pendingRender && _visible && !_disposed)
             Invalidate();
     }
 
@@ -101,6 +123,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
     {
         try
         {
+            if (!_visible || _disposed) return;
             var renderer = _renderer;
             var screen = _screen;
             if (renderer is null || screen is null)
@@ -129,38 +152,65 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             (float logicalWidth, float logicalHeight) = GetRenderTargetLogicalSize(
                 renderBounds,
                 canvas.LocalClipBounds);
-            (int width, int height) = GetRenderTargetPixelSize(
-                renderBounds,
-                canvas.LocalClipBounds,
-                renderScale.X,
-                renderScale.Y);
-            SKRect logicalDestinationRect = new(0, 0, width / renderScale.X, height / renderScale.Y);
+            int width;
+            int height;
+            SKRect logicalDestinationRect;
+            if (TerminalPixelSnapLayout.TryCreate(
+                    logicalWidth, logicalHeight, renderScale.X, renderScale.Y,
+                    canvas.TotalMatrix, out TerminalPixelSnapLayout pixelLayout))
+            {
+                width = pixelLayout.Width;
+                height = pixelLayout.Height;
+                logicalDestinationRect = pixelLayout.Destination;
+                // No physical coverage: don't allocate a phantom one-pixel FBO.
+                if (width == 0 || height == 0)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                (width, height) = GetRenderTargetPixelSize(
+                    renderBounds, canvas.LocalClipBounds, renderScale.X, renderScale.Y);
+                logicalDestinationRect = new SKRect(0, 0, width / renderScale.X, height / renderScale.Y);
+            }
             SKRect logicalClipRect = new(0, 0, logicalWidth, logicalHeight);
             SKImage? terminalFrame = null;
             SKColor background = default;
             GRContext? grContext = lease.GrContext;
+            _shaderPostProcessor ??= TerminalShaderPostProcessor.Create(_shaderSources);
 
-            lock (screen.SyncRoot)
+            using (screen.Synchronization.AcquireDemand())
             {
                 background = new SKColor(screen.DefaultBackground);
-                if (!EnsureTerminalSurface(width, height, renderScale, grContext))
+                if (!EnsureTerminalSurface(width, height, renderScale, lease))
                 {
                     canvas.Clear(background);
-                    renderer.RenderFull(canvas, screen);
+                    canvas.Save();
+                    try
+                    {
+                        if (screen.RenderScrollFraction != 0)
+                            canvas.ClipRect(new SKRect(0, 0, screen.Columns * renderer.CellWidth, screen.ViewportRows * renderer.CellHeight));
+                        renderer.RenderFull(canvas, screen);
+                    }
+                    finally { canvas.Restore(); }
                     return;
                 }
 
-                bool fullRedraw = !_cachedFrameValid || _forceFullRedrawRequested;
+                double scrollFraction = screen.RenderScrollFraction;
+                bool fullRedraw = !_cachedFrameValid || _forceFullRedrawRequested || scrollFraction != _lastRenderScrollFraction;
+                renderer.PrepareImageDamage(screen);
                 if (_invalidateViewportRequested)
                 {
-                    screen.InvalidateViewport();
+                    TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+                    for (int index = 0; index < rows.Count; index++) rows[index].Row.IsDirty = true;
                 }
 
                 bool cursorChanged = MarkCursorRowsDirtyIfNeeded(renderer, screen);
                 bool hasDirtyRows = fullRedraw || _terminalFrameDirty || cursorChanged || HasDirtyViewportRows(screen);
                 if (hasDirtyRows)
                 {
-                    SKCanvas terminalCanvas = _terminalSurface!.Canvas;
+                    SKCanvas terminalCanvas = _terminalSurface!.Surface.Canvas;
                     if (fullRedraw)
                     {
                         terminalCanvas.Clear(background);
@@ -170,6 +220,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                     terminalCanvas.Scale(renderScale.X, renderScale.Y);
                     try
                     {
+                        if (scrollFraction != 0)
+                            terminalCanvas.ClipRect(new SKRect(0, 0, screen.Columns * renderer.CellWidth, screen.ViewportRows * renderer.CellHeight));
                         if (!fullRedraw)
                         {
                             ClearDirtyViewportRows(terminalCanvas, renderer, screen, background, logicalWidth);
@@ -190,7 +242,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 }
 
                 _lastCursorSnapshot = TerminalCursorRenderSnapshot.From(renderer);
-                terminalFrame = _terminalSurface!.Snapshot();
+                _lastRenderScrollFraction = scrollFraction;
+                terminalFrame = _terminalSurface!.Surface.Snapshot();
             }
 
             if (terminalFrame is null)
@@ -254,6 +307,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void RequestRender()
     {
+        if (!_visible || _disposed || _pendingRender) return;
         _pendingRender = true;
         RegisterForNextAnimationFrameUpdate();
     }
@@ -274,8 +328,9 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         int width,
         int height,
         RenderTargetScale scale,
-        GRContext? grContext)
+        ISkiaSharpApiLease lease)
     {
+        GRContext? grContext = lease.GrContext;
         GRContext? activeGrContext = TerminalShaderPostProcessor.CanUseGpuRenderSurface(grContext)
             ? grContext
             : null;
@@ -291,12 +346,9 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
         ReleaseTerminalSurface();
         _terminalSurfaceInfo = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
-        _terminalSurface = TerminalShaderPostProcessor.CreateRenderSurface(
-            _terminalSurfaceInfo,
-            activeGrContext,
-            out bool isGpuBacked);
+        _terminalSurface = TerminalRenderSurface.Create(_terminalSurfaceInfo, lease);
         _terminalSurfaceGrContext = activeGrContext;
-        _terminalSurfaceGpuBacked = isGpuBacked;
+        _terminalSurfaceGpuBacked = _terminalSurface?.IsGpuBacked == true;
         _terminalSurfaceScaleX = scale.X;
         _terminalSurfaceScaleY = scale.Y;
         _cachedFrameValid = false;
@@ -308,19 +360,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private void ReleaseTerminalSurface()
     {
-        SKSurface? terminalSurface = _terminalSurface;
+        _terminalSurface?.Dispose();
         _terminalSurface = null;
         _terminalSurfaceGrContext = null;
         _terminalSurfaceGpuBacked = false;
 
-        if (terminalSurface is null)
-        {
-            return;
-        }
-
-        terminalSurface.Canvas.Flush();
-        terminalSurface.Dispose();
     }
+
+    internal long RetainedFrameBytes => _terminalSurface?.ByteCount ?? 0;
+    internal bool HasCompiledShaders => _shaderPostProcessor?.HasShaders == true;
+    internal bool IsRenderPending => _pendingRender;
 
     internal static (int Width, int Height) GetRenderTargetPixelSize(
         Rect renderBounds,
@@ -361,8 +410,12 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         SKMatrix matrix)
     {
         RenderTargetScale matrixScale = GetCanvasScale(matrix);
-        float inferredScaleX = InferScale(renderBounds.Width, localClipBounds.Width);
-        float inferredScaleY = InferScale(renderBounds.Height, localClipBounds.Height);
+        // Skia expands local clips outward for antialiasing (often -1..size+1).
+        // That padding is not DPI: inferring scale from it stretches a 320x100
+        // framebuffer to 322x102. Only a non-outset clip can supply fallback DPI.
+        bool clipIsOutset = localClipBounds.Left < 0 || localClipBounds.Top < 0;
+        float inferredScaleX = clipIsOutset ? 1f : InferScale(renderBounds.Width, localClipBounds.Width);
+        float inferredScaleY = clipIsOutset ? 1f : InferScale(renderBounds.Height, localClipBounds.Height);
         float scaleX = MathF.Max(matrixScale.X, inferredScaleX);
         float scaleY = MathF.Max(matrixScale.Y, inferredScaleY);
 
@@ -449,9 +502,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
 
     private static bool HasDirtyViewportRows(TerminalScreen screen)
     {
-        for (int row = 0; row < screen.ViewportRows; row++)
+        TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+        for (int row = 0; row < rows.Count; row++)
         {
-            if (screen.GetViewportRow(row).IsDirty)
+            if (rows[row].Row.IsDirty)
             {
                 return true;
             }
@@ -470,16 +524,21 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _clearPaint.Color = background;
         float rowWidth = Math.Max(canvasWidth, screen.Columns * renderer.CellWidth);
         float rowHeight = Math.Max(1f, renderer.CellHeight);
-        for (int row = 0; row < screen.ViewportRows; row++)
+        TerminalRenderViewport rows = screen.GetRenderViewport(screen.RenderScrollOverscan);
+        double fraction = screen.RenderScrollFraction;
+        canvas.Save();
+        try
         {
-            if (!screen.GetViewportRow(row).IsDirty)
+            // Use exactly the renderer's translation, avoiding a different
+            // floating-point rounding path at fractional device-pixel edges.
+            if (fraction != 0) canvas.Translate(0, -(float)(fraction * renderer.CellHeight));
+            for (int row = 0; row < rows.Count; row++)
             {
-                continue;
+                if (!rows[row].Row.IsDirty) continue;
+                canvas.DrawRect(0, rows[row].ViewportY * renderer.CellHeight, rowWidth, rowHeight, _clearPaint);
             }
-
-            float y = row * renderer.CellHeight;
-            canvas.DrawRect(0, y, rowWidth, rowHeight, _clearPaint);
         }
+        finally { canvas.Restore(); }
     }
 
     private void SetShaderState(
@@ -487,7 +546,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         bool animationEnabled)
     {
         _shaderPostProcessor?.Dispose();
-        _shaderPostProcessor = TerminalShaderPostProcessor.Create(sources);
+        _shaderPostProcessor = null;
+        _shaderSources = sources;
         _shaderAnimationEnabled = animationEnabled;
         _shaderStartTimestamp = 0;
         _lastShaderTimestamp = 0;
@@ -502,13 +562,16 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         _shaderAnimationEnabled = false;
         _shaderPostProcessor?.Dispose();
         _shaderPostProcessor = null;
+        _shaderSources = null;
         ResetCachedFrame();
+        _clearPaint.Dispose();
+        _disposed = true;
     }
 
     private bool ShouldContinueShaderAnimation()
     {
         TerminalShaderPostProcessor? shaderPostProcessor = _shaderPostProcessor;
-        return _shaderAnimationEnabled &&
+        return _visible && !_disposed && _shaderAnimationEnabled &&
                shaderPostProcessor is not null &&
                shaderPostProcessor.HasShaders &&
                shaderPostProcessor.RequiresContinuousAnimation;
@@ -633,7 +696,8 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
         bool Visible,
         CursorStyle Style,
         SKColor Color,
-        SKColor TextColor)
+        SKColor TextColor,
+        TerminalPreedit? Preedit)
     {
         public static TerminalCursorRenderSnapshot From(SkiaTerminalRenderer renderer)
             => new(
@@ -642,6 +706,7 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
                 renderer.CursorVisible,
                 renderer.CursorStyle,
                 renderer.CursorColor,
-                renderer.CursorTextColor);
+                renderer.CursorTextColor,
+                renderer.Preedit);
     }
 }

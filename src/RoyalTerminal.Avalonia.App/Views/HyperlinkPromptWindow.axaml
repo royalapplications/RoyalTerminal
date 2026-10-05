@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RoyalTerminal.Avalonia.App.ViewModels"
+        x:Class="RoyalTerminal.Avalonia.App.Views.HyperlinkPromptWindow"
+        x:DataType="vm:HyperlinkPromptViewModel"
+        x:CompileBindings="True"
+        Title="{Binding Title, Mode=OneWay}"
+        Width="580" MinWidth="400" MaxHeight="640"
+        SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <Grid Margin="24" RowDefinitions="Auto,*,Auto,Auto" RowSpacing="16">
+    <TextBlock Text="{Binding Message, Mode=OneWay}" TextWrapping="Wrap" />
+    <ScrollViewer Grid.Row="1" MaxHeight="320" HorizontalScrollBarVisibility="Disabled">
+      <SelectableTextBlock x:Name="TargetText" Text="{Binding Target, Mode=OneWay}" TextWrapping="Wrap" />
+    </ScrollViewer>
+    <StackPanel Grid.Row="2" IsVisible="{Binding CanOpen, Mode=OneWay}" Spacing="4">
+      <TextBlock Text="Application" FontWeight="SemiBold" />
+      <TextBlock Text="{Binding Handler, Mode=OneWay}" TextWrapping="Wrap" />
+    </StackPanel>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="CopyTargetButton" Content="Copy target" Command="{Binding CopyCommand}" />
+      <Button x:Name="CancelButton" Content="Cancel" IsCancel="True" IsDefault="True" Command="{Binding CancelCommand}" />
+      <Button x:Name="OpenLinkButton" Content="Open" IsVisible="{Binding CanOpen, Mode=OneWay}" Command="{Binding OpenCommand}" />
+    </StackPanel>
+  </Grid>
+</Window>

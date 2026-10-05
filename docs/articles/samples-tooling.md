@@ -118,6 +118,13 @@ The repository includes several test layers:
 
 The test names are descriptive and double as subsystem maps. If you need to understand whether a behavior is intentional, read the relevant test file before changing the implementation.
 
+The benchmark executable has focused `--managed-print` and `--managed-raster`
+scenarios for terminal-state work without PTY or renderer costs. The raster case
+reuses decoded pixels and placements to isolate replacement/retirement with
+1, 2, 8 or 64 live images; it reports warmed elapsed time and allocated bytes over
+seven samples. Compare the same scenario, runtime and build configuration across
+revisions. These microbenchmarks do not establish whole-app rendering performance.
+
 ## Internal reference material
 
 The repository also contains a rich internal reference set under `skills/royalterminal-development/references/`. Those files are not the public docs site, but they are extremely useful when you need source-grounded details about:

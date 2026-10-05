@@ -30,7 +30,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         string? text = null;
         bool usedRendererSelection = false;
 
-        if (screen is not null &&
+        if (owner is TerminalControl control && control.TryReadExpandedSelection(out text))
+        {
+            // Visible highlight spans are clipped. A word/line may start or end in
+            // off-viewport history owned only by the processor (native VT).
+            usedRendererSelection = true;
+        }
+        else if (screen is not null &&
             renderer is not null &&
             !renderer.GetSelectionSpans().IsEmpty)
         {
@@ -244,6 +250,24 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         return false;
     }
 
+    private static bool TryGetSelectionRow(TerminalScreen screen, int viewportRow, out TerminalRow row)
+    {
+        long absoluteRow = (long)screen.ViewportTopAbsoluteRow + viewportRow;
+        if (absoluteRow >= 0 && absoluteRow < screen.TotalRows)
+        {
+            row = screen.GetRow((int)absoluteRow);
+            return true;
+        }
+        TerminalRenderViewport view = screen.GetRenderViewport(screen.RenderScrollOverscan);
+        if ((uint)viewportRow < (uint)view.Count)
+        {
+            row = view[viewportRow].Row;
+            return true;
+        }
+        row = null!;
+        return false;
+    }
+
     private static string? GetSelectedText(TerminalScreen screen, RendererSelectionRange selection)
     {
         int startCol = selection.StartColumn;
@@ -254,16 +278,13 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         StringBuilder sb = new();
         lock (screen.SyncRoot)
         {
-            int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
             for (int row = startRow; row <= endRow; row++)
             {
-                int absoluteRow = viewportTopAbsoluteRow + row;
-                if (absoluteRow < 0 || absoluteRow >= screen.TotalRows)
+                if (!TryGetSelectionRow(screen, row, out TerminalRow termRow))
                 {
                     continue;
                 }
 
-                TerminalRow termRow = screen.GetRow(absoluteRow);
                 int colStart = selection.Rectangle || row == startRow ? startCol : 0;
                 int colEndExclusive = selection.Rectangle || row == endRow ? endColExclusive : screen.Columns;
                 if (colEndExclusive <= 0 || colStart >= screen.Columns)
@@ -325,14 +346,12 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
         StringBuilder sb = new();
         lock (screen.SyncRoot)
         {
-            int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
             int previousRow = int.MinValue;
             int previousEndColumn = -1;
             for (int i = 0; i < spans.Length; i++)
             {
                 TerminalHighlightSpan span = spans[i];
-                int absoluteRow = viewportTopAbsoluteRow + span.Row;
-                if (absoluteRow < 0 || absoluteRow >= screen.TotalRows)
+                if (!TryGetSelectionRow(screen, span.Row, out TerminalRow termRow))
                 {
                     continue;
                 }
@@ -348,7 +367,6 @@ public sealed class DefaultTerminalSelectionService : ITerminalSelectionService
 
                 previousRow = span.Row;
                 previousEndColumn = span.EndColumn;
-                TerminalRow termRow = screen.GetRow(absoluteRow);
                 int colStart = Math.Clamp(span.StartColumn, 0, screen.Columns);
                 int colEndInclusive = Math.Clamp(span.EndColumn, -1, Math.Max(0, screen.Columns - 1));
                 if (colStart > colEndInclusive)

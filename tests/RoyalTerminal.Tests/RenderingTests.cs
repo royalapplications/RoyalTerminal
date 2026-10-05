@@ -186,11 +186,18 @@ public class RenderingTests
     }
 
     [Fact]
-    public void TerminalFontResolver_BaseFontMissingGlyph_ResolvesConsistentlyWithSkiaMatchCharacter()
+    public void TerminalFontResolver_NonCharacter_UsesCoveredReplacementInsteadOfLastResort()
     {
         const int nonCharacterCodepoint = 0x10FFFE;
         Assert.True(Rune.IsValid(nonCharacterCodepoint));
-        VerifyResolverMatchesSkiaForCodepoint(nonCharacterCodepoint, CultureInfo.InvariantCulture);
+        using var resolver = new TerminalFontResolver();
+        using var primary = FindTypefaceMissingGlyph(nonCharacterCodepoint);
+        TerminalFontResolution resolution = resolver.ResolveTypeface(primary, nonCharacterCodepoint, CultureInfo.InvariantCulture);
+
+        Assert.Equal(0xFFFD, resolution.ReplacementCodepoint);
+        Assert.True(resolution.Typeface.ContainsGlyph(0xFFFD));
+        Assert.False(TerminalFontCoverage.IsLastResort(resolution.Typeface));
+        Assert.Equal(primary.Handle != resolution.Typeface.Handle, resolution.UsedFallback);
     }
 
     [Fact]
@@ -213,24 +220,55 @@ public class RenderingTests
             regionalIndicatorCodepoint,
             CultureInfo.InvariantCulture);
 
+        if (baseTypeface.ContainsGlyph(regionalIndicatorCodepoint))
+        {
+            Assert.Same(baseTypeface, resolution.Typeface);
+            Assert.False(resolution.UsedFallback);
+            Assert.Equal(0, resolution.ReplacementCodepoint);
+            return;
+        }
+
         using var expectedEmojiTypeface = manager.MatchCharacter(
             null,
             baseTypeface.FontStyle,
             ["und-Zsye"],
             regionalIndicatorCodepoint);
 
-        if (expectedEmojiTypeface is not null && expectedEmojiTypeface.Handle != baseTypeface.Handle)
+        // Ghostty's CodepointResolver validates presentation after discovery.
+        // The language hint alone does not guarantee color glyph coverage:
+        // Windows can return a monochrome regional indicator from an emoji font.
+        using TerminalGlyphPresentation? expectedPresentation = expectedEmojiTypeface is null
+            ? null
+            : new(expectedEmojiTypeface);
+        if (expectedEmojiTypeface is not null &&
+            expectedEmojiTypeface.Handle != baseTypeface.Handle &&
+            !TerminalFontCoverage.IsLastResort(expectedEmojiTypeface) &&
+            expectedPresentation!.IsColorGlyph(expectedEmojiTypeface.GetGlyph(regionalIndicatorCodepoint)))
         {
             Assert.True(resolution.UsedFallback);
-            Assert.True(resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint));
-            Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
+            Assert.Equal(0, resolution.ReplacementCodepoint);
+        }
+
+        Assert.Equal(baseTypeface.Handle != resolution.Typeface.Handle, resolution.UsedFallback);
+        Assert.False(TerminalFontCoverage.IsLastResort(resolution.Typeface));
+        if (resolution.ReplacementCodepoint != 0)
+        {
+            // UsedFallback describes font ownership, not source coverage:
+            // U+FFFD can itself require another font (as on Windows CI).
+            Assert.Contains(resolution.ReplacementCodepoint, new[] { 0xFFFD, (int)' ' });
+            Assert.True(resolution.Typeface.ContainsGlyph(resolution.ReplacementCodepoint));
+            if (baseTypeface.ContainsGlyph(0xFFFD))
+            {
+                Assert.Equal(0xFFFD, resolution.ReplacementCodepoint);
+                Assert.Same(baseTypeface, resolution.Typeface);
+            }
             return;
         }
 
-        Assert.True(
-            resolution.Typeface.Handle == baseTypeface.Handle ||
-            resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint),
-            "Resolution should keep base typeface or return a typeface containing the regional indicator glyph.");
+        Assert.True(resolution.UsedFallback);
+        Assert.True(resolution.Typeface.ContainsGlyph(regionalIndicatorCodepoint));
+        using TerminalGlyphPresentation presentation = new(resolution.Typeface);
+        Assert.True(presentation.IsColorGlyph(resolution.Typeface.GetGlyph(regionalIndicatorCodepoint)));
     }
 
     [Fact]
@@ -3164,22 +3202,39 @@ public class RenderingTests
         using var manager = SKFontManager.CreateDefault();
 
         TerminalFontResolution resolution = resolver.ResolveTypeface(baseTypeface, codepoint, culture);
+        bool preferEmoji = new RoyalTerminal.Unicode.Codepoint((uint)codepoint).IsEmojiPresentation;
         using var expected = manager.MatchCharacter(
-            baseTypeface.FamilyName,
+            preferEmoji ? null : baseTypeface.FamilyName,
             baseTypeface.FontStyle,
-            [culture.Name],
+            preferEmoji ? ["und-Zsye"] : [culture.Name],
             codepoint);
 
-        if (expected is null)
+        // Discovery is only a candidate: Ghostty rejects LastResort range
+        // placeholders and wrong-presentation glyphs before replacing a cell.
+        using TerminalGlyphPresentation? expectedPresentation = expected is null ? null : new(expected);
+        bool hasExpectedGlyph = expected is not null && !TerminalFontCoverage.IsLastResort(expected) &&
+            expected.ContainsGlyph(codepoint) &&
+            expectedPresentation!.IsColorGlyph(expected.GetGlyph(codepoint)) == preferEmoji;
+        if (hasExpectedGlyph) Assert.Equal(0, resolution.ReplacementCodepoint);
+
+        Assert.False(TerminalFontCoverage.IsLastResort(resolution.Typeface));
+        Assert.Equal(baseTypeface.Handle != resolution.Typeface.Handle, resolution.UsedFallback);
+        if (resolution.ReplacementCodepoint != 0)
         {
-            Assert.Same(baseTypeface, resolution.Typeface);
-            Assert.False(resolution.UsedFallback);
+            Assert.Contains(resolution.ReplacementCodepoint, new[] { 0xFFFD, (int)' ' });
+            Assert.True(resolution.Typeface.ContainsGlyph(resolution.ReplacementCodepoint));
+            if (baseTypeface.ContainsGlyph(0xFFFD))
+            {
+                Assert.Equal(0xFFFD, resolution.ReplacementCodepoint);
+                Assert.Same(baseTypeface, resolution.Typeface);
+            }
         }
         else
         {
             Assert.True(resolution.UsedFallback);
             Assert.True(resolution.Typeface.ContainsGlyph(codepoint));
-            Assert.NotEqual(baseTypeface.Handle, resolution.Typeface.Handle);
+            using TerminalGlyphPresentation presentation = new(resolution.Typeface);
+            Assert.Equal(preferEmoji, presentation.IsColorGlyph(resolution.Typeface.GetGlyph(codepoint)));
         }
     }
 

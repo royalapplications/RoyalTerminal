@@ -11,12 +11,16 @@ internal static class UnicodeData
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static GraphemeBreakClass GetGraphemeClusterBreak(uint codepoint)
     {
-        return (GraphemeBreakClass)GraphemeBreakTrie.Trie.Get(codepoint);
+        return (GraphemeBreakClass)(Unicode18Data.Get(codepoint) & 31);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static EastAsianWidthClass GetEastAsianWidthClass(uint codepoint)
     {
-        return (EastAsianWidthClass)EastAsianWidthTrie.Trie.Get(codepoint);
+        return (EastAsianWidthClass)((Unicode18Data.Get(codepoint) >> 5) & 7);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static IndicConjunctBreakClass GetIndicConjunctBreak(uint codepoint)
+        => (IndicConjunctBreakClass)((Unicode18Data.Get(codepoint) >> 8) & 3);
 }

@@ -108,6 +108,9 @@ public enum TerminalInputAction
 
     /// <summary>Key/button released.</summary>
     Release = 1,
+
+    /// <summary>Keyboard auto-repeat (not a pointer-button action).</summary>
+    Repeat = 2,
 }
 
 /// <summary>
@@ -163,6 +166,12 @@ public enum TerminalModifiers
 
     /// <summary>Meta/Super key modifier.</summary>
     Meta = 1 << 3,
+
+    /// <summary>Caps Lock is active.</summary>
+    CapsLock = 1 << 4,
+
+    /// <summary>Num Lock is active.</summary>
+    NumLock = 1 << 5,
 }
 
 /// <summary>

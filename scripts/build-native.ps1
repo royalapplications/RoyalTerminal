@@ -286,7 +286,8 @@ $env:ZIG_GLOBAL_CACHE_DIR = $ZigGlobalCacheDir
 New-Item -ItemType Directory -Force -Path $ZigGlobalCacheDir | Out-Null
 Write-Info "Zig global cache: $ZigGlobalCacheDir"
 
-Push-Location $GhosttyDir
+$ghosttyBuildDir = Join-Path $RootDir "native\ghostty-vt-extensions"
+Push-Location $ghosttyBuildDir
 
 try {
     # Clean if requested
@@ -303,9 +304,9 @@ try {
     Write-Info "Building ghostty-vt shared library..."
     $cpuLog = if ($ZigCpu) { " -Dcpu=$ZigCpu" } else { "" }
     $simdLog = if (-not $GhosttySimd) { " -Dsimd=false" } else { "" }
-    Write-Info "Command: zig build $optimize -Dapp-runtime=none -Demit-lib-vt=true -Dtarget=$ZigTarget$cpuLog$simdLog"
+    Write-Info "Command: zig build $optimize -Dtarget=$ZigTarget$cpuLog$simdLog"
 
-    $buildArgs = @("build", "-Dapp-runtime=none", "-Demit-lib-vt=true", "-Dtarget=$ZigTarget")
+    $buildArgs = @("build", "-Dtarget=$ZigTarget")
     if ($ZigCpu) { $buildArgs += "-Dcpu=$ZigCpu" }
     if (-not $GhosttySimd) { $buildArgs += "-Dsimd=false" }
     if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }
@@ -358,6 +359,8 @@ try {
         }
 
         Copy-Item $vtHeadersSrc $ghosttyHeaderDest -Recurse
+        Copy-Item (Join-Path $GhosttyDir "include\ghostty\vt.h") $ghosttyHeaderDest
+        Copy-Item (Join-Path $ghosttyBuildDir "include\royalterminal_ghostty_vt.h") $headerDest
         Write-Info "Copied official VT headers: $vtHeaderDest"
     }
 

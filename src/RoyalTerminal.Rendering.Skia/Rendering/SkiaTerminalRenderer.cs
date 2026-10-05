@@ -27,7 +27,7 @@ namespace RoyalTerminal.Avalonia.Rendering;
 /// - Cursor rendering with configurable styles
 /// - Selection highlighting
 /// </summary>
-public sealed class SkiaTerminalRenderer : IDisposable
+public sealed partial class SkiaTerminalRenderer : IDisposable
 {
     /// <summary>Default selection highlight color.</summary>
     public static SKColor DefaultSelectionColor { get; } = new(0x40, 0x60, 0xA0, 0x80);
@@ -59,6 +59,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private readonly GlyphCache _glyphCache;
     private readonly HarfBuzzTextShaper _textShaper;
     private readonly TerminalFontResolver _fontResolver;
+    private readonly TerminalDisplayCellBuffer _displayCells = new();
+    private readonly TerminalDisplayCellBuffer _preeditDisplayCells = new();
     private readonly ShapedRunCache _shapedRunCache;
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
     private readonly PretextRunCache _pretextRunCache;
@@ -113,7 +115,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private TerminalHighlightSpan[] _selectionSpans = Array.Empty<TerminalHighlightSpan>();
     private TerminalTextHighlightRule[] _textHighlightRules = Array.Empty<TerminalTextHighlightRule>();
     private CompiledTextHighlightRule[] _compiledTextHighlightRules = Array.Empty<CompiledTextHighlightRule>();
-    private readonly Dictionary<TerminalRow, TextHighlightRowCacheEntry> _textHighlightRowCache = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<TerminalRenderRowId, TextHighlightRowCacheEntry> _textHighlightRowCache = new();
+    internal int TextHighlightRowCacheEntryCount => _textHighlightRowCache.Count;
     private char[] _textHighlightRowText = Array.Empty<char>();
     private int[] _textHighlightColumnMap = Array.Empty<int>();
     private int _textHighlightRuleRevision;
@@ -391,10 +394,47 @@ public sealed class SkiaTerminalRenderer : IDisposable
         TerminalFontSource fontSource = TerminalFontSource.System,
         string? fontFilePath = null,
         TerminalFontRenderingSettings? fontRenderingSettings = null)
+        : this(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a renderer with ordered configured faces for each terminal style.
+    /// Faces are borrowed and must outlive the renderer and its coverage source.
+    /// Cell metrics come from the first regular face.
+    /// </summary>
+    public static SkiaTerminalRenderer CreateWithTypefaces(TerminalTypefaceCollection typefaces,
+        float fontSize = 14f, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(typefaces);
+        return new(string.Empty, fontSize, TerminalFontSource.System, null, fontRenderingSettings, typefaces, null);
+    }
+
+    /// <summary>
+    /// Creates a renderer owning the configured per-style families. Empty or
+    /// unavailable regular lists retain the supplied legacy family/file selection.
+    /// Coverage owns independent resources and follows the same family order.
+    /// </summary>
+    public static SkiaTerminalRenderer CreateWithFontFamilies(TerminalFontFamilySettings families,
+        string fontFamily = "Consolas", float fontSize = 14f, TerminalFontSource fontSource = TerminalFontSource.System,
+        string? fontFilePath = null, TerminalFontRenderingSettings? fontRenderingSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(families);
+        return new(fontFamily, fontSize, fontSource, fontFilePath, fontRenderingSettings, null, families.Normalize());
+    }
+
+    private SkiaTerminalRenderer(string fontFamily, float fontSize, TerminalFontSource fontSource,
+        string? fontFilePath, TerminalFontRenderingSettings? fontRenderingSettings, TerminalTypefaceCollection? typefaces,
+        TerminalFontFamilySettings? families)
     {
         _fontSize = fontSize;
+        _glyphCoverageSource = typefaces is not null ? SkiaTerminalGlyphCoverageSource.CreateWithTypefaces(typefaces)
+            : families is not null ? SkiaTerminalGlyphCoverageSource.CreateWithFontFamilies(families, fontFamily, fontSource, fontFilePath)
+            : new(fontFamily, fontSource, fontFilePath);
         _fontRenderingSettings = NormalizeFontRenderingSettings(fontRenderingSettings);
-        _glyphCache = new GlyphCache(
+        _glyphCache = typefaces is not null ? GlyphCache.CreateWithTypefaces(typefaces, fontRenderingSettings: _fontRenderingSettings)
+            : families is not null ? GlyphCache.CreateWithFontFamilies(families, fontFamily, fontSource, fontFilePath, fontRenderingSettings: _fontRenderingSettings)
+            : new GlyphCache(
             fontFamily,
             fontSource,
             fontFilePath,
@@ -425,6 +465,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
             Style = SKPaintStyle.Fill,
         };
         _spritePath = new SKPath();
+    }
+
+    // Test composition seam: the renderer owns the supplied resolver, just as
+    // it owns the default one. No process-wide font installation is needed.
+    internal SkiaTerminalRenderer(TerminalFontResolver fontResolver, string fontFilePath, float fontSize = 14f)
+        : this(fontSize: fontSize, fontSource: TerminalFontSource.File, fontFilePath: fontFilePath)
+    {
+        _fontResolver.Dispose();
+        _fontResolver = fontResolver;
+    }
+
+    internal SkiaTerminalRenderer(TerminalFontResolver fontResolver, TerminalTypefaceCollection typefaces, float fontSize = 14f)
+        : this(string.Empty, fontSize, TerminalFontSource.System, null, null, typefaces, null)
+    {
+        _fontResolver.Dispose();
+        _fontResolver = fontResolver;
     }
 
     /// <summary>
@@ -479,6 +535,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private void ClearTextRenderCaches()
     {
+        _thickenedGlyphs.Clear();
         _shapedRunCache.Clear();
         _singleGlyphIdCache.Clear();
         _cellTextBlobCache.Clear();
@@ -627,26 +684,69 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     /// <summary>
     /// Renders the terminal screen to the given SKCanvas.
-    /// Only re-renders rows marked as dirty unless forceFullRedraw is true.
+    /// Re-renders dirty rows, including changed image bounds, unless forceFullRedraw
+    /// is true. Retained-canvas callers must call <see cref="PrepareImageDamage"/>
+    /// before clearing dirty rows; rendering itself does not clear the canvas.
     /// </summary>
     public void Render(SKCanvas canvas, TerminalScreen screen, bool forceFullRedraw = false)
+        => Render(canvas, screen, default, forceFullRedraw);
+
+    /// <summary>
+    /// Renders available overscan rows at signed viewport positions as well as
+    /// visible rows. The caller owns clipping/translation and must keep the screen
+    /// stable. Cell rows, image clipping, and Kitty placeholder projection use
+    /// the same captured range; cursor/preedit remain viewport-based. Zero
+    /// overscan preserves the ordinary rendering path.
+    /// </summary>
+    /// <param name="canvas">Destination canvas.</param>
+    /// <param name="screen">Screen whose rows and resources are rendered.</param>
+    /// <param name="overscan">Requested extra rows, limited to accessible screen history.</param>
+    /// <param name="forceFullRedraw">Whether to render clean rows too.</param>
+    public void Render(SKCanvas canvas, TerminalScreen screen, TerminalRenderOverscan overscan, bool forceFullRedraw = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(screen);
 
-        canvas.Save();
+        overscan = GetImageRenderOverscan(screen, overscan);
+        PrepareImageDamage(screen, overscan);
+        int saveCount = canvas.Save();
+        try
+        {
+            RenderPreparedFrame(canvas, screen, overscan, forceFullRedraw);
+        }
+        catch
+        {
+            // No damage baseline is committed on failure. Text rows may already
+            // have been acknowledged before an image upload failed; retry them.
+            TerminalRenderViewport rows = screen.GetRenderViewport(overscan);
+            for (int index = 0; index < rows.Count; index++) rows[index].Row.IsDirty = true;
+            throw;
+        }
+        finally { canvas.RestoreToCount(saveCount); }
+    }
+
+    private void RenderPreparedFrame(SKCanvas canvas, TerminalScreen screen, TerminalRenderOverscan overscan, bool forceFullRedraw)
+    {
+        double scrollFraction = screen.RenderScrollFraction;
+        TerminalRenderViewport renderRows = screen.GetRenderViewport(overscan);
+        PrepareRegisteredGlyphCache(screen);
+        if (scrollFraction != 0) canvas.Translate(0, -(float)(scrollFraction * _cellHeight));
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
         ReadOnlySpan<CompiledTextHighlightRule> textHighlightRules = _compiledTextHighlightRules;
         TerminalTextHighlightingMode textHighlightingMode = _textHighlightingMode;
         bool textHighlightingEnabled = textHighlightingMode != TerminalTextHighlightingMode.Disabled &&
             !textHighlightRules.IsEmpty;
-        ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements();
+        ReadOnlySpan<TerminalKittyImagePlacement> kittyPlacements = screen.GetKittyPlacements(overscan);
         ReadOnlySpan<TerminalRasterImagePlacement> rasterPlacements = screen.GetRasterImagePlacements();
+        SKRect imageClip = GetImageRenderClip(screen, renderRows.CapturedOverscan);
+        BuildImageDamageClip(renderRows, imageClip, forceFullRedraw);
         long imageFrameId = unchecked(++_imageRenderFrameId);
+        foreach (ImageDamageItem item in _nextKittyDamage) TouchVisibleBitmap(_kittyBitmapCache, item.Pixels, imageFrameId);
+        foreach (ImageDamageItem item in _nextRasterDamage) TouchVisibleBitmap(_rasterBitmapCache, item.Pixels, imageFrameId);
         int overlayCapacity = Math.Max(1, screen.Columns);
         bool useFullRowBuffers = TryGetPooledRowBufferCellCount(
-            screen.ViewportRows,
+            renderRows.Count,
             overlayCapacity,
             out int rowBufferCellCount);
         CellOverlayFlags[] overlayBuffer = ArrayPool<CellOverlayFlags>.Shared.Rent(rowBufferCellCount);
@@ -656,19 +756,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         try
         {
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId);
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowBackground, imageFrameId, imageClip);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowBackground, imageFrameId, imageClip);
 
             // Render backgrounds first (batched)
-            for (var row = 0; row < screen.ViewportRows; row++)
+            for (int index = 0; index < renderRows.Count; index++)
             {
-                var terminalRow = screen.GetViewportRow(row);
+                TerminalRenderRow renderRow = renderRows[index];
+                int row = renderRow.ViewportY;
+                TerminalRow terminalRow = renderRow.Row;
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
                 Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
                     overlayBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 rowOverlays.Clear();
@@ -680,7 +782,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     rowOverlays);
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
                     textHighlightBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 rowTextHighlights.Clear();
@@ -694,19 +796,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 RenderRowBackground(canvas, terminalRow, y, rowOverlays, rowTextHighlights);
             }
 
-            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId);
-            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId);
+            RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.BelowText, imageFrameId, imageClip);
+            RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.BelowText, imageFrameId, imageClip);
 
             // Render text on top of the cell layer.
-            for (var row = 0; row < screen.ViewportRows; row++)
+            for (int index = 0; index < renderRows.Count; index++)
             {
-                var terminalRow = screen.GetViewportRow(row);
+                TerminalRenderRow renderRow = renderRows[index];
+                int row = renderRow.ViewportY;
+                TerminalRow terminalRow = renderRow.Row;
                 if (!forceFullRedraw && !terminalRow.IsDirty) continue;
 
                 var y = row * _cellHeight;
                 Span<CellOverlayFlags> rowOverlays = GetRowOverlayFlags(
                     overlayBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 if (!useFullRowBuffers)
@@ -722,7 +826,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
                     textHighlightBuffer,
-                    useFullRowBuffers ? row : 0,
+                    useFullRowBuffers ? index : 0,
                     terminalRow.Columns,
                     overlayCapacity);
                 if (!useFullRowBuffers)
@@ -736,7 +840,22 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         rowTextHighlights);
                 }
 
-                RenderRowText(canvas, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                if ((uint)row < (uint)screen.ViewportRows &&
+                    TryGetPreeditRange(screen.Columns, row, out var preeditRange))
+                {
+                    // Preserve cell backgrounds/images, but replace text in the
+                    // composing range without changing terminal or snapshot state.
+                    canvas.Save();
+                    canvas.ClipRect(new SKRect(preeditRange.Start * _cellWidth, y,
+                        (preeditRange.End + 1) * _cellWidth, y + _cellHeight), SKClipOperation.Difference);
+                    RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
+                    canvas.Restore();
+                    canvas.Save();
+                    canvas.ClipRect(new SKRect(0, y, screen.Columns * _cellWidth, y + _cellHeight));
+                    RenderPreedit(canvas, screen.DefaultForeground, y, preeditRange);
+                    canvas.Restore();
+                }
+                else RenderRowText(canvas, screen, terminalRow, y, row, rowOverlays, rowTextHighlights);
                 terminalRow.IsDirty = false;
             }
         }
@@ -753,16 +872,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
         }
 
-        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId);
-        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId);
+        RenderKittyLayer(canvas, screen, kittyPlacements, TerminalKittyImageLayer.AboveText, imageFrameId, imageClip);
+        RenderRasterLayer(canvas, screen, rasterPlacements, TerminalRasterImageLayer.AboveText, imageFrameId, imageClip);
         TrimBitmapCache(_kittyBitmapCache, ref _kittyBitmapCacheBytes, imageFrameId);
         TrimBitmapCache(_rasterBitmapCache, ref _rasterBitmapCacheBytes, imageFrameId);
 
         // Render cursor
-        if (CursorVisible)
+        if (CursorVisible && Preedit is not { Count: > 0 })
             RenderCursor(canvas, screen);
 
-        canvas.Restore();
+        CommitImageDamage(screen, imageClip);
     }
 
     /// <summary>
@@ -829,6 +948,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private void RenderRowText(
         SKCanvas canvas,
+        TerminalScreen screen,
         TerminalRow row,
         float y,
         int rowIndex,
@@ -841,19 +961,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
             return;
         }
 
-        bool splitRunsAroundCursor = CursorVisible && rowIndex == CursorRow;
+        bool splitRunsAroundCursor = CursorVisible && (uint)rowIndex < (uint)screen.ViewportRows && rowIndex == CursorRow;
         int cursorSplitColumn = CursorColumn;
+        bool usePretextPipeline = CanUsePretextTextPipeline();
 #if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-        bool usePretextPipeline = EnableTextShaping &&
-            !_enableLigatures &&
-            _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
-            PretextPipelineInitializer.TryEnsureInitialized();
         if (usePretextPipeline &&
             !_enableLigatures &&
             _textDirectionMode != TextDirectionMode.RightToLeft &&
             Math.Abs(_cellWidth - _measuredCellWidth) < CellMetricEpsilon &&
             TryDrawSimpleTextRowBatch(
                 canvas,
+                screen,
                 cells,
                 rowOverlays,
                 rowTextHighlights,
@@ -868,6 +986,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         if (CanUseSimpleHarfBuzzTextRowBatch() &&
             TryDrawSimpleTextRowBatch(
                 canvas,
+                screen,
                 cells,
                 rowOverlays,
                 rowTextHighlights,
@@ -886,6 +1005,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
             if (!IsRenderableGlyphCell(in firstCell))
             {
                 col++;
+                continue;
+            }
+
+            if (TryGetRegisteredGlyph(screen, in firstCell, out var registeredGlyph))
+            {
+                SKColor color = ResolveForegroundColorForCell(in firstCell, rowOverlays[col], GetTextHighlightOverride(rowTextHighlights, col));
+                DrawRegisteredGlyph(canvas, (uint)GetCellPrimaryCodepoint(in firstCell), registeredGlyph, col, y, firstCell.Width, color);
+                DrawRunDecorations(canvas, cells, rowOverlays, col, Math.Min(cells.Length, col + firstCell.Width), y, color);
+                col += Math.Max(1, (int)firstCell.Width);
                 continue;
             }
 
@@ -909,7 +1037,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                         break;
                     }
 
-                    if (!TryGetSpriteCodepoint(in spriteCandidate, out _))
+                    if (TryGetRegisteredGlyph(screen, in spriteCandidate, out _) ||
+                        !TryGetSpriteCodepoint(in spriteCandidate, out _))
                     {
                         break;
                     }
@@ -941,14 +1070,16 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             bool bold = (firstCell.Attributes & CellAttributes.Bold) != 0;
             bool italic = (firstCell.Attributes & CellAttributes.Italic) != 0;
-            SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
             SKColor runColor = ResolveForegroundColorForCell(
                 in firstCell,
                 rowOverlays[col],
                 GetTextHighlightOverride(rowTextHighlights, col));
-            SKTypeface runTypeface = ResolveTypefaceForCell(primaryTypeface, in firstCell);
-            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in firstCell) &&
-                !(_enableLigatures && IsProgrammingLigatureCharCell(in firstCell));
+            TerminalFontResolution firstFont = ResolveFontForCell(in firstCell);
+            RenderFont runTypeface = new(firstFont);
+            _displayCells.Clear();
+            _displayCells.Add(in firstCell, firstFont);
+            bool firstIsSymbolGlyph = IsSymbolGlyphClipCandidate(in _displayCells.Cells[0]) &&
+                !(_enableLigatures && IsProgrammingLigatureCharCell(in _displayCells.Cells[0]));
 
             int runEnd = col + 1;
             while (runEnd < cells.Length)
@@ -965,6 +1096,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 ref readonly TerminalCell nextCell = ref cells[runEnd];
+                if (TryGetRegisteredGlyph(screen, in nextCell, out _)) break;
                 if (!IsRenderableGlyphCell(in nextCell))
                 {
                     break;
@@ -975,14 +1107,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                if (IsSymbolGlyphClipCandidate(in nextCell) &&
-                    !(_enableLigatures && IsProgrammingLigatureCharCell(in nextCell)))
+                TerminalFontResolution nextFont = ResolveFontForCell(in nextCell);
+                TerminalCell nextDisplay = _displayCells.Project(in nextCell, nextFont);
+                if (IsSymbolGlyphClipCandidate(in nextDisplay) &&
+                    !(_enableLigatures && IsProgrammingLigatureCharCell(in nextDisplay)))
                 {
                     break;
                 }
 
                 bool preserveLigatureCandidate = _enableLigatures &&
-                    WouldSplitProgrammingLigatureCandidate(cells, runEnd);
+                    IsProgrammingLigatureCharCell(in _displayCells.Cells[^1]) &&
+                    IsProgrammingLigatureCharCell(in nextDisplay);
 
                 bool nextBold = (nextCell.Attributes & CellAttributes.Bold) != 0;
                 bool nextItalic = (nextCell.Attributes & CellAttributes.Italic) != 0;
@@ -1000,41 +1135,23 @@ public sealed class SkiaTerminalRenderer : IDisposable
                     break;
                 }
 
-                SKTypeface nextTypeface = ResolveTypefaceForCell(primaryTypeface, in nextCell);
-
-                if (nextTypeface.Handle != runTypeface.Handle && !preserveLigatureCandidate)
+                // Even programming ligatures cannot cross a resolved font
+                // boundary: a replacement glyph may use a different face.
+                if (!runTypeface.Matches(new(nextFont)))
                 {
                     break;
                 }
 
+                _displayCells.AddProjected(in nextDisplay, nextFont);
                 runEnd++;
             }
 
-            if (EnableTextShaping)
+            try
             {
-#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
-                if (!usePretextPipeline ||
-                    !TryDrawPretextTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y))
-                {
-                    DrawShapedTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y);
-                }
-#else
-                DrawShapedTextRun(canvas, cells, col, runEnd, runTypeface, runColor, y);
-#endif
+                DrawDisplayTextRun(canvas, _displayCells.Cells, col, runTypeface, runColor, y,
+                    usePretextPipeline);
             }
-            else
-            {
-                float runWidth = ComputeRunWidth(cells, col, runEnd);
-                DrawCellAnchoredFallbackRun(
-                    canvas,
-                    cells,
-                    col,
-                    runEnd,
-                    runTypeface,
-                    runColor,
-                    y,
-                    runWidth);
-            }
+            finally { _displayCells.Clear(); }
 
             DrawRunDecorations(
                 canvas,
@@ -2587,12 +2704,21 @@ public sealed class SkiaTerminalRenderer : IDisposable
         DrawCellPixelRect(canvas, x, y, 0, lineTop, cellWidthPx, lineTop + thickness, _spritePaint);
     }
 
-    private static bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
+    private bool TryGetSpriteCodepoint(ref readonly TerminalCell cell, out int codepoint)
     {
         return TryGetSpriteCodepoint(in cell, out codepoint, out _);
     }
 
-    private static bool TryGetSpriteCodepoint(
+    private bool TryGetSpriteCodepoint(
+        ref readonly TerminalCell cell,
+        out int codepoint,
+        out SpriteCategory category)
+    {
+        if (!TryGetBuiltinSpriteCodepoint(in cell, out codepoint, out category)) return false;
+        return !_fontResolver.TryGetCodepointOverride(_glyphCache.TypefaceCollection, codepoint, out _);
+    }
+
+    private static bool TryGetBuiltinSpriteCodepoint(
         ref readonly TerminalCell cell,
         out int codepoint,
         out SpriteCategory category)
@@ -3038,12 +3164,23 @@ public sealed class SkiaTerminalRenderer : IDisposable
                IsProgrammingLigatureChar((char)cell.Codepoint);
     }
 
+    private bool CanUsePretextTextPipeline()
+    {
+#if ROYALTERMINAL_PRETEXT_TEXT_PIPELINE
+        return EnableTextShaping && !_enableLigatures &&
+            _textRenderPipeline == TerminalTextRenderPipeline.Pretext &&
+            PretextPipelineInitializer.TryEnsureInitialized();
+#else
+        return false;
+#endif
+    }
+
     private bool TryDrawPretextTextRun(
         SKCanvas canvas,
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
@@ -3132,6 +3269,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private bool TryDrawSimpleTextRowBatch(
         SKCanvas canvas,
+        TerminalScreen screen,
         ReadOnlySpan<TerminalCell> cells,
         ReadOnlySpan<CellOverlayFlags> rowOverlays,
         ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights,
@@ -3165,6 +3303,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             ref readonly TerminalCell cell = ref cells[col];
+            if (TryGetRegisteredGlyph(screen, in cell, out _)) return false;
             if (!cell.HasContent || cell.Width == 0 || IsCellHidden(in cell))
             {
                 continue;
@@ -3179,15 +3318,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 return false;
             }
 
-            bool bold = (cell.Attributes & CellAttributes.Bold) != 0;
-            bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
-            SKTypeface primaryTypeface = _glyphCache.GetTypeface(bold, italic);
-            SKTypeface typeface = ResolveTypefaceForCell(primaryTypeface, in cell);
+            TerminalFontResolution resolution = ResolveFontForCell(in cell);
+            if (resolution.ReplacementCodepoint != 0) return false;
+            RenderFont typeface = new(resolution);
             if (!_singleGlyphIdCache.TryGetOrCreate(
                 new SingleGlyphIdCacheKey(
                     cell.Codepoint,
                     typeface.Handle),
-                typeface,
+                typeface.Typeface,
                 out ushort glyphId))
             {
                 return false;
@@ -3198,7 +3336,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 _simpleTextRowBatchGroups,
                 groupCount,
                 color,
-                typeface.Handle);
+                typeface);
 
             if (groupIndex < 0)
             {
@@ -3211,7 +3349,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 _simpleTextRowBatchGroups[groupIndex] = new SimpleTextRowBatchGroup
                 {
                     Color = color,
-                    TypefaceHandle = typeface.Handle,
                     Typeface = typeface,
                 };
             }
@@ -3260,6 +3397,15 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             SKFont font = _textRowFontCache.GetOrCreate(group.Typeface, _fontSize, _fontRenderingSettings);
+            _fgPaint.Color = group.Color;
+            int thickenedGroupOffset = _simpleTextRowGroupOffsets[groupIndex];
+            if (TryDrawThickenedGlyphs(canvas, group.Typeface,
+                _simpleTextRowBatchGlyphIds.AsSpan(thickenedGroupOffset, count),
+                _simpleTextRowGlyphPositions.AsSpan(thickenedGroupOffset, count), 0, baselineY))
+            {
+                if (recordPretextRuns) RecordPretextRun();
+                continue;
+            }
             using SKTextBlobBuilder builder = new();
             int groupOffset = _simpleTextRowGroupOffsets[groupIndex];
             builder.AddPositionedRun(
@@ -3311,12 +3457,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<SimpleTextRowBatchGroup> groups,
         int groupCount,
         SKColor color,
-        nint typefaceHandle)
+        RenderFont typeface)
     {
         for (int i = 0; i < groupCount; i++)
         {
             if (groups[i].Color == color &&
-                groups[i].TypefaceHandle == typefaceHandle)
+                groups[i].Typeface.Matches(typeface))
             {
                 return i;
             }
@@ -3334,7 +3480,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             cell.Codepoint <= 0 ||
             cell.Codepoint > char.MaxValue ||
             char.IsSurrogate((char)cell.Codepoint) ||
-            TryGetSpriteCodepoint(in cell, out _))
+            TryGetBuiltinSpriteCodepoint(in cell, out _, out _))
         {
             return false;
         }
@@ -3363,7 +3509,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private CachedPretextRun GetOrCreateCachedPretextRun(
         ReadOnlySpan<char> runText,
         ulong textHash,
-        SKTypeface runTypeface)
+        RenderFont runTypeface)
     {
         PretextRunCacheKey cacheKey = new(
             textHash,
@@ -3371,7 +3517,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             runTypeface.Handle,
             BitConverter.SingleToInt32Bits(_fontSize),
             _textDirectionMode,
-            _enableLigatures);
+            _enableLigatures, runTypeface.Synthesis);
 
         if (_pretextRunCache.TryGet(cacheKey, runText, out CachedPretextRun cachedRun))
         {
@@ -3401,7 +3547,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
@@ -3544,19 +3690,19 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return cell.Width == 1 &&
                cell.Codepoint is >= char.MinValue and <= char.MaxValue &&
                string.IsNullOrEmpty(cell.Grapheme) &&
-               !TryGetSpriteCodepoint(in cell, out _) &&
+               !TryGetBuiltinSpriteCodepoint(in cell, out _, out _) &&
                !IsSymbolGlyphClipCandidate(in cell);
     }
 
-    private string CreatePretextFontDescriptor(SKTypeface typeface)
+    private string CreatePretextFontDescriptor(RenderFont typeface)
     {
-        SKFontStyle fontStyle = typeface.FontStyle;
+        SKFontStyle fontStyle = typeface.Typeface.FontStyle;
         string slant = fontStyle.Slant is SKFontStyleSlant.Italic or SKFontStyleSlant.Oblique
             ? "italic "
             : string.Empty;
-        string familyName = string.IsNullOrWhiteSpace(typeface.FamilyName)
+        string familyName = string.IsNullOrWhiteSpace(typeface.Typeface.FamilyName)
             ? "monospace"
-            : typeface.FamilyName.Replace("\"", string.Empty, StringComparison.Ordinal);
+            : typeface.Typeface.FamilyName.Replace("\"", string.Empty, StringComparison.Ordinal);
 
         return string.Create(
             s_renderCulture,
@@ -3595,7 +3741,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void DrawCachedPretextRun(
         SKCanvas canvas,
         CachedPretextRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -3613,6 +3759,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         bool needsClip = clipPadding > 0f;
         bool needsTransform = xScale != 1f;
+        if (TryDrawThickenedPretextRun(canvas, run, typeface, originX, rowY, baselineY, runWidth, xScale)) return;
         if (!needsClip && !needsTransform)
         {
             if (run.NaturalTextBlob is { } directTextBlob)
@@ -3621,7 +3768,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
             else
             {
-                using SKFont directFont = GlyphCache.CreateFont(typeface, _fontSize, _fontRenderingSettings);
+                SKFont directFont = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
                 canvas.DrawText(run.Text, originX, baselineY, directFont, _fgPaint);
             }
 
@@ -3651,7 +3798,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
         else
         {
-            using SKFont font = GlyphCache.CreateFont(typeface, _fontSize, _fontRenderingSettings);
+            SKFont font = _textRowFontCache.GetOrCreate(typeface, _fontSize, _fontRenderingSettings);
             canvas.DrawText(run.Text, originX, baselineY, font, _fgPaint);
         }
 
@@ -3680,17 +3827,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return (float)Math.Max(maxLineWidth, lineWidth);
     }
 
-    private static ushort[] CreatePretextNaturalGlyphIds(SKTypeface typeface, string text)
+    private static ushort[] CreatePretextNaturalGlyphIds(RenderFont typeface, string text)
     {
         if (text.Length <= 0)
         {
             return [];
         }
 
-        return typeface.GetGlyphs(text);
+        return typeface.Typeface.GetGlyphs(text);
     }
 
-    private SKTextBlob? CreatePretextNaturalTextBlob(SKTypeface typeface, ReadOnlySpan<ushort> glyphIds)
+    private SKTextBlob? CreatePretextNaturalTextBlob(RenderFont typeface, ReadOnlySpan<ushort> glyphIds)
     {
         if (glyphIds.Length <= 0)
         {
@@ -3709,12 +3856,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface runTypeface,
+        RenderFont runTypeface,
         SKColor runColor,
         float y)
     {
         int utf16Length = 0;
-        bool singleWidthSingleUtf16Cells = !runTypeface.IsFixedPitch;
+        bool singleWidthSingleUtf16Cells = !runTypeface.Typeface.IsFixedPitch;
         for (int col = startCol; col < endCol; col++)
         {
             ref readonly TerminalCell cell = ref cells[col];
@@ -3804,11 +3951,11 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 BitConverter.SingleToInt32Bits(_cellWidth),
                 BitConverter.SingleToInt32Bits(_cellHeight),
                 _textDirectionMode,
-                _enableLigatures);
+                _enableLigatures, runTypeface.Synthesis);
 
             if (!_shapedRunCache.TryGet(cacheKey, runText, out CachedShapedRun cachedRun))
             {
-                ShapedTextRun shaped = _textShaper.Shape(runText, runTypeface, options);
+                ShapedTextRun shaped = _textShaper.Shape(runText, runTypeface.Typeface, options);
                 if (shaped.GlyphCount <= 0)
                 {
                     DrawCellAnchoredFallbackRun(
@@ -3856,7 +4003,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
             float xScale = 1f;
             GridPlacementMode placement;
-            if (runTypeface.IsFixedPitch && IsWithinGridPlacementTolerance(cachedRun.TotalAdvanceX, runWidth))
+            if (runTypeface.Typeface.IsFixedPitch && IsWithinGridPlacementTolerance(cachedRun.TotalAdvanceX, runWidth))
             {
                 placement = GridPlacementMode.Natural;
             }
@@ -3950,7 +4097,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void DrawCachedShapedRun(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -3969,6 +4116,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         float clipPadding = run.ClipPadding;
         _fgPaint.Color = color;
+
+        if (TryDrawThickenedShapedRun(canvas, run, typeface, originX, rowY, baselineY,
+            runWidth, xScale, clampToRunWidth, textGridOffsets, useClusterGridFit)) return;
 
         if (!useClusterGridFit &&
             !clampToRunWidth &&
@@ -4034,7 +4184,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void DrawClusterGridFittedShapedRun(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float originX,
         float rowY,
@@ -4107,7 +4257,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private void DrawCachedShapedRunPath(
         SKCanvas canvas,
         CachedShapedRun run,
-        SKTypeface typeface,
+        RenderFont typeface,
         float originX,
         float rowY,
         float baselineY,
@@ -4139,7 +4289,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     private SKTextBlob? CreateGridTextBlob(
-        SKTypeface typeface,
+        RenderFont typeface,
         CachedShapedRun run,
         float runWidth,
         float xScale,
@@ -4172,7 +4322,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     private SKPath? CreateShapedRunPath(
-        SKTypeface typeface,
+        RenderFont typeface,
         CachedShapedRun run,
         float runWidth,
         float xScale,
@@ -4255,7 +4405,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     }
 
     private SKTextBlob? CreateNaturalTextBlob(
-        SKTypeface typeface,
+        RenderFont typeface,
         ReadOnlySpan<ushort> glyphIds,
         ReadOnlySpan<float> xOffsets,
         ReadOnlySpan<float> yOffsets)
@@ -4297,7 +4447,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ReadOnlySpan<TerminalCell> cells,
         int startCol,
         int endCol,
-        SKTypeface typeface,
+        RenderFont typeface,
         SKColor color,
         float y,
         float runWidth)
@@ -4326,6 +4476,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 string text = string.IsNullOrEmpty(cell.Grapheme)
                     ? GetCodepointText(cell.Codepoint)
                     : cell.Grapheme;
+                if (TryDrawThickenedText(canvas, typeface, font, text, x, GetTextBaselineY(y))) continue;
                 SKTextBlob? blob = GetOrCreateCellTextBlob(typeface, font, text);
                 if (blob is not null)
                 {
@@ -4356,13 +4507,13 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return text;
     }
 
-    private SKTextBlob? GetOrCreateCellTextBlob(SKTypeface typeface, SKFont font, string text)
+    private SKTextBlob? GetOrCreateCellTextBlob(RenderFont typeface, SKFont font, string text)
     {
         CellTextBlobCacheKey key = new(
             ComputeTextHash(text.AsSpan()),
             text.Length,
             typeface.Handle,
-            BitConverter.SingleToInt32Bits(_fontSize));
+            BitConverter.SingleToInt32Bits(_fontSize), typeface.Synthesis);
         return _cellTextBlobCache.GetOrCreate(key, text, font);
     }
 
@@ -4572,15 +4723,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
     }
 
-    private SKTypeface ResolveTypefaceForCell(SKTypeface primaryTypeface, ref readonly TerminalCell cell)
+    private TerminalFontResolution ResolveFontForCell(ref readonly TerminalCell cell)
     {
+        bool bold = (cell.Attributes & CellAttributes.Bold) != 0;
+        bool italic = (cell.Attributes & CellAttributes.Italic) != 0;
+        TerminalTypefaceStyle style = bold
+            ? (italic ? TerminalTypefaceStyle.BoldItalic : TerminalTypefaceStyle.Bold)
+            : (italic ? TerminalTypefaceStyle.Italic : TerminalTypefaceStyle.Regular);
         TerminalFontResolution resolution = string.IsNullOrEmpty(cell.Grapheme)
             ? _fontResolver.ResolveTypeface(
-                primaryTypeface,
+                _glyphCache.TypefaceCollection, style,
                 GetCellPrimaryCodepoint(in cell),
                 s_renderCulture)
             : _fontResolver.ResolveTypeface(
-                primaryTypeface,
+                _glyphCache.TypefaceCollection, style,
                 cell.Grapheme.AsSpan(),
                 s_renderCulture);
 
@@ -4589,7 +4745,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             RecordFallbackFontHit();
         }
 
-        return resolution.Typeface;
+        return resolution;
     }
 
     private float ComputeRunWidth(ReadOnlySpan<TerminalCell> cells, int startCol, int endCol)
@@ -4892,6 +5048,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private static bool IsRenderableGlyphCell(ref readonly TerminalCell cell)
     {
         return cell.Width != 0 &&
+               cell.Codepoint != 0x10EEEE && // Kitty placeholders are blank glyphs, including their diacritics.
                cell.HasContent &&
                (HasCellGrapheme(in cell) || Rune.IsValid(cell.Codepoint)) &&
                !IsCellHidden(in cell);
@@ -5119,7 +5276,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
         bool darkTheme,
         Span<CellTextHighlightOverride> rowTextHighlights)
     {
-        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry) ||
+        if (!_textHighlightRowCache.TryGetValue(row.RenderId, out TextHighlightRowCacheEntry? entry) ||
             entry.Columns != rowTextHighlights.Length ||
             entry.RuleRevision != _textHighlightRuleRevision ||
             entry.DarkTheme != darkTheme ||
@@ -5142,7 +5299,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         bool darkTheme,
         ReadOnlySpan<CellTextHighlightOverride> rowTextHighlights)
     {
-        if (!_textHighlightRowCache.TryGetValue(row, out TextHighlightRowCacheEntry? entry))
+        TerminalRenderRowId id = row.RenderId;
+        if (!_textHighlightRowCache.TryGetValue(id, out TextHighlightRowCacheEntry? entry))
         {
             if (_textHighlightRowCache.Count >= MaxTextHighlightRowCacheEntries)
             {
@@ -5150,7 +5308,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
             }
 
             entry = new TextHighlightRowCacheEntry();
-            _textHighlightRowCache.Add(row, entry);
+            _textHighlightRowCache.Add(id, entry);
         }
 
         if (!HasAnyTextHighlightOverride(rowTextHighlights))
@@ -5786,6 +5944,10 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
         switch (CursorStyle)
         {
+            case CursorStyle.Lock:
+                RenderPasswordCursor(canvas, x, y, cursorWidth);
+                break;
+
             case CursorStyle.Block:
                 _cursorPaint.Style = SKPaintStyle.Fill;
                 _cursorPaint.BlendMode = SKBlendMode.SrcOver;
@@ -5834,21 +5996,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         }
 
         _fgPaint.Color = CursorTextColor;
-        float x = column * _cellWidth;
-        float baselineY = GetTextBaselineY(y);
-
-        if (!string.IsNullOrEmpty(cell.Grapheme))
+        if (TryGetRegisteredGlyph(screen, in cell, out var registeredGlyph))
         {
-            using SKFont font = _glyphCache.CreateFont(_fontSize);
-            canvas.DrawText(cell.Grapheme, x, baselineY, font, _fgPaint);
+            DrawRegisteredGlyph(canvas, (uint)GetCellPrimaryCodepoint(in cell), registeredGlyph, column, y, cell.Width, CursorTextColor);
             return;
         }
-
-        if (cell.Codepoint > 0 && Rune.IsValid(cell.Codepoint))
-        {
-            using SKFont font = _glyphCache.CreateFont(_fontSize);
-            canvas.DrawText(GetCodepointText(cell.Codepoint), x, baselineY, font, _fgPaint);
-        }
+        DrawCursorDisplayCell(canvas, in cell, column, y);
     }
 
     private static bool TryResolveCursorCellPlacement(
@@ -6019,19 +6172,19 @@ public sealed class SkiaTerminalRenderer : IDisposable
         TerminalScreen screen,
         ReadOnlySpan<TerminalRasterImagePlacement> placements,
         TerminalRasterImageLayer layer,
-        long imageFrameId)
+        long imageFrameId,
+        SKRect imageClip)
     {
         if (placements.IsEmpty)
         {
             return;
         }
 
-        float viewportWidth = screen.Columns * _cellWidth;
-        float viewportHeight = screen.ViewportRows * _cellHeight;
         int viewportTopAbsoluteRow = screen.ViewportTopAbsoluteRow;
 
         canvas.Save();
-        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+        canvas.ClipRect(imageClip);
+        if (_clipImagesToDamage) canvas.ClipPath(_imageDamagePath, antialias: false);
 
         try
         {
@@ -6044,22 +6197,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                float xScale = GetRasterPlacementScale(placement.CellWidthPx, _cellWidth);
-                float yScale = GetRasterPlacementScale(placement.CellHeightPx, _cellHeight);
-                float destLeft = (placement.AnchorColumn * _cellWidth) + (placement.XOffsetPx * xScale);
-                float destTop = ((placement.AnchorRow - viewportTopAbsoluteRow) * _cellHeight) +
-                    (placement.YOffsetPx * yScale);
-                SKRect destRect = new(
-                    destLeft,
-                    destTop,
-                    destLeft + (placement.WidthPx * xScale),
-                    destTop + (placement.HeightPx * yScale));
-                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                SKRect destRect = GetRasterDestination(placement, viewportTopAbsoluteRow);
+                if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
 
                 RecordImagePlacementVisible();
+                if (canvas.QuickReject(destRect)) continue;
                 if (!screen.TryGetRasterImageSource(placement.ImageId, out TerminalRasterImageSource? source) ||
                     source is null)
                 {
@@ -6069,8 +6214,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 SKRect sourceRect = new(
                     placement.SourceX,
                     placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                    (float)placement.SourceX + placement.SourceWidth,
+                    (float)placement.SourceY + placement.SourceHeight);
                 if (!IsRenderableImageRect(sourceRect, destRect))
                 {
                     continue;
@@ -6103,18 +6248,17 @@ public sealed class SkiaTerminalRenderer : IDisposable
         TerminalScreen screen,
         ReadOnlySpan<TerminalKittyImagePlacement> placements,
         TerminalKittyImageLayer layer,
-        long imageFrameId)
+        long imageFrameId,
+        SKRect imageClip)
     {
         if (placements.IsEmpty)
         {
             return;
         }
 
-        float viewportWidth = screen.Columns * _cellWidth;
-        float viewportHeight = screen.ViewportRows * _cellHeight;
-
         canvas.Save();
-        canvas.ClipRect(new SKRect(0, 0, viewportWidth, viewportHeight));
+        canvas.ClipRect(imageClip);
+        if (_clipImagesToDamage) canvas.ClipPath(_imageDamagePath, antialias: false);
 
         try
         {
@@ -6127,20 +6271,14 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 }
 
                 RecordImagePlacementVisited();
-                (float xScale, float yScale) = GetKittyPlacementScale(placement);
-                float destLeft = (placement.ViewportColumn * _cellWidth) + (placement.XOffsetPx * xScale);
-                float destTop = (placement.ViewportRow * _cellHeight) + (placement.YOffsetPx * yScale);
-                SKRect destRect = new(
-                    destLeft,
-                    destTop,
-                    destLeft + (placement.WidthPx * xScale),
-                    destTop + (placement.HeightPx * yScale));
-                if (!IntersectsViewport(destRect, viewportWidth, viewportHeight))
+                SKRect destRect = GetKittyDestination(placement);
+                if (!IntersectsViewport(destRect, imageClip))
                 {
                     continue;
                 }
 
                 RecordImagePlacementVisible();
+                if (canvas.QuickReject(destRect)) continue;
                 if (!screen.TryGetKittyImageSource(placement.ImageId, out TerminalKittyImageSource? source) ||
                     source is null)
                 {
@@ -6150,8 +6288,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
                 SKRect sourceRect = new(
                     placement.SourceX,
                     placement.SourceY,
-                    placement.SourceX + placement.SourceWidth,
-                    placement.SourceY + placement.SourceHeight);
+                    (float)placement.SourceX + placement.SourceWidth,
+                    (float)placement.SourceY + placement.SourceHeight);
                 if (!IsRenderableImageRect(sourceRect, destRect))
                 {
                     continue;
@@ -6191,12 +6329,12 @@ public sealed class SkiaTerminalRenderer : IDisposable
         return (scale, scale);
     }
 
-    private static bool IntersectsViewport(SKRect rect, float viewportWidth, float viewportHeight)
+    private static bool IntersectsViewport(SKRect rect, SKRect viewport)
     {
-        return rect.Right > 0f &&
-            rect.Bottom > 0f &&
-            rect.Left < viewportWidth &&
-            rect.Top < viewportHeight;
+        return rect.Right > viewport.Left &&
+            rect.Bottom > viewport.Top &&
+            rect.Left < viewport.Right &&
+            rect.Top < viewport.Bottom;
     }
 
     private static bool IsRenderableImageRect(SKRect sourceRect, SKRect destRect)
@@ -6376,6 +6514,9 @@ public sealed class SkiaTerminalRenderer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _glyphCoverageSource.Dispose();
+        ClearRegisteredGlyphCache();
+        _registeredGlyphScreen = null;
 
         foreach (TerminalBitmapCacheEntry entry in _kittyBitmapCache.Values)
         {
@@ -6391,12 +6532,20 @@ public sealed class SkiaTerminalRenderer : IDisposable
         _rasterBitmapCache.Clear();
         _kittyBitmapCacheBytes = 0;
         _rasterBitmapCacheBytes = 0;
+        _imageDamagePath.Dispose();
+        _lastKittyDamage.Clear();
+        _nextKittyDamage.Clear();
+        _lastRasterDamage.Clear();
+        _nextRasterDamage.Clear();
         _bgPaint.Dispose();
         _fgPaint.Dispose();
+        _thickenedGlyphs.Dispose();
         _cursorPaint.Dispose();
         _spritePaint.Dispose();
         _symbolPaint.Dispose();
         _spritePath.Dispose();
+        _displayCells.Dispose();
+        _preeditDisplayCells.Dispose();
         _textShaper.Dispose();
         _fontResolver.Dispose();
         ClearTextRenderCaches();
@@ -6644,31 +6793,24 @@ public sealed class SkiaTerminalRenderer : IDisposable
 
     private sealed class TextRowFontCache
     {
-        private readonly Dictionary<TextRowFontCacheKey, SKFont> _cache = new();
+        private readonly Dictionary<RasterFontCacheKey, SKFont> _cache = new();
 
         public SKFont GetOrCreate(
-            SKTypeface typeface,
+            RenderFont typeface,
             float fontSize,
             TerminalFontRenderingSettings fontRenderingSettings)
         {
             TerminalFontRenderingSettings settings = NormalizeFontRenderingSettings(fontRenderingSettings);
-            TextRowFontCacheKey key = new(
+            RasterFontCacheKey key = new(
                 typeface.Handle,
                 BitConverter.SingleToInt32Bits(fontSize),
-                settings.SubpixelPositioning,
-                settings.Edging,
-                settings.Hinting,
-                settings.BaselineSnap,
-                settings.EmbeddedBitmaps,
-                settings.Embolden,
-                settings.ForceAutoHinting,
-                settings.LinearMetrics);
+                settings, typeface.Synthesis);
             if (_cache.TryGetValue(key, out SKFont? font))
             {
                 return font;
             }
 
-            font = GlyphCache.CreateFont(typeface, fontSize, settings);
+            font = GlyphCache.CreateFont(typeface.Typeface, fontSize, settings, typeface.Synthesis);
             _cache[key] = font;
             return font;
         }
@@ -6683,18 +6825,6 @@ public sealed class SkiaTerminalRenderer : IDisposable
             _cache.Clear();
         }
     }
-
-    private readonly record struct TextRowFontCacheKey(
-        nint TypefaceHandle,
-        int FontSizeBits,
-        bool SubpixelPositioning,
-        TerminalFontEdging Edging,
-        TerminalFontHinting Hinting,
-        bool BaselineSnap,
-        bool EmbeddedBitmaps,
-        bool Embolden,
-        bool ForceAutoHinting,
-        bool LinearMetrics);
 
     private sealed class CellTextBlobCache
     {
@@ -6755,7 +6885,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         ulong TextHash,
         int TextLength,
         nint TypefaceHandle,
-        int FontSizeBits);
+        int FontSizeBits,
+        TerminalFontSynthesis Synthesis);
 
     private sealed class CachedCellTextBlob : IDisposable
     {
@@ -6778,8 +6909,7 @@ public sealed class SkiaTerminalRenderer : IDisposable
     private struct SimpleTextRowBatchGroup
     {
         public SKColor Color;
-        public nint TypefaceHandle;
-        public SKTypeface Typeface;
+        public RenderFont Typeface;
         public int Count;
     }
 
@@ -6848,7 +6978,8 @@ public sealed class SkiaTerminalRenderer : IDisposable
         nint TypefaceHandle,
         int FontSizeBits,
         TextDirectionMode Direction,
-        bool EnableLigatures);
+        bool EnableLigatures,
+        TerminalFontSynthesis Synthesis);
 
     private sealed class CachedPretextRun : IDisposable
     {
@@ -7005,4 +7136,6 @@ public enum CursorStyle
     BlockHollow,
     Underline,
     Bar,
+    /// <summary>Steady password-entry indicator; not proof of OS secure input.</summary>
+    Lock,
 }

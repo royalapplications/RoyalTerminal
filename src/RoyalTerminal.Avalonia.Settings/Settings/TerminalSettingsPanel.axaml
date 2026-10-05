@@ -366,6 +366,10 @@
                 <CheckBox Content="Reflow on Resize"
                           Margin="0,2,10,0"
                           IsChecked="{Binding ReflowOnResize}" />
+                <CheckBox Content="Allow programs to resize this window"
+                          Margin="0,2,10,0"
+                          ToolTip.Tip="CSI 8 t requests apply only to a single terminal in a normal resizable window. Disabled by default."
+                          IsChecked="{Binding AllowVtWindowResize}" />
                 <CheckBox Content="Enable Sixel Graphics"
                           Margin="0,2,10,0"
                           IsChecked="{Binding SixelGraphicsEnabled}" />
@@ -488,6 +492,43 @@
                 <TextBlock Foreground="{DynamicResource TerminalSettings.Panel.SubtleTextBrush}"
                            IsVisible="{Binding IsFileFontSourceSelected}"
                            Text="{Binding FontFamilyName, StringFormat='Resolved family: {0}'}" />
+                <Expander Header="Ordered font families" HorizontalAlignment="Stretch">
+                  <StackPanel Spacing="8" DataContext="{Binding FontFamiliesEditor}"
+                              x:DataType="settings:TerminalFontFamilyEditorViewModel">
+                    <TextBlock Text="One system family per line, highest priority first. Unavailable families are skipped. Empty regular uses the primary family/file above; empty styled lists inherit regular-family variants."
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="Regular" />
+                    <TextBox Name="RegularFontFamiliesEditor" Text="{Binding Regular, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Bold" />
+                    <TextBox Name="BoldFontFamiliesEditor" Text="{Binding Bold, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Italic" />
+                    <TextBox Name="ItalicFontFamiliesEditor" Text="{Binding Italic, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Bold italic" />
+                    <TextBox Name="BoldItalicFontFamiliesEditor" Text="{Binding BoldItalic, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="Named font styles" />
+                    <TextBlock Text="Named styles: leave empty/default for automatic selection, or enter an advertised face name. Use false to disable bold, italic or bold italic independently. Names apply to configured/inherited system families, not a primary font file."
+                               TextWrapping="Wrap" />
+                    <TextBox Name="RegularFontStyleEditor" Watermark="Regular face name" Text="{Binding RegularStyle, Mode=TwoWay}" />
+                    <TextBox Name="BoldFontStyleEditor" Watermark="Bold face name or false" Text="{Binding BoldStyle, Mode=TwoWay}" />
+                    <TextBox Name="ItalicFontStyleEditor" Watermark="Italic face name or false" Text="{Binding ItalicStyle, Mode=TwoWay}" />
+                    <TextBox Name="BoldItalicFontStyleEditor" Watermark="Bold italic face name or false" Text="{Binding BoldItalicStyle, Mode=TwoWay}" />
+                    <TextBlock Text="Synthesize missing styles" FontWeight="SemiBold" />
+                    <CheckBox Name="SyntheticBoldFontEditor" Content="Bold" IsChecked="{Binding SyntheticBold, Mode=TwoWay}" />
+                    <CheckBox Name="SyntheticItalicFontEditor" Content="Italic" IsChecked="{Binding SyntheticItalic, Mode=TwoWay}" />
+                    <CheckBox Name="SyntheticBoldItalicFontEditor" Content="Bold italic (independent)" IsChecked="{Binding SyntheticBoldItalic, Mode=TwoWay}" />
+                    <TextBlock Text="Codepoint font overrides" />
+                    <TextBlock Text="One mapping per line, e.g. U+2500-U+257F=My Font. Later ranges win; unavailable fonts or glyphs use normal fallback."
+                               TextWrapping="Wrap" />
+                    <TextBox Name="CodepointFontMapsEditor" Text="{Binding CodepointMaps, Mode=TwoWay}"
+                             AcceptsReturn="True" MinHeight="54" MaxHeight="160" />
+                    <TextBlock Text="{Binding CodepointMapError}" IsVisible="{Binding HasCodepointMapError}"
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Expander>
               </StackPanel>
 
               <StackPanel Spacing="8">
@@ -711,7 +752,7 @@
                 </ItemsControl>
 
                 <Grid ColumnDefinitions="160,*"
-                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                       ColumnSpacing="12"
                       RowSpacing="8"
                       Width="520">
@@ -785,6 +826,24 @@
                       </DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
+                  <CheckBox Grid.Row="10"
+                            Grid.Column="1"
+                            Content="Thicken fonts (macOS)"
+                            IsChecked="{Binding FontThicken}" />
+                  <TextBlock Grid.Row="11"
+                             Grid.Column="0"
+                             VerticalAlignment="Center"
+                             Text="Thickening strength" />
+                  <NumericUpDown Grid.Row="11"
+                                 Grid.Column="1"
+                                 Width="120"
+                                 HorizontalAlignment="Left"
+                                 Minimum="0"
+                                 Maximum="255"
+                                 Increment="1"
+                                 FormatString="0"
+                                 IsEnabled="{Binding FontThicken}"
+                                 Value="{Binding FontThickenStrength}" />
                 </Grid>
               </StackPanel>
             </StackPanel>

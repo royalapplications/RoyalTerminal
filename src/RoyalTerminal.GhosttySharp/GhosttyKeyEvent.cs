@@ -13,6 +13,9 @@ public sealed class GhosttyKeyEvent : IDisposable
 {
     private nint _handle;
     private bool _disposed;
+    // Native set_utf8 borrows this memory until replacement/event disposal.
+    // A pinned object-heap buffer is retained across setter/encoder calls.
+    private byte[]? _utf8Buffer;
 
     /// <summary>
     /// Creates a new key event.
@@ -70,7 +73,7 @@ public sealed class GhosttyKeyEvent : IDisposable
         GhosttyVtNative.KeyEventSetComposing(_handle, composing);
     }
 
-    /// <summary>Sets the UTF-8 text payload for this event.</summary>
+    /// <summary>Copies text into event-owned pinned UTF-8 storage, retained until replacement or disposal.</summary>
     public unsafe void SetText(string? text)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -81,10 +84,13 @@ public sealed class GhosttyKeyEvent : IDisposable
             return;
         }
 
-        byte[] utf8 = Encoding.UTF8.GetBytes(text);
-        fixed (byte* utf8Ptr = utf8)
+        int length = Encoding.UTF8.GetByteCount(text);
+        if (_utf8Buffer is null || _utf8Buffer.Length < length)
+            _utf8Buffer = GC.AllocateUninitializedArray<byte>(Math.Max(32, length), pinned: true);
+        Encoding.UTF8.GetBytes(text, _utf8Buffer);
+        fixed (byte* utf8Ptr = _utf8Buffer)
         {
-            GhosttyVtNative.KeyEventSetUtf8(_handle, utf8Ptr, (nuint)utf8.Length);
+            GhosttyVtNative.KeyEventSetUtf8(_handle, utf8Ptr, (nuint)length);
         }
     }
 
@@ -109,6 +115,7 @@ public sealed class GhosttyKeyEvent : IDisposable
             GhosttyVtNative.KeyEventFree(_handle);
             _handle = nint.Zero;
         }
+        _utf8Buffer = null;
     }
 
     private static void ThrowIfFailed(GhosttyVtNative.GhosttyResult result, string operation)

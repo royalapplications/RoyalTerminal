@@ -1,0 +1,90 @@
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+
+using RoyalTerminal.Avalonia.Rendering;
+
+namespace RoyalTerminal.Terminal;
+
+/// <summary>
+/// Owned protocol pixels plus a lazy, immutable RGBA view for publication.
+/// RGB storage remains RGB when rendered; animation promotion explicitly replaces
+/// it with <see cref="AsRgba"/>. The owning processor serializes all access.
+/// </summary>
+internal sealed class ManagedKittyImagePixels
+{
+    private readonly byte[] _pixels;
+    private KittyGraphicsDecodedImage? _rgba;
+    private TerminalKittyImageSource? _source;
+
+    internal ManagedKittyImagePixels(KittyGraphicsDecodedImage rgba)
+    {
+        ArgumentNullException.ThrowIfNull(rgba);
+        Width = rgba.Width;
+        Height = rgba.Height;
+        _pixels = rgba.Rgba;
+        _rgba = rgba;
+        IsRgba = true;
+    }
+
+    private ManagedKittyImagePixels(int width, int height, byte[] rgb)
+    {
+        Width = width;
+        Height = height;
+        _pixels = rgb;
+    }
+
+    internal int Width { get; }
+    internal int Height { get; }
+    internal bool IsRgba { get; }
+    internal int StorageBytes => _pixels.Length;
+    internal int RgbaByteLength => checked(Width * Height * 4);
+    internal ReadOnlyMemory<byte> Data => _pixels;
+
+    internal static ManagedKittyImagePixels FromRgb(int width, int height, byte[] rgb)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+        ArgumentNullException.ThrowIfNull(rgb);
+        ulong pixels = (ulong)width * (uint)height;
+        if (pixels * 3 != (ulong)rgb.LongLength || pixels * 4 > int.MaxValue)
+            throw new ArgumentException("RGB pixels and their RGBA view must fit the specified dimensions.", nameof(rgb));
+        return new(width, height, rgb);
+    }
+
+    internal KittyGraphicsDecodedImage GetRgbaImage(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
+    {
+        if (_rgba is not null) return _rgba;
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaBuffer);
+        byte[] rgba = GC.AllocateUninitializedArray<byte>(RgbaByteLength);
+        ManagedKittyAnimationPixels.ExpandRgb(_pixels, rgba);
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaView);
+        return _rgba = new(Width, Height, rgba);
+    }
+
+    /// <summary>
+    /// Gets an immutable render source for these pixels. A frame's fingerprint is
+    /// reused when animation playback returns to the same image ID. Keep only
+    /// one ID-specific wrapper; sharing pixels under another image ID must not
+    /// return the wrong identity or build an unbounded per-ID cache.
+    /// </summary>
+    internal TerminalKittyImageSource GetSource(int imageId)
+    {
+        ArgumentOutOfRangeException.ThrowIfEqual(imageId, 0);
+        TerminalKittyImageSource? source = _source;
+        if (source is null || source.ImageId != imageId)
+        {
+            KittyGraphicsDecodedImage rgba = GetRgbaImage();
+            source = new(imageId, rgba.Width, rgba.Height, rgba.Rgba);
+            _source = source;
+        }
+        return source;
+    }
+
+    internal ManagedKittyImagePixels AsRgba(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
+    {
+        if (IsRgba) return this;
+        KittyGraphicsDecodedImage rgba = GetRgbaImage(allocationCheckpoint);
+        allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaOwner);
+        return new(rgba) { _source = _source };
+    }
+}

@@ -45,6 +45,7 @@ public sealed class GhosttyKeyEncoder : IDisposable
             null,
             0,
             out nuint needed);
+        GC.KeepAlive(keyEvent);
 
         if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace &&
             probe != GhosttyVtNative.GhosttyResult.Success)
@@ -60,9 +61,10 @@ public sealed class GhosttyKeyEncoder : IDisposable
         byte[] data = new byte[checked((int)needed)];
         fixed (byte* dataPtr = data)
         {
-            ThrowIfFailed(
-                GhosttyVtNative.KeyEncoderEncode(_handle, keyEvent.Handle, dataPtr, (nuint)data.Length, out nuint written),
-                "ghostty_key_encoder_encode");
+            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KeyEncoderEncode(
+                _handle, keyEvent.Handle, dataPtr, (nuint)data.Length, out nuint written);
+            GC.KeepAlive(keyEvent);
+            ThrowIfFailed(result, "ghostty_key_encoder_encode");
 
             if (written == (nuint)data.Length)
             {

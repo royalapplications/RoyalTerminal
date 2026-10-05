@@ -39,6 +39,9 @@ unexpected_tests="${tmp_dir}/unexpected-tests.txt"
 duplicate_tests="${tmp_dir}/duplicate-tests.txt"
 batch_tests="${tmp_dir}/batch-tests.txt"
 
+# Test display names are identities, not linguistically sortable text. macOS
+# UTF-8 collation can merge distinct Unicode names and then report duplicates
+# even after sort -u. Keep comparisons bytewise without changing dotnet's locale.
 extract_listed_tests() {
   awk '
     /^[[:space:]]{4}[^[:space:]]/ {
@@ -53,7 +56,7 @@ dotnet test "${project}" \
   --no-build \
   --list-tests |
   extract_listed_tests |
-  sort -u > "${all_tests}"
+  LC_ALL=C sort -u > "${all_tests}"
 
 if [ ! -s "${all_tests}" ]; then
   echo "::error::No unit tests were discovered for ${project}."
@@ -67,8 +70,8 @@ awk '
     print method
   }
 ' "${all_tests}" |
-  sort |
-  uniq -c |
+  LC_ALL=C sort |
+  LC_ALL=C uniq -c |
   awk '
     {
       count = $1
@@ -136,7 +139,7 @@ if [ "${validate_coverage}" = "true" ]; then
       --list-tests \
       --filter "${filter}" |
       extract_listed_tests |
-      sort -u > "${batch_tests}"
+      LC_ALL=C sort -u > "${batch_tests}"
 
     if [ ! -s "${batch_tests}" ]; then
       echo "::error::Generated unit test batch ${batch} does not match any discovered tests."
@@ -147,11 +150,11 @@ if [ "${validate_coverage}" = "true" ]; then
     cat "${batch_tests}" >> "${matched_tests}"
   done < "${batches}"
 
-  sort "${matched_tests}" > "${matched_tests_sorted}"
-  sort -u "${matched_tests_sorted}" > "${matched_tests_unique}"
-  uniq -d "${matched_tests_sorted}" > "${duplicate_tests}"
-  comm -23 "${all_tests}" "${matched_tests_unique}" > "${uncovered_tests}"
-  comm -13 "${all_tests}" "${matched_tests_unique}" > "${unexpected_tests}"
+  LC_ALL=C sort "${matched_tests}" > "${matched_tests_sorted}"
+  LC_ALL=C sort -u "${matched_tests_sorted}" > "${matched_tests_unique}"
+  LC_ALL=C uniq -d "${matched_tests_sorted}" > "${duplicate_tests}"
+  LC_ALL=C comm -23 "${all_tests}" "${matched_tests_unique}" > "${uncovered_tests}"
+  LC_ALL=C comm -13 "${all_tests}" "${matched_tests_unique}" > "${unexpected_tests}"
 
   if [ -s "${duplicate_tests}" ]; then
     duplicate_count="$(wc -l < "${duplicate_tests}" | tr -d ' ')"

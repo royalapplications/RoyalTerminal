@@ -18,6 +18,37 @@ namespace RoyalTerminal.IntegrationTests;
 public class OscParserTests
 {
     [GhosttyNativeFact]
+    public void OscParser_ExposesNewUpstreamCommandTypes()
+    {
+        (string Input, GhosttyOscCommandType Type)[] cases =
+        [
+            ("9;4;1;42", GhosttyOscCommandType.ConEmuProgressReport),
+            ("5522;type=read", GhosttyOscCommandType.KittyClipboardProtocol),
+            ("72;t=a", GhosttyOscCommandType.KittyDragAndDropProtocol),
+            ("3008;start=abc123", GhosttyOscCommandType.ContextSignal),
+            ("99;;hello", GhosttyOscCommandType.KittyDesktopNotification),
+        ];
+        Assert.Equal(GhosttyResult.Success, GhosttyVtNative.OscNew(0, out nint parser));
+        try
+        {
+            foreach ((string input, GhosttyOscCommandType type) in cases)
+            {
+                GhosttyVtNative.OscReset(parser);
+                foreach (byte value in Encoding.UTF8.GetBytes(input))
+                {
+                    GhosttyVtNative.OscNext(parser, value);
+                }
+
+                Assert.Equal(type, GhosttyVtNative.OscCommandType(GhosttyVtNative.OscEnd(parser, 0x07)));
+            }
+        }
+        finally
+        {
+            GhosttyVtNative.OscFree(parser);
+        }
+    }
+
+    [GhosttyNativeFact]
     public void OscParser_CreateAndFree()
     {
         var result = GhosttyVtNative.OscNew(0, out var parser);
