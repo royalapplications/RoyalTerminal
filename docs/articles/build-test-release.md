@@ -19,6 +19,40 @@ Common optional requirements:
 - SSH test endpoint credentials for integration tests
 - platform-native dependencies needed by Ghostty/native builds
 
+## Dependency compatibility
+
+Dependency versions are centralized in `Directory.Packages.props`. Update related
+managed and native packages together, then validate the Release build, isolated
+unit batches, required-native integration tests, documentation build, and packaging.
+
+The October 2026 dependency review retains these compatibility constraints:
+
+- Avalonia 12.1.3 and Pretext 0.1.0 use SkiaSharp 3. Keep SkiaSharp at 3.119.4
+  and HarfBuzzSharp on the 8.3.1 line, with every native asset on the same version
+  as its managed package. SkiaSharp 4 requires a separate rendering migration.
+- Avalonia.Headless.XUnit 12.1.3 targets xUnit 3.2.2 extensibility. Keep that test
+  framework version while updating the Visual Studio adapter independently.
+  xUnit 4 changes extensibility/parallelization APIs and defaults to Microsoft
+  Testing Platform v2, which rejects the current VSTest invocation on .NET 10.
+- Ghostty remains at the explicit submodule commit tested with RoyalTerminal's
+  native overlays and generated ABI checks. Its build requires Zig 0.16.0 exactly;
+  updating to Zig 0.17 or a newer upstream development commit requires a coordinated
+  native/managed ABI and terminal behavior review.
+- VitePress remains on its latest stable 1.6.4 release. The npm overrides update
+  Vite and its Vue plugin together so the plugin's peer range supports Vite 8.
+
+ReactiveUI 26 uses `Interaction.Handle` for task-based handling. Observable command
+pipelines use `WhenHandled` to keep interaction dispatch tied to subscription.
+
+Useful audit commands:
+
+```bash
+dotnet list RoyalTerminal.slnx package --outdated
+dotnet list RoyalTerminal.slnx package --vulnerable --include-transitive
+npm outdated
+npm audit
+```
+
 ## Bootstrap
 
 Initialize submodules before native builds:
