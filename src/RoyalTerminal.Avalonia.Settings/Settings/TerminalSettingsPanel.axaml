@@ -512,10 +512,10 @@
                     <TextBlock Text="Named font styles" />
                     <TextBlock Text="Named styles: leave empty/default for automatic selection, or enter an advertised face name. Use false to disable bold, italic or bold italic independently. Names apply to configured/inherited system families, not a primary font file."
                                TextWrapping="Wrap" />
-                    <TextBox Name="RegularFontStyleEditor" Watermark="Regular face name" Text="{Binding RegularStyle, Mode=TwoWay}" />
-                    <TextBox Name="BoldFontStyleEditor" Watermark="Bold face name or false" Text="{Binding BoldStyle, Mode=TwoWay}" />
-                    <TextBox Name="ItalicFontStyleEditor" Watermark="Italic face name or false" Text="{Binding ItalicStyle, Mode=TwoWay}" />
-                    <TextBox Name="BoldItalicFontStyleEditor" Watermark="Bold italic face name or false" Text="{Binding BoldItalicStyle, Mode=TwoWay}" />
+                    <TextBox Name="RegularFontStyleEditor" PlaceholderText="Regular face name" Text="{Binding RegularStyle, Mode=TwoWay}" />
+                    <TextBox Name="BoldFontStyleEditor" PlaceholderText="Bold face name or false" Text="{Binding BoldStyle, Mode=TwoWay}" />
+                    <TextBox Name="ItalicFontStyleEditor" PlaceholderText="Italic face name or false" Text="{Binding ItalicStyle, Mode=TwoWay}" />
+                    <TextBox Name="BoldItalicFontStyleEditor" PlaceholderText="Bold italic face name or false" Text="{Binding BoldItalicStyle, Mode=TwoWay}" />
                     <TextBlock Text="Synthesize missing styles" FontWeight="SemiBold" />
                     <CheckBox Name="SyntheticBoldFontEditor" Content="Bold" IsChecked="{Binding SyntheticBold, Mode=TwoWay}" />
                     <CheckBox Name="SyntheticItalicFontEditor" Content="Italic" IsChecked="{Binding SyntheticItalic, Mode=TwoWay}" />

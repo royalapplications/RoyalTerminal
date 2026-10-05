@@ -266,6 +266,7 @@ public sealed class TerminalFontFamilySettingsTests
                 Assert.True(state.FontFamiliesEditor.HasCodepointMapError);
                 Assert.False(state.ApplyCommand.CanExecute(null));
                 TextBox style = Assert.Single(expander.GetVisualDescendants().OfType<TextBox>(), e => e.Name == "BoldFontStyleEditor");
+                Assert.Equal("Bold face name or false", style.PlaceholderText);
                 style.Text = "false";
                 await HeadlessTerminalTestCleanup.DrainDispatcherAsync();
                 Assert.Equal("false", state.FontFamiliesEditor.BuildSettings().BoldStyle);

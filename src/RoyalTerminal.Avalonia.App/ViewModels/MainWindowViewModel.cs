@@ -306,14 +306,14 @@ public sealed class MainWindowViewModel : ReactiveObject
         AcceptSshHostKeyCommand = ReactiveCommand.Create(AcceptSshHostKeyPrompt);
         DeclineSshHostKeyCommand = ReactiveCommand.Create(DeclineSshHostKeyPrompt);
 
-        NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.Handle(Unit.Default));
+        NewTabCommand = ReactiveCommand.CreateFromObservable(() => CreateNewTabInteraction.WhenHandled(Unit.Default));
         CreateNewTabFromProfileCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(CreateNewTabFromProfile);
-        CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.Handle(Unit.Default));
+        CloseCurrentTabCommand = ReactiveCommand.CreateFromObservable(() => CloseCurrentTabInteraction.WhenHandled(Unit.Default));
         ActivateTabCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(ActivateTab);
         CloseTabCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(CloseTab);
         SwitchToTabByIndexCommand = ReactiveCommand.CreateFromObservable<object?, Unit>(SwitchToTabByIndex);
-        CycleTabForwardCommand = ReactiveCommand.CreateFromObservable(() => CycleTabInteraction.Handle(true));
-        CycleTabBackwardCommand = ReactiveCommand.CreateFromObservable(() => CycleTabInteraction.Handle(false));
+        CycleTabForwardCommand = ReactiveCommand.CreateFromObservable(() => CycleTabInteraction.WhenHandled(true));
+        CycleTabBackwardCommand = ReactiveCommand.CreateFromObservable(() => CycleTabInteraction.WhenHandled(false));
         CopySelectionCommand = ReactiveCommand.CreateFromObservable(CopySelection);
         PasteClipboardCommand = ReactiveCommand.CreateFromObservable(PasteClipboard);
         SelectAllCommand = ReactiveCommand.CreateFromObservable(SelectAll);
@@ -384,32 +384,32 @@ public sealed class MainWindowViewModel : ReactiveObject
         CopyStyledVtSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.StyledVt));
         CopyHtmlSnapshotCommand = ReactiveCommand.CreateFromObservable(() => CopySnapshot(TerminalSnapshotExportFormat.Html));
         CycleShaderSampleCommand = ReactiveCommand.CreateFromObservable(CycleShaderSample);
-        ShowAboutCommand = ReactiveCommand.CreateFromObservable(() => ShowAboutInteraction.Handle(Unit.Default));
-        QuitApplicationCommand = ReactiveCommand.CreateFromObservable(() => QuitApplicationInteraction.Handle(Unit.Default));
+        ShowAboutCommand = ReactiveCommand.CreateFromObservable(() => ShowAboutInteraction.WhenHandled(Unit.Default));
+        QuitApplicationCommand = ReactiveCommand.CreateFromObservable(() => QuitApplicationInteraction.WhenHandled(Unit.Default));
         TogglePreserveScrollbackOnRestartCommand = ReactiveCommand.Create(TogglePreserveScrollbackOnRestart);
         ToggleSixelGraphicsCommand = ReactiveCommand.Create(ToggleSixelGraphics);
         SplitPaneRightCommand = ReactiveCommand.CreateFromObservable(
-            () => SplitPaneInteraction.Handle(TerminalPaneSplitRequest.Right));
+            () => SplitPaneInteraction.WhenHandled(TerminalPaneSplitRequest.Right));
         SplitPaneDownCommand = ReactiveCommand.CreateFromObservable(
-            () => SplitPaneInteraction.Handle(TerminalPaneSplitRequest.Down));
+            () => SplitPaneInteraction.WhenHandled(TerminalPaneSplitRequest.Down));
         FocusPaneLeftCommand = ReactiveCommand.CreateFromObservable(
-            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Left));
+            () => FocusPaneInteraction.WhenHandled(TerminalPaneDirection.Left));
         FocusPaneRightCommand = ReactiveCommand.CreateFromObservable(
-            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Right));
+            () => FocusPaneInteraction.WhenHandled(TerminalPaneDirection.Right));
         FocusPaneUpCommand = ReactiveCommand.CreateFromObservable(
-            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Up));
+            () => FocusPaneInteraction.WhenHandled(TerminalPaneDirection.Up));
         FocusPaneDownCommand = ReactiveCommand.CreateFromObservable(
-            () => FocusPaneInteraction.Handle(TerminalPaneDirection.Down));
+            () => FocusPaneInteraction.WhenHandled(TerminalPaneDirection.Down));
         ResizePaneLeftCommand = ReactiveCommand.CreateFromObservable(
-            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Left));
+            () => ResizePaneInteraction.WhenHandled(TerminalPaneDirection.Left));
         ResizePaneRightCommand = ReactiveCommand.CreateFromObservable(
-            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Right));
+            () => ResizePaneInteraction.WhenHandled(TerminalPaneDirection.Right));
         ResizePaneUpCommand = ReactiveCommand.CreateFromObservable(
-            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Up));
+            () => ResizePaneInteraction.WhenHandled(TerminalPaneDirection.Up));
         ResizePaneDownCommand = ReactiveCommand.CreateFromObservable(
-            () => ResizePaneInteraction.Handle(TerminalPaneDirection.Down));
+            () => ResizePaneInteraction.WhenHandled(TerminalPaneDirection.Down));
         CloseCurrentPaneCommand = ReactiveCommand.CreateFromObservable(
-            () => CloseCurrentPaneInteraction.Handle(Unit.Default),
+            () => CloseCurrentPaneInteraction.WhenHandled(Unit.Default),
             canCloseCurrentPane);
 
         UpdateThemePresetButtonText();
@@ -2174,7 +2174,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             return Observable.Return(Unit.Default);
         }
 
-        return ActivateTabInteraction.Handle(tabId);
+        return ActivateTabInteraction.WhenHandled(tabId);
     }
 
     private IObservable<Unit> CloseTab(object? parameter)
@@ -2184,7 +2184,7 @@ public sealed class MainWindowViewModel : ReactiveObject
             return Observable.Return(Unit.Default);
         }
 
-        return CloseTabInteraction.Handle(tabId);
+        return CloseTabInteraction.WhenHandled(tabId);
     }
 
     private IObservable<Unit> SwitchToTabByIndex(object? parameter)
@@ -2194,27 +2194,27 @@ public sealed class MainWindowViewModel : ReactiveObject
             return Observable.Return(Unit.Default);
         }
 
-        return SwitchToTabByIndexInteraction.Handle(index);
+        return SwitchToTabByIndexInteraction.WhenHandled(index);
     }
 
     private IObservable<Unit> CopySelection()
     {
         return CopySelectionInteraction
-            .Handle(Unit.Default)
+            .WhenHandled(Unit.Default)
             .Do(_ => SetStatus("Copied to clipboard"));
     }
 
     private IObservable<Unit> PasteClipboard()
     {
         return PasteClipboardInteraction
-            .Handle(Unit.Default)
+            .WhenHandled(Unit.Default)
             .Do(_ => SetStatus("Pasted from clipboard"));
     }
 
     private IObservable<Unit> SelectAll()
     {
         return SelectAllInteraction
-            .Handle(Unit.Default)
+            .WhenHandled(Unit.Default)
             .Do(_ => SetStatus("Selected all text"));
     }
 
@@ -2222,7 +2222,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         FontSize = Math.Clamp(FontSize + delta, 8, 32);
         return ApplyFontSizeInteraction
-            .Handle(FontSize)
+            .WhenHandled(FontSize)
             .Do(_ => SetStatus($"Font size: {FormatFontSize(FontSize)}"));
     }
 
@@ -2230,7 +2230,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     {
         FontSize = 14;
         return ApplyFontSizeInteraction
-            .Handle(FontSize)
+            .WhenHandled(FontSize)
             .Do(_ => SetStatus($"Font size: {FormatFontSize(FontSize)}"));
     }
 
@@ -2246,7 +2246,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
         SelectedAppThemeMode = mode;
         return ApplyAppThemeInteraction
-            .Handle(mode)
+            .WhenHandled(mode)
             .Do(_ => SetStatus($"App theme: {GetAppThemeDisplayName(mode)}"));
     }
 
@@ -2306,7 +2306,7 @@ public sealed class MainWindowViewModel : ReactiveObject
     private IObservable<Unit> ToggleCapture()
     {
         bool shouldStartCapture = !IsCaptureActive;
-        return ToggleCaptureInteraction.Handle(shouldStartCapture);
+        return ToggleCaptureInteraction.WhenHandled(shouldStartCapture);
     }
 
     private void TogglePreserveScrollbackOnRestart()
@@ -2346,29 +2346,29 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> SaveCapture()
     {
-        return SaveCaptureInteraction.Handle(Unit.Default);
+        return SaveCaptureInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> LoadReplay()
     {
-        return LoadReplayInteraction.Handle(Unit.Default);
+        return LoadReplayInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ToggleReplayPlayback()
     {
         bool shouldPlay = !IsReplayPlaying;
-        return SetReplayPlayingInteraction.Handle(shouldPlay);
+        return SetReplayPlayingInteraction.WhenHandled(shouldPlay);
     }
 
     private IObservable<Unit> StopReplay()
     {
-        return StopReplayInteraction.Handle(Unit.Default);
+        return StopReplayInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> PrepareSettingsPanel()
     {
         return PrepareSettingsPanelInteraction
-            .Handle(Unit.Default)
+            .WhenHandled(Unit.Default)
             .ObserveOn(_uiScheduler)
             .Do(_ => IsSettingsPanelOpen = true);
     }
@@ -2380,7 +2380,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> RefreshSessionLauncher()
     {
-        return RefreshSessionLauncherInteraction.Handle(Unit.Default);
+        return RefreshSessionLauncherInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> LaunchSelectedSessionProfile()
@@ -2405,28 +2405,28 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
 
         return LaunchSessionProfileInteraction
-            .Handle(profileId.Trim())
+            .WhenHandled(profileId.Trim())
             .Do(_ => SetStatus("Opened launch profile"));
     }
 
     private IObservable<Unit> ApplySearch()
     {
-        return ApplySearchInteraction.Handle(SearchQuery);
+        return ApplySearchInteraction.WhenHandled(SearchQuery);
     }
 
     private IObservable<Unit> NextSearch()
     {
-        return NextSearchInteraction.Handle(Unit.Default);
+        return NextSearchInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> PreviousSearch()
     {
-        return PreviousSearchInteraction.Handle(Unit.Default);
+        return PreviousSearchInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ClearSearch()
     {
-        return ClearSearchInteraction.Handle(Unit.Default);
+        return ClearSearchInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> OpenCommandHistoryOverlay()
@@ -2442,7 +2442,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> RefreshCommandSuggestions()
     {
-        return RefreshCommandSuggestionsInteraction.Handle(CommandSuggestionQuery);
+        return RefreshCommandSuggestionsInteraction.WhenHandled(CommandSuggestionQuery);
     }
 
     private IObservable<Unit> AcceptCommandSuggestion()
@@ -2456,7 +2456,7 @@ public sealed class MainWindowViewModel : ReactiveObject
 
         string commandLine = SelectedCommandSuggestion.CommandLine;
         return AcceptCommandSuggestionInteraction
-            .Handle(commandLine)
+            .WhenHandled(commandLine)
             .Do(_ =>
             {
                 IsCommandHistoryOverlayOpen = false;
@@ -2466,27 +2466,27 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     private IObservable<Unit> RestartActiveSession()
     {
-        return RestartActiveSessionInteraction.Handle(Unit.Default);
+        return RestartActiveSessionInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ClearActiveScrollback()
     {
-        return ClearActiveScrollbackInteraction.Handle(Unit.Default);
+        return ClearActiveScrollbackInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ShowHyperlinkSample()
     {
-        return ShowHyperlinkSampleInteraction.Handle(Unit.Default);
+        return ShowHyperlinkSampleInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ShowKittyGraphicsSample()
     {
-        return ShowKittyGraphicsSampleInteraction.Handle(Unit.Default);
+        return ShowKittyGraphicsSampleInteraction.WhenHandled(Unit.Default);
     }
 
     private IObservable<Unit> ToggleGhosttyDiagnostics()
     {
-        return ToggleGhosttyDiagnosticsInteraction.Handle(!ShowGhosttyDiagnostics);
+        return ToggleGhosttyDiagnosticsInteraction.WhenHandled(!ShowGhosttyDiagnostics);
     }
 
     private IObservable<Unit> CycleShaderSample()
@@ -2504,13 +2504,13 @@ public sealed class MainWindowViewModel : ReactiveObject
         int nextIndex = (currentIndex + 1) % _shaderSamples.Count;
         SelectedShaderSample = _shaderSamples[nextIndex];
         return ApplyShaderSampleInteraction
-            .Handle(SelectedShaderSample.Id)
+            .WhenHandled(SelectedShaderSample.Id)
             .Do(_ => SetStatus($"Shader sample: {SelectedShaderSample.DisplayName}"));
     }
 
     private IObservable<Unit> CopySnapshot(TerminalSnapshotExportFormat format)
     {
-        return CopySnapshotInteraction.Handle(format);
+        return CopySnapshotInteraction.WhenHandled(format);
     }
 
     private void ClearEventLog()
@@ -2580,7 +2580,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         IsDarkTheme = IsThemeDark(theme);
 
         return ApplyThemeModelInteraction
-            .Handle(new TerminalThemeApplyRequest(theme, themeName))
+            .WhenHandled(new TerminalThemeApplyRequest(theme, themeName))
             .Do(_ => SetStatus(statusText));
     }
 
@@ -2750,7 +2750,7 @@ public sealed class MainWindowViewModel : ReactiveObject
         }
 
         return CreateNewTabFromProfileInteraction
-            .Handle(profileId.Trim())
+            .WhenHandled(profileId.Trim())
             .Do(_ => SetStatus("Opened shell profile"));
     }
 
