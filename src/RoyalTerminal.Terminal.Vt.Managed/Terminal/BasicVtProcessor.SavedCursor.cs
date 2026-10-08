@@ -21,6 +21,7 @@ public sealed partial class BasicVtProcessor
 
     private void ClearAlternateBeforeCursorCopy()
     {
+        _screen.InvalidateHistoryLayout();
         uint background = _currentBg;
         SgrColorKind kind = _currentBgKind;
         int paletteIndex = _currentBgPaletteIndex;

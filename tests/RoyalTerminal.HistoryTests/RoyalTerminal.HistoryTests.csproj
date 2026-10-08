@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Vt.Ghostty/RoyalTerminal.Terminal.Vt.Ghostty.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="../../src/RoyalTerminal.GhosttySharp.Native.Win64/build/RoyalTerminal.GhosttySharp.Native.Win64.targets" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+  <Import Project="../../src/RoyalTerminal.GhosttySharp.Native.Linux64/build/RoyalTerminal.GhosttySharp.Native.Linux64.targets" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+  <Import Project="../../src/RoyalTerminal.GhosttySharp.Native.OSX/build/RoyalTerminal.GhosttySharp.Native.OSX.targets" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+</Project>

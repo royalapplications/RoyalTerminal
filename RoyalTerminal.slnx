@@ -47,6 +47,7 @@
     <Project Path="tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj" />
     <Project Path="tests/RoyalTerminal.PtyHarness/RoyalTerminal.PtyHarness.csproj" />
     <Project Path="tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj" />
+    <Project Path="tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj" />
   </Folder>
   <Project Path="src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj" />
   <Project Path="src/RoyalTerminal.GhosttySharp/RoyalTerminal.GhosttySharp.csproj" />

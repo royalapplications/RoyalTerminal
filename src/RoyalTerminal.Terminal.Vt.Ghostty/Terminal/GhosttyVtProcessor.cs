@@ -809,6 +809,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     public void PrepareForNewSession(bool preserveScrollback)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // A process reset invalidates live coordinates even when history survives.
+        _historyPrimary.NativeEpoch = 0;
+        _historyAlternate.NativeEpoch = 0;
         ClearSessionNotifications();
         _terminal.SendDragDropEvent(5);
 
@@ -993,27 +996,30 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        lock (_screen.SyncRoot)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        _disposed = true;
-        ClearSessionNotifications();
-        _notificationHost = null;
-        _search?.Dispose();
-        _search = null;
-        _kittyPlacementIterator?.Dispose();
-        DisposeSixelOverlay();
-        _mouseEvent.Dispose();
-        _mouseEncoder.Dispose();
-        _keyEvent.Dispose();
-        _keyEncoder.Dispose();
-        _renderState.Dispose();
-        _terminal.Dispose();
-        _unsupportedWindowsSequenceSanitizer.Reset();
-        _forceFullScreenSyncAfterResize = false;
-        ResetManagedState();
+            _disposed = true;
+            ClearSessionNotifications();
+            _notificationHost = null;
+            _search?.Dispose();
+            _search = null;
+            _kittyPlacementIterator?.Dispose();
+            DisposeSixelOverlay();
+            _mouseEvent.Dispose();
+            _mouseEncoder.Dispose();
+            _keyEvent.Dispose();
+            _keyEncoder.Dispose();
+            _renderState.Dispose();
+            _terminal.Dispose();
+            _unsupportedWindowsSequenceSanitizer.Reset();
+            _forceFullScreenSyncAfterResize = false;
+            ResetManagedState();
+        }
     }
 
     /// <inheritdoc />
