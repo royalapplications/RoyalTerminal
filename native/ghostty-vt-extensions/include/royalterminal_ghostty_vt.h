@@ -7,6 +7,31 @@
 extern "C" {
 #endif
 
+/** Owned numeric metadata for bounded active-buffer history reads. Serialize
+ * with mutations and disposal. Initialize size to sizeof(RoyalHistoryInfo).
+ * Origin advances on prefix pruning; epoch changes when row layouts change. */
+typedef struct {
+    size_t size;
+    uint64_t epoch;
+    uint64_t origin;
+    uint64_t screen_generation;
+    uint64_t total_rows;
+    uint16_t columns;
+    uint16_t rows;
+    uint8_t alternate;
+} RoyalHistoryInfo;
+GHOSTTY_API GhosttyResult ghostty_royal_history_info(
+    GhosttyTerminal terminal, RoyalHistoryInfo* output);
+/** Row is an absolute native screen row. The sized output is borrowed until
+ * the next terminal mutation; callers must not retain it in owned snapshots. */
+GHOSTTY_API GhosttyResult ghostty_royal_history_row_ref(
+    GhosttyTerminal terminal, uint64_t row, GhosttyGridRef* output);
+/** Bounded UTF-16 grapheme measurement; OUT_OF_SPACE means it cannot fit.
+ * Does not allocate scratch storage. The reference remains borrowed.
+ */
+GHOSTTY_API GhosttyResult ghostty_royal_history_grapheme_fits(
+    const GhosttyGridRef* reference, size_t budget);
+
 /** CSI 8 t host request in cell counts. Zero preserves the current dimension.
  * This does not resize native terminal state. The host must explicitly permit
  * window changes. Never throw/re-enter from the callback; serialize registration

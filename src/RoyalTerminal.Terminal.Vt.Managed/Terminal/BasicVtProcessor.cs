@@ -1687,6 +1687,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int oldColumn = _cursorCol, oldRow = _cursorRow;
         bool oldWrap = _delayedWrap;
         bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !_inAltScreen;
+        if (!history) _screen.InvalidateHistoryLayout();
         bool rotate = !down && !HasHorizontalMargins &&
             (index || _inAltScreen && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
         bool imageMargins = _scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins;
@@ -1771,6 +1772,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ShiftFullWidthRows(int top, int bottom, int count, bool down)
     {
+        _screen.InvalidateHistoryLayout();
         // Ghostty IL/DL traverse once, directly from count rows away. Repeated
         // one-row copies can spuriously grow a page for discarded content, or
         // even fault an operation which only needs to clear its entire region.
@@ -3808,6 +3810,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     SwitchToAltScreen(clearAlt: false);
                 else if (!set && _inAltScreen)
                 {
+                    _screen.InvalidateHistoryLayout();
                     EraseInDisplay(2);
                     SwitchToMainScreen();
                 }
@@ -3867,7 +3870,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         if (_inAltScreen)
         {
-            if (clearAlt) EraseInDisplay(2);
+            if (clearAlt)
+            {
+                _screen.InvalidateHistoryLayout();
+                EraseInDisplay(2);
+            }
             return;
         }
 
@@ -4275,6 +4282,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         ClampCursor();
         if (_cursorRow < _scrollTop || _cursorRow > _scrollBottom || !CursorInsideHorizontalMargins) return;
+        _screen.InvalidateHistoryLayout();
         count = Math.Clamp(count, 1, _scrollBottom - _cursorRow + 1);
         bool restoreImages = _kittyStore.PlacementCount > 0;
         if (restoreImages) _kittyStore.BeginMarginScroll(_screen, _cursorRow, _scrollBottom, 0, 0, 0,
@@ -4551,6 +4559,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// </summary>
     public void Reset()
     {
+        _screen.InvalidateHistoryLayout();
         _screen.ThrowIfSnapshotMutationFailed();
         ResetInternal(raiseModeChanged: true, SessionScreenResetMode.ClearViewport);
     }
@@ -4558,6 +4567,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void PrepareForNewSession(bool preserveScrollback)
     {
+        _screen.InvalidateHistoryLayout();
         _screen.ThrowIfSnapshotMutationFailed();
         ClearSessionNotifications();
         _dragDrop = null;
@@ -5063,13 +5073,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     /// <inheritdoc />
     public void Dispose()
     {
-        ResetApcCommand();
-        ClearSessionNotifications();
-        _notificationHost = null;
-        _dragDrop = null;
-        _backgroundSearch?.Dispose();
-        _search.Reset();
-        EndRenderHold();
+        lock (_publishedScreen.SyncRoot)
+        {
+            if (_historyDisposed) return;
+            _historyDisposed = true;
+            ResetApcCommand();
+            ClearSessionNotifications();
+            _notificationHost = null;
+            _dragDrop = null;
+            _backgroundSearch?.Dispose();
+            _search.Reset();
+            EndRenderHold();
+        }
     }
 
     /// <inheritdoc />

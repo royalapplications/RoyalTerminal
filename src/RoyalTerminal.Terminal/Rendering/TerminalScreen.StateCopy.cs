@@ -123,6 +123,7 @@ public sealed partial class TerminalScreen
         {
             copy.Add(rows[index].CreateStateCopy());
         }
+        copy.CopyHistoryLayoutFrom(rows);
         return copy;
     }
 

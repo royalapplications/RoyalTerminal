@@ -57,6 +57,22 @@ pub fn build(b: *std.Build) !void {
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "4ca194a422f9400f4337daccfea8d8ae98d475db47042626e647875a049dc2b5", &.{
         .{
+            .before = "            assert(self.screens.active_key == .alternate);\n            self.eraseDisplay(.complete, false);",
+            .after = "            assert(self.screens.active_key == .alternate);\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
+        },
+        .{
+            .before = "        .@\"1047\" => if (!enabled and self.screens.active_key == .alternate) {\n            self.eraseDisplay(.complete, false);",
+            .after = "        .@\"1047\" => if (!enabled and self.screens.active_key == .alternate) {\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
+        },
+        .{
+            .before = "pub fn insertLines(self: *Terminal, count: usize) void {",
+            .after = "pub fn insertLines(self: *Terminal, count: usize) void {\n    self.screens.active.pages.royalHistoryInvalidate();",
+        },
+        .{
+            .before = "pub fn deleteLines(self: *Terminal, count: usize) void {",
+            .after = "pub fn deleteLines(self: *Terminal, count: usize) void {\n    self.screens.active.pages.royalHistoryInvalidate();",
+        },
+        .{
             .before = "        try self.screens.active.appendGrapheme(prev, c);\n        return;",
             .after = "        self.screens.active.cursorMarkDirty();\n        try self.screens.active.appendGrapheme(prev, c);\n        return;",
         },
@@ -95,6 +111,38 @@ pub fn build(b: *std.Build) !void {
         },
     });
     try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{
+        .{
+            .before = "page_serial_epoch: u64,",
+            .after = "page_serial_epoch: u64,\n\n// Bounded history coordinates: prefix eviction preserves layout identity.\nroyal_history_epoch: u64 = 1,\nroyal_history_origin: u64 = 0,\n",
+        },
+        .{
+            .before = "pub fn reset(self: *PageList) void {",
+            .after = "pub fn royalHistoryInvalidate(self: *PageList) void {\n    self.royal_history_epoch += 1;\n    self.royal_history_origin = 0;\n}\n\npub fn reset(self: *PageList) void {\n    self.royalHistoryInvalidate();",
+        },
+        .{
+            .before = "pub fn resize(self: *PageList, opts: Resize) Allocator.Error!void {",
+            .after = "pub fn resize(self: *PageList, opts: Resize) Allocator.Error!void {\n    self.royalHistoryInvalidate();",
+        },
+        .{
+            .before = "pub fn invalidateNodeLayout(self: *PageList, node: *List.Node) void {",
+            .after = "pub fn invalidateNodeLayout(self: *PageList, node: *List.Node) void {\n    self.royalHistoryInvalidate();",
+        },
+        .{
+            .before = "    self.eraseRows(.{ .history = .{} }, bl_pt);",
+            .after = "    self.royalHistoryInvalidate();\n    self.eraseRows(.{ .history = .{} }, bl_pt);",
+        },
+        .{
+            .before = "    self.eraseRows(.{ .active = .{} }, .{ .active = .{ .y = y } });",
+            .after = "    self.royalHistoryInvalidate();\n    self.eraseRows(.{ .active = .{} }, .{ .active = .{ .y = y } });",
+        },
+        .{
+            .before = "        // If we have a pin viewport cache then we need to update it.\n",
+            .after = "        self.royal_history_origin += first.rows();\n\n        // If we have a pin viewport cache then we need to update it.\n",
+        },
+        .{
+            .before = "            pagelist.total_rows -= first_rows;",
+            .after = "            pagelist.total_rows -= first_rows;\n            pagelist.royal_history_origin += first_rows;",
+        },
         .{
             // A clone can fail after retaining a styled/grapheme/link prefix.
             // Reset it while the row is still in size.rows, then remap pins for
@@ -213,7 +261,7 @@ pub fn build(b: *std.Build) !void {
     );
     module.root_source_file = sources.add(
         "src/lib_vt_royal.zig",
-        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig"), "\n", @embedFile("src/window_resize.zig") }),
+        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig"), "\n", @embedFile("src/window_resize.zig"), "\n", @embedFile("src/history.zig") }),
     );
 
     // Retain Ghostty's platform linking, symbol visibility, static archive
@@ -245,6 +293,10 @@ pub fn build(b: *std.Build) !void {
 
     const static_step = b.step("static", "Build the static library including extensions");
     static_step.dependOn(b.getInstallStep());
+
+    const history_tests = b.addTest(.{ .root_module = module, .filters = &.{"Royal history"} });
+    const history_run = b.addRunArtifact(history_tests);
+    b.step("test-history", "Test bounded-history metadata and row references").dependOn(&history_run.step);
 }
 
 const Overlay = struct {

@@ -599,6 +599,35 @@ public sealed class TerminalRow
 /// </summary>
 internal sealed class TerminalRowBuffer
 {
+    private Guid _historyLayoutEpoch;
+    private bool _historyLayoutInvalidated = true;
+    internal Guid HistoryLayoutEpoch
+    {
+        get
+        {
+            if (_historyLayoutInvalidated)
+            {
+                _historyLayoutEpoch = Guid.NewGuid();
+                _historyLayoutInvalidated = false;
+            }
+            return _historyLayoutEpoch;
+        }
+    }
+    internal long HistoryOrigin { get; private set; }
+
+    internal void InvalidateHistoryLayout()
+    {
+        _historyLayoutInvalidated = true;
+        HistoryOrigin = 0;
+    }
+
+    internal void CopyHistoryLayoutFrom(TerminalRowBuffer source)
+    {
+        _historyLayoutEpoch = source._historyLayoutEpoch;
+        _historyLayoutInvalidated = source._historyLayoutInvalidated;
+        HistoryOrigin = source.HistoryOrigin;
+    }
+
     private TerminalRow?[] _items;
     private int _head;
     private TerminalSearchChangeToken? _searchChanges;
@@ -637,6 +666,7 @@ internal sealed class TerminalRowBuffer
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
             ArgumentNullException.ThrowIfNull(value);
             TrackAddedRow(value);
+            InvalidateHistoryLayout();
             _items[PhysicalIndex(index)] = value;
         }
     }
@@ -670,6 +700,7 @@ internal sealed class TerminalRowBuffer
     internal void PrependRange(ReadOnlySpan<TerminalRow> rows)
     {
         if (rows.IsEmpty) return;
+        InvalidateHistoryLayout();
         foreach (TerminalRow row in rows) ArgumentNullException.ThrowIfNull(row);
         int count = checked(Count + rows.Length);
         EnsureCapacity(count); // All fallible work precedes mutation.
@@ -685,6 +716,7 @@ internal sealed class TerminalRowBuffer
 
     public void Clear()
     {
+        InvalidateHistoryLayout();
         if (Count == 0)
         {
             return;
@@ -717,6 +749,7 @@ internal sealed class TerminalRowBuffer
 
         _searchChanges?.InvalidateStructure();
         ClearPhysicalRange(_head, count);
+        HistoryOrigin = checked(HistoryOrigin + count);
         _head = Count == count ? 0 : (_head + count) % _items.Length;
         Count -= count;
     }
@@ -748,6 +781,7 @@ internal sealed class TerminalRowBuffer
         }
 
         Compact();
+        InvalidateHistoryLayout();
         _searchChanges?.InvalidateStructure();
         Array.Copy(
             _items,
@@ -769,6 +803,7 @@ internal sealed class TerminalRowBuffer
 
     private void RemoveTail(int count)
     {
+        InvalidateHistoryLayout();
         _searchChanges?.InvalidateStructure();
         ClearPhysicalRange(PhysicalIndex(Count - count), count);
         Count -= count;
@@ -899,6 +934,9 @@ public sealed partial class TerminalScreen
             }
 
             _scrollbackLimit = normalizedValue;
+            _rows.InvalidateHistoryLayout();
+            _primaryRows?.InvalidateHistoryLayout();
+            _alternateRows?.InvalidateHistoryLayout();
             if (!_alternateBufferActive)
             {
                 TrimScrollbackRows();
@@ -1535,6 +1573,7 @@ public sealed partial class TerminalScreen
             EnsureAlternateRows();
             if (clear)
             {
+                _rows.InvalidateHistoryLayout();
                 ClearActiveRows();
                 ClearRasterGraphics();
             }
@@ -1558,6 +1597,7 @@ public sealed partial class TerminalScreen
 
         if (clear)
         {
+            _rows.InvalidateHistoryLayout();
             ClearActiveRows();
             ClearRasterGraphics();
         }
@@ -1660,6 +1700,7 @@ public sealed partial class TerminalScreen
     /// </summary>
     public void ClearScrollback()
     {
+        _rows.InvalidateHistoryLayout();
         if (_alternateBufferActive)
         {
             EnsureAlternateRows();
@@ -1678,6 +1719,7 @@ public sealed partial class TerminalScreen
 
     private void ClearHistoryCore(bool reuseNativeTailSlots)
     {
+        _rows.InvalidateHistoryLayout();
         int scrollbackRows = Math.Max(0, _rows.Count - ViewportRows);
         if (scrollbackRows <= 0)
         {
@@ -2341,6 +2383,7 @@ public sealed partial class TerminalScreen
         ArgumentOutOfRangeException.ThrowIfLessThan(columns, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(viewportRows, 1);
 
+        _rows.InvalidateHistoryLayout();
         _renderScrollFraction = 0;
         ClearExternalRenderRows();
         int oldColumns = Columns;
