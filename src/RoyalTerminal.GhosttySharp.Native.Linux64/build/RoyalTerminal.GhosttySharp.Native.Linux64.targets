@@ -5,7 +5,7 @@
     <_RoyalTerminalGhosttyNativeLinux64 Include="$(MSBuildThisFileDirectory)../runtimes/linux-arm64/native/*"
                                         Condition="'$(RuntimeIdentifier)' == 'linux-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
     <NativeLibrary Include="@(_RoyalTerminalGhosttyNativeLinux64)" />
-    <!-- Copy only this package's libraries. NativeLibrary is shared with other packages, whose items may be bare linker inputs such as dbghelp.lib. -->
+    <!-- Copy only this package's libraries. NativeLibrary is shared with other packages, whose items may be linker inputs that are not files to copy. -->
     <None Include="@(_RoyalTerminalGhosttyNativeLinux64)"
           CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)"

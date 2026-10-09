@@ -9,7 +9,7 @@
     <_RoyalTerminalGhosttyNativeWin64 Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-renderer-capi.dll"
                                       Condition="Exists('$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/ghostty-renderer-capi.dll') And ('$(RuntimeIdentifier)' == 'win-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64'))" />
     <NativeLibrary Include="@(_RoyalTerminalGhosttyNativeWin64)" />
-    <!-- Copy only this package's libraries. NativeLibrary is shared with other packages, whose items may be bare linker inputs such as dbghelp.lib. -->
+    <!-- Copy only this package's libraries. NativeLibrary is shared with other packages, whose items may be linker inputs that are not files to copy. -->
     <None Include="@(_RoyalTerminalGhosttyNativeWin64)"
           CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)"
