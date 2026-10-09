@@ -10,6 +10,9 @@ public sealed class TerminalProgramStatusStore
 {
     private readonly List<TerminalProgramStatus> _records = [];
     private readonly ReadOnlyCollection<TerminalProgramStatus> _view;
+    // Index only explicitly named applications. Inheritance remains dynamic,
+    // so replacing/removing a parent immediately changes its descendants.
+    private readonly Dictionary<string, string> _applications = new(StringComparer.Ordinal);
 
     /// <summary>Maximum records per terminal, as specified by OSC 7501.</summary>
     public const int Capacity = 256;
@@ -34,7 +37,7 @@ public sealed class TerminalProgramStatusStore
                 if (report.Id.Length != 0 && id != report.Id &&
                     !(id.StartsWith(report.Id, StringComparison.Ordinal) &&
                       id.Length > report.Id.Length && id[report.Id.Length] == '/')) continue;
-                _records.RemoveAt(i);
+                RemoveAt(i);
                 changed = true;
             }
             return changed;
@@ -44,11 +47,12 @@ public sealed class TerminalProgramStatusStore
         {
             if (_records[i].Id != report.Id) continue;
             if (i == _records.Count - 1 && _records[i] == report) return false;
-            _records.RemoveAt(i);
+            RemoveAt(i);
             break;
         }
-        if (_records.Count == Capacity) _records.RemoveAt(0);
+        if (_records.Count == Capacity) RemoveAt(0);
         _records.Add(report);
+        if (report.App.Length != 0) _applications[report.Id] = report.App;
         return true;
     }
 
@@ -59,7 +63,7 @@ public sealed class TerminalProgramStatusStore
         for (int i = _records.Count - 1; i >= 0; i--)
         {
             if (_records[i].State is not (TerminalProgramStatusState.Working or TerminalProgramStatusState.Blocked)) continue;
-            _records.RemoveAt(i);
+            RemoveAt(i);
             changed = true;
         }
         return changed;
@@ -70,6 +74,7 @@ public sealed class TerminalProgramStatusStore
     {
         if (_records.Count == 0) return false;
         _records.Clear();
+        _applications.Clear();
         return true;
     }
 
@@ -77,17 +82,22 @@ public sealed class TerminalProgramStatusStore
     public string GetApplication(string id)
     {
         ArgumentNullException.ThrowIfNull(id);
+        if (_applications.Count == 0) return string.Empty;
+        Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> applications =
+            _applications.GetAlternateLookup<ReadOnlySpan<char>>();
         ReadOnlySpan<char> candidate = id;
         while (true)
         {
-            for (int i = 0; i < _records.Count; i++)
-            {
-                TerminalProgramStatus record = _records[i];
-                if (candidate.SequenceEqual(record.Id) && record.App.Length != 0) return record.App;
-            }
+            if (applications.TryGetValue(candidate, out string? application)) return application;
             if (candidate.IsEmpty) return string.Empty;
             int separator = candidate.LastIndexOf('/');
             candidate = separator < 0 ? [] : candidate[..separator];
         }
+    }
+
+    private void RemoveAt(int index)
+    {
+        _applications.Remove(_records[index].Id);
+        _records.RemoveAt(index);
     }
 }
