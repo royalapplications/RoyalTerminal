@@ -69,6 +69,41 @@ direction controls escaped and the originating terminal identified. Reports do
 not trigger commands, sounds or desktop notifications. Detection replies preserve
 BEL/ST and contain only the fixed `OSC 7501;?` response.
 
+### October protocol and host additions
+
+Both processors expose `ITerminalLifecycleEffectSource` for owned OSC 133
+command/error bytes and ordered protocol reset effects, and
+`ITerminalUnknownSequencePolicy` for bounded unknown OSC capture. Hosts receive
+reports through `ITerminalEffectSource.UnknownSequenceCallback`; capture defaults
+to 4096 bytes and can be disabled with a zero limit. Known but malformed commands
+and canceled sequences are excluded.
+`ITerminalChecksumPolicy` enables DECRQCRA/XTCHECKSUM explicitly; checksum replies
+remain disabled by default.
+
+`TerminalControl.CursorClickToMove` defaults to true. Unmodified prompt clicks
+use OSC 133's advertised click mode, with correct coordinates across history
+pages. Selection drags and application mouse reporting keep their existing input
+paths. Back/forward mouse buttons are supported through the shared host and both
+encoders, including UTF-8 mouse reports. X10 accepts only the three standard
+buttons. Shared custom shaders now receive `iCursorText`,
+`iSelectionForegroundColor` and `iSelectionBackgroundColor` as RGB uniforms.
+
+### Snapshot compression and memory accounting
+
+Set `GhosttySnapshotDecoder.SetCompressHistory(true)` or
+`ManagedTerminalSnapshotOptions.CompressHistory = true` to compress restored
+scrollback incrementally. Compression is optional and defaults to false. Managed
+rows use lossless Brotli storage, retain copy-on-write ownership and restore only
+when their cells are read or edited. Compression does not change history quotas,
+snapshot formats, READY admission or the active visible viewport.
+
+Both processors implement `ITerminalMemoryUsageSource.GetMemoryUsage()`. The
+report separates primary/alternate storage, compressed payload and Kitty images.
+Native reports use upstream page accounting. Managed reports estimate cell arrays
+and referenced text, excluding CLR headers, allocation metadata, external retained
+snapshots and renderer caches; these values are not process memory measurements.
+Querying memory or cloning row state does not inflate compressed rows.
+
 ### Platform boundaries
 
 The dependency versions are fixed for this delivery: no Avalonia or other
