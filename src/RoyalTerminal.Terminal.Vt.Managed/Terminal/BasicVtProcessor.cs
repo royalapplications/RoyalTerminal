@@ -387,6 +387,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         _screen = screen;
         _publishedScreen = screen;
+        _lastResizeColumns = screen.Columns;
+        _lastResizeRows = screen.ViewportRows;
         _options = options ?? BasicVtProcessorOptions.Default;
         UnknownSequenceMaxBytes = _options.UnknownSequenceMaxBytes;
         TitleReportEnabled = _options.TitleReportEnabled;
@@ -4874,7 +4876,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
                 ApplyResizeState(columns, rows);
             }
-            else if (notifyOnly) ApplyResizeState(columns, rows);
+            else if (notifyOnly && (columns != _lastResizeColumns || rows != _lastResizeRows))
+                ApplyResizeState(columns, rows);
             ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Layout);
             _renderHold = null;
             AdvanceKittyAnimations();
@@ -4892,6 +4895,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // No allocation or host callback between these ownership transfers.
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
+        _lastResizeColumns = columns;
+        _lastResizeRows = rows;
         if (_inAltScreen) _alternateKittyStore = _kittyStore;
         else _primaryKittyStore = _kittyStore;
         SetExtendedDecMode(2026, false);

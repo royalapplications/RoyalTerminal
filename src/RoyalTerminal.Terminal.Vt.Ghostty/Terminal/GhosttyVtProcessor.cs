@@ -3355,6 +3355,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             TerminalMouseButton.Left => 1 << 0,
             TerminalMouseButton.Middle => 1 << 1,
             TerminalMouseButton.Right => 1 << 2,
+            TerminalMouseButton.Back => 1 << 3,
+            TerminalMouseButton.Forward => 1 << 4,
             _ => 0,
         };
     }
@@ -3395,6 +3397,10 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 return true;
             case TerminalMouseButton.Right:
                 value = GhosttyVtNative.GhosttyMouseButtonId.Right;
+                return true;
+            case TerminalMouseButton.Back:
+            case TerminalMouseButton.Forward:
+                value = (GhosttyVtNative.GhosttyMouseButtonId)button;
                 return true;
             default:
                 value = GhosttyVtNative.GhosttyMouseButtonId.Unknown;

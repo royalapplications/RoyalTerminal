@@ -119,3 +119,16 @@ new official callbacks. Managed decoding matches first-option/quoting/percent
 decoding rules and the 2048-byte capture, including malformed and split input.
 The shared line selector already bounds whitespace trimming to the semantic
 range; the new upstream unwritten-gap regression passes in both engines.
+
+October input/resize batch: 241 passed, zero skipped, including six new headless
+cases. Saved pins account for deferred hard breaks and pending wrap before
+clamping; shrinking without reflow clears both halves of a split wide glyph
+and their snapshot metadata. Same-size resize retains margins and updates pixel
+reports. OSC 133 click_events=1/2 now reach both engines through a focused host
+capability; prompt-relative rows use absolute coordinates across page boundaries
+and scrolled viewports. Native reads public cursor/grid APIs. The control excludes
+modified clicks, drags, selections and application mouse reporting; hosts can
+disable cursor-click-to-move. Extended back/forward buttons flow through Avalonia,
+both adapters and every mouse encoding, including UTF-8 button bytes; X10 remains
+limited to the three standard buttons. Native exposes button IDs 10/11 but its
+encoder does not emit them, so the shared host does not claim support for them.

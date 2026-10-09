@@ -1984,8 +1984,12 @@ public sealed partial class TerminalScreen
             if (row.PreservedColumns > row.Columns)
             {
                 using GhosttySnapshotPageTracker.RowEdit styles = EditSnapshotRowMetadata(row);
-                styles.Clear(row.Columns, row.PreservedColumns - row.Columns);
-                row.ClearPreservedCellsFrom(row.Columns, DefaultForeground, DefaultBackground);
+                // A native no-reflow cut also erases the head of a wide glyph
+                // whose trailing cell falls outside the new grid (Ghostty #14509).
+                int start = row.Columns > 0 && row.ReadOnlyCells[^1].Width == 2
+                    ? row.Columns - 1 : row.Columns;
+                styles.Clear(start, row.PreservedColumns - start);
+                row.ClearPreservedCellsFrom(start, DefaultForeground, DefaultBackground);
             }
         }
     }
@@ -2790,7 +2794,6 @@ public sealed partial class TerminalScreen
         mappedColumn = Math.Clamp(trackedColumn, 0, columns);
 
         int nextTrackedPositionIndex = 0;
-        int lastDestinationColumn = 0;
         int rowIndex = 0;
         int sourceRowCount = _rows.Count;
         if (trimTrailingBlankRows)
@@ -2841,13 +2844,12 @@ public sealed partial class TerminalScreen
                         int clampedColumn = Math.Clamp(position.OldColumn, 0, row.Columns);
                         if (position.CellAnchor && clampedColumn >= endExclusive)
                         {
-                            // Ghostty clamps before advancing a deferred newline
-                            // or pending wrap. At a full row the physical cursor
-                            // remains on the last cell, not column zero.
+                            // Deferred hard breaks and pending wraps start at
+                            // column zero in the destination (Ghostty #14478).
                             int destinationColumn = logicalLine.Count == 0
-                                ? lastDestinationColumn
-                                : Math.Min(columns - 1, MapLogicalOffsetToReflowedPosition(
-                                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column);
+                                ? 0
+                                : MapLogicalOffsetToReflowedPosition(
+                                    CollectionsMarshal.AsSpan(logicalLine), columns, logicalLine.Count).Column % columns;
                             clampedColumn = Math.Min(clampedColumn, columns - 1 - destinationColumn);
                         }
                         int effectiveTrackedColumn = position.ExtendLineToColumn
@@ -2913,8 +2915,7 @@ public sealed partial class TerminalScreen
                 trackedLogicalOffset,
                 semanticRows is null ? default : CollectionsMarshal.AsSpan(semanticRows),
                 snapshotAllocation,
-                snapshotSources is null ? default : CollectionsMarshal.AsSpan(snapshotSources),
-                ref lastDestinationColumn);
+                snapshotSources is null ? default : CollectionsMarshal.AsSpan(snapshotSources));
 
             if (mappedLinePosition is { } mappedPosition)
             {
@@ -3042,8 +3043,7 @@ public sealed partial class TerminalScreen
         int trackedLogicalOffset,
         ReadOnlySpan<(int Start, int End, TerminalSemanticPrompt Prompt)> semanticRows,
         GhosttySnapshotReflowAllocation? snapshotAllocation,
-        ReadOnlySpan<GhosttySnapshotReflowAllocation.Source> snapshotSources,
-        ref int lastDestinationColumn)
+        ReadOnlySpan<GhosttySnapshotReflowAllocation.Source> snapshotSources)
     {
         int destinationStart = destination.Count;
         TerminalGridPosition? mappedPosition = null;
@@ -3178,7 +3178,6 @@ public sealed partial class TerminalScreen
             }
             row.WrapsToNext = sourceIndex < logicalLine.Length;
             destination.Add(row);
-            lastDestinationColumn = Math.Min(column, columns - 1);
         }
 
         if (mappedPosition is null && trackedLogicalOffset >= 0)

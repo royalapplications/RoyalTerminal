@@ -118,8 +118,9 @@ public sealed partial class ManagedSnapshotMetadataFailureTests
 
         // First-fit replacement scratch fragments the free bitmap suffix;
         // the 49th scalar cannot reserve 13 contiguous chunks before freeing 12.
-        Assert.Equal((remapped ? " " : "\u263a") + string.Concat(Enumerable.Repeat(mark, 48)), destination.ReadOnlyCells[0].Grapheme);
-        Assert.Equal(remapped ? ' ' : 0x263A, destination.ReadOnlyCells[0].Codepoint);
+        // Charset selection never remaps a transferred grapheme or a scalar above 0xFF.
+        Assert.Equal("\u263a" + string.Concat(Enumerable.Repeat(mark, 48)), destination.ReadOnlyCells[0].Grapheme);
+        Assert.Equal(0x263A, destination.ReadOnlyCells[0].Codepoint);
         Assert.Equal((byte)2, destination.ReadOnlyCells[0].Width);
         Assert.Equal(tail.Grapheme, destination.ReadOnlyCells[1].Grapheme);
         Assert.Equal(tail.Width, destination.ReadOnlyCells[1].Width);
