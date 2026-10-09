@@ -894,9 +894,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         builder.Append("\x1b[")
-            .Append(_cursorRow - (options.Extras.IncludeModes && _originMode ? _scrollTop : 0) + 1)
+            .Append(Math.Max(0, _cursorRow - (options.Extras.IncludeModes && options.Extras.IncludeScrollingRegion && _originMode ? _scrollTop : 0)) + 1)
             .Append(';')
-            .Append(cursorColumn - (options.Extras.IncludeModes && _originMode ? _scrollLeft : 0) + 1)
+            .Append(Math.Max(0, cursorColumn - (options.Extras.IncludeModes && options.Extras.IncludeScrollingRegion && _originMode ? _scrollLeft : 0)) + 1)
             .Append('H');
 
         if (!restoreWrap)

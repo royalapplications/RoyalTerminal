@@ -13,6 +13,19 @@ namespace RoyalTerminal.IntegrationTests;
 public class GhosttyOctoberApiTests
 {
     [GhosttyNativeFact]
+    public void SearchTickRejectsAFreedTerminal()
+    {
+        using GhosttyTerminal terminal = new(20, 4);
+        terminal.Write("find this"u8);
+        using GhosttySearch search = new(terminal);
+        search.SetNeedle("this");
+        search.Feed();
+        terminal.Dispose();
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => search.Tick());
+        Assert.Contains("InvalidValue", error.Message);
+    }
+
+    [GhosttyNativeFact]
     public unsafe void ProgramStatusUsesPublicCallbacksAndPreservesReplyTerminator()
     {
         using GhosttyTerminal terminal = new(20, 4);

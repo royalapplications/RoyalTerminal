@@ -12,6 +12,34 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalShaderPostProcessorTests
 {
+    [Theory]
+    [InlineData("iSelectionForegroundColor", 255, 0, 0)]
+    [InlineData("iSelectionBackgroundColor", 0, 0, 255)]
+    [InlineData("iCursorText", 0, 255, 0)]
+    public void GhosttyColorUniformsRemainDistinct(string uniform, byte red, byte green, byte blue)
+    {
+        TerminalShaderSource source = new("color uniforms",
+            $"void mainImage(out vec4 color, in vec2 pixel) {{ color = vec4({uniform}, 1.0); }}",
+            TerminalShaderLanguage.GhosttyShadertoy);
+        using TerminalShaderPostProcessor processor = TerminalShaderPostProcessor.Create([source]);
+        Assert.True(processor.HasShaders, processor.CompileLog);
+        using SKSurface input = SKSurface.Create(new SKImageInfo(4, 4));
+        using SKSurface output = SKSurface.Create(new SKImageInfo(4, 4));
+        input.Canvas.Clear(SKColors.White);
+        using SKImage image = input.Snapshot();
+        TerminalShaderFrameContext frame = new(4, 4, 0, 0, 0, 1, SKColors.Black, SKColors.White,
+            SKColors.Yellow, default, CursorStyle.Block, true,
+            cursorTextColor: SKColors.Lime, selectionForegroundColor: SKColors.Red, selectionBackgroundColor: SKColors.Blue);
+        Assert.True(processor.TryApply(null, output.Canvas, image, new SKRect(0, 0, 4, 4), frame));
+        using SKImage result = output.Snapshot();
+        using SKBitmap pixels = SKBitmap.FromImage(result);
+        Assert.Equal(new SKColor(red, green, blue), pixels.GetPixel(1, 1));
+        TerminalShaderFrameContext defaults = CreateFrameContext();
+        Assert.Equal(defaults.BackgroundColor, defaults.CursorTextColor);
+        Assert.Equal(defaults.ForegroundColor, defaults.SelectionForegroundColor);
+        Assert.Equal(defaults.BackgroundColor, defaults.SelectionBackgroundColor);
+    }
+
     [Fact]
     public void SharedShellShaderSamples_Compile()
     {

@@ -233,7 +233,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         Ground,
         Escape,
         OscString,
-        OscEscape,
     }
 
     /// <inheritdoc />
@@ -521,6 +520,15 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ProcessShellIntegrationOscByte(byte value)
     {
+        // Match the native parser's global CAN/SUB cancellation. The legacy
+        // command-history observer must not publish a discarded OSC report.
+        if (value is 0x18 or 0x1A)
+        {
+            _shellIntegrationOscBuffer.Clear();
+            _shellIntegrationOscDiscarding = false;
+            _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+            return;
+        }
         switch (_shellIntegrationOscState)
         {
             case ShellIntegrationOscParserState.Ground:
@@ -548,33 +556,19 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 break;
 
             case ShellIntegrationOscParserState.OscString:
-                if (value == 0x07 || value == 0x9C)
+                if (value == 0x07)
                 {
                     HandleShellIntegrationOsc();
                     _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
                 }
                 else if (value == 0x1B)
                 {
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscEscape;
-                }
-                else
-                {
-                    AppendShellIntegrationOscByte(value);
-                }
-
-                break;
-
-            case ShellIntegrationOscParserState.OscEscape:
-                if (value == (byte)'\\')
-                {
                     HandleShellIntegrationOsc();
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Escape;
                 }
-                else
+                else if (value >= 0x20)
                 {
-                    AppendShellIntegrationOscByte(0x1B);
                     AppendShellIntegrationOscByte(value);
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscString;
                 }
 
                 break;
@@ -628,15 +622,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             return;
         }
 
-        if (!int.TryParse(payload.AsSpan(0, separator), out int selectorCode))
+        int selectorCode = payload.AsSpan(0, separator) switch
         {
-            return;
-        }
-
-        if (selectorCode is not 7 and not 133)
-        {
-            return;
-        }
+            "7" => 7,
+            "133" => 133,
+            _ => -1,
+        };
+        if (selectorCode < 0) return;
 
         string value = separator + 1 < payload.Length
             ? payload[(separator + 1)..]

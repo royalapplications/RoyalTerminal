@@ -27,7 +27,10 @@ public readonly record struct TerminalShaderFrameContext
         SKColor cursorColor,
         SKRect cursorRect,
         CursorStyle cursorStyle,
-        bool cursorVisible)
+        bool cursorVisible,
+        SKColor? cursorTextColor = null,
+        SKColor? selectionForegroundColor = null,
+        SKColor? selectionBackgroundColor = null)
     {
         Width = Math.Max(1, width);
         Height = Math.Max(1, height);
@@ -41,6 +44,9 @@ public readonly record struct TerminalShaderFrameContext
         CursorRect = cursorRect;
         CursorStyle = cursorStyle;
         CursorVisible = cursorVisible;
+        CursorTextColor = cursorTextColor ?? backgroundColor;
+        SelectionForegroundColor = selectionForegroundColor ?? foregroundColor;
+        SelectionBackgroundColor = selectionBackgroundColor ?? backgroundColor;
     }
 
     /// <summary>Gets the framebuffer width in pixels.</summary>
@@ -69,6 +75,15 @@ public readonly record struct TerminalShaderFrameContext
 
     /// <summary>Gets the current cursor color.</summary>
     public SKColor CursorColor { get; }
+
+    /// <summary>Gets the text color under the cursor, exposed as iCursorText.</summary>
+    public SKColor CursorTextColor { get; }
+
+    /// <summary>Gets the selection text color, exposed as iSelectionForegroundColor.</summary>
+    public SKColor SelectionForegroundColor { get; }
+
+    /// <summary>Gets the selection fill color, exposed as iSelectionBackgroundColor.</summary>
+    public SKColor SelectionBackgroundColor { get; }
 
     /// <summary>Gets the current cursor rectangle in framebuffer coordinates.</summary>
     public SKRect CursorRect { get; }
