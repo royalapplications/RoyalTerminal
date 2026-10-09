@@ -6097,6 +6097,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             if (ReferenceEquals(_activeTransportExitHandler, exitHandler)) _activeTransportExitHandler = null;
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            EndProgramStatusProcess();
             _windowResizeQueue?.Reset();
             ResetPendingTransportOutputQueue();
             ResetKeyboardInputState();
