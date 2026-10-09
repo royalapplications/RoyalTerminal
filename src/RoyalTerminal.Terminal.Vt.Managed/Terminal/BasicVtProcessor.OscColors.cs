@@ -9,6 +9,11 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    private void ResetPaletteOverrides()
+    {
+        if (_colors.ResetPalette(null)) ApplyEffectiveTheme(_colors.GetEffectiveTheme());
+    }
+
     private static bool TryOscColorOperation(ReadOnlySpan<byte> selector, out int operation)
     {
         operation = 0;

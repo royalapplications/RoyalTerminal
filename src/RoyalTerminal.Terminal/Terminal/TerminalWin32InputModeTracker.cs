@@ -250,12 +250,7 @@ public sealed class TerminalWin32InputModeTracker
                 }
             }
         }
-        else if (_privateMarker == '!' && finalByte == 'p') // DECSTR
-        {
-            _win32InputMode = false;
-            _focusEventMode = false;
-        }
-
+        // DECSTR preserves focus and Win32 input modes. RIS resets both.
         _state = ParserState.Ground;
         ResetCsiParser();
     }

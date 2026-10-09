@@ -51,7 +51,7 @@ checked on October 9; there are no subsequent changes to port.
 - [x] Bind new public C types/options/callbacks/functions; regenerate ABI audit.
 - [x] OSC 7501 parser, bounded record store, native callbacks, lifecycle and host UI.
 - [ ] Unknown OSC capture, terminators, cancellation and numeric validation.
-- [ ] DECSTR and RIS palette behavior; charset single shift and Unicode handling.
+- [x] DECSTR and RIS palette behavior; charset single shift and Unicode handling.
 - [ ] DECRQCRA/XTCHECKSUM and configurable device attributes.
 - [ ] Mouse shape, UTF-8 mouse buttons, modified backspace and prompt-click fixes.
 - [ ] Resize/reflow, saved cursor, line-selection and Kitty placeholder regressions.
@@ -93,3 +93,13 @@ TerminalControl coalesces immutable snapshots onto the UI thread, handles real
 transport exit/stop, and discards old processor state on replacement. The app's
 compiled-XAML status bar displays the most urgent record and all records in a
 tooltip, labels the originating terminal, and escapes invisible direction text.
+
+Reset/charset regression batch: 440 passed. Follow-up reset, pointer and input
+tracker batch: 87 passed. DECSTR now resets only Ghostty's defined mode subset,
+active saved cursor, pen, protection, charset, modifyOtherKeys and palette;
+it preserves dynamic colors, text/cursor, pending wrap, tabs, links, keyboard
+stacks and other modes. RIS also restores palette overrides. Single shift is
+consumed by exactly one input scalar, including combining characters; internal
+spacers are raw writes and non-8-bit Unicode bypasses legacy charset mapping.
+Live pending-wrap cursors advance after resize when no longer at the right edge.
+Empty OSC 22 restores the text pointer in both engines.

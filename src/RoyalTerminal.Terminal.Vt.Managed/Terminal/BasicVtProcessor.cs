@@ -1248,6 +1248,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        // A single shift belongs to one input scalar, including a combining
+        // character. Internal spacer writes must not consume or remap it.
+        int mappedCodepoint = _charsets.MapPrintedCell(codepoint);
         bool graphemeClusters = _extendedDecModes.Contains(ManagedDecModeFlag.GraphemeClusters);
         // The byte-sized fast path never joins a grapheme in Ghostty's printer.
         // Zero-width and cluster continuations must be considered before wrapping.
@@ -1269,6 +1272,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (width == 2 && _screen.Columns == 1)
         {
             codepoint = 0;
+            mappedCodepoint = 0;
             width = 1;
         }
 
@@ -1332,7 +1336,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ClearCellAndWideArtifacts(row, _cursorCol + 1);
         }
 
-        WriteCellFromPen(row, _cursorCol, codepoint, (byte)width);
+        WriteCellFromPen(row, _cursorCol, mappedCodepoint, (byte)width);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
             WriteCellFromPen(row, _cursorCol + 1, 0, 0);
@@ -1346,7 +1350,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
     {
         if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
-        cell.Codepoint = _charsets.MapPrintedCell(codepoint);
+        cell.Codepoint = codepoint;
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
@@ -2107,7 +2111,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         if (rawPayload.StartsWith("22;"u8))
         {
-            if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
+            if (rawPayload.Length == 3) MouseShape = TerminalMouseShape.Text;
+            else if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
             _oscBuffer.Clear();
             return;
         }
@@ -4510,42 +4515,23 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SoftReset()
     {
-        EndRenderHold();
-        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
-        _cursorVisible = true;
-        _originMode = false;
-        _autoWrap = true;
-        _applicationCursorKeys = false;
-        _applicationKeypad = false;
-        _backarrowKeyMode = false;
-        _saveCursorMode = false;
-        _bracketedPaste = false;
-        _win32InputMode = false;
-        _keyboardLocked = false;
-        _sendReceiveMode = true;
-        ResetExtendedDecModesToDefaults();
-        _sixelDisplayMode = false;
-        ResetSavedAndScreenModes();
-        _insertMode = false;
-        _lineFeedNewLineMode = false;
-        ResetDelayedWrap();
+        // Ghostty DECSTR resets this precise mode subset to configured defaults.
+        // Other protocol modes, saved mode banks, tabs and pending wrap survive.
+        foreach (int mode in (ReadOnlySpan<int>)[25, 6, 7, 45, 1045, 1, 66, 69])
+            RestoreDefaultMode(mode, ansi: false);
+        RestoreDefaultMode(2, ansi: true);
+        RestoreDefaultMode(4, ansi: true);
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();
         _charsets = new();
-        _lastGraphicCodepoint = -1;
-        _oscBuffer.Clear();
-        _isDiscardingOscPayload = false;
-        _dcsBuffer.Clear();
-        _isDiscardingDcsPayload = false;
-        ResetApcCommand();
-        _currentHyperlinkId = 0;
-        _kittyKeyboardMain = default;
-        _kittyKeyboardAlt = default;
+        _currentProtected = false;
+        SavedCursor = null;
+        _statusDisplay = 0;
+        ModifyOtherKeys2 = false;
         ResetAttributes();
-        InitTabStops();
-        ApplyConfiguredModeDefaults();
         SetCursorStyle(0);
+        ResetPaletteOverrides();
     }
 
     #endregion
@@ -4722,6 +4708,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetAttributes();
         InitTabStops();
         ApplyConfiguredModeDefaults();
+        ResetPaletteOverrides();
 
         // Ghostty fullReset selects the configured cursor after modes.reset;
         // this policy takes precedence over the restored default mode bank.
@@ -5046,6 +5033,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         _cursorCol = Math.Clamp(mappedCursor.Column, 0, safeColumns - 1);
         _delayedWrap = restoreDelayedWrapAtEnd;
+        if (_delayedWrap && _cursorCol != safeColumns - 1)
+        {
+            _cursorCol++;
+            _delayedWrap = false;
+        }
     }
 
     /// <inheritdoc />
