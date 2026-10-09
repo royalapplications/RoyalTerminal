@@ -1,10 +1,12 @@
 <Project>
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
-    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/*"
-                   Condition="'$(RuntimeIdentifier)' == 'linux-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64')" />
-    <NativeLibrary Include="$(MSBuildThisFileDirectory)../runtimes/linux-arm64/native/*"
-                   Condition="'$(RuntimeIdentifier)' == 'linux-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
-    <None Include="@(NativeLibrary)"
+    <_RoyalTerminalGhosttyNativeLinux64 Include="$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/*"
+                                        Condition="'$(RuntimeIdentifier)' == 'linux-x64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'X64')" />
+    <_RoyalTerminalGhosttyNativeLinux64 Include="$(MSBuildThisFileDirectory)../runtimes/linux-arm64/native/*"
+                                        Condition="'$(RuntimeIdentifier)' == 'linux-arm64' Or ('$(RuntimeIdentifier)' == '' And '$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)' == 'Arm64')" />
+    <NativeLibrary Include="@(_RoyalTerminalGhosttyNativeLinux64)" />
+    <!-- Copy only this package's libraries. NativeLibrary is shared with other packages, whose items may be bare linker inputs such as dbghelp.lib. -->
+    <None Include="@(_RoyalTerminalGhosttyNativeLinux64)"
           CopyToOutputDirectory="PreserveNewest"
           Link="%(Filename)%(Extension)"
           Visible="false" />
