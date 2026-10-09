@@ -12,6 +12,21 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalShaderPostProcessorTests
 {
+    [Fact]
+    public void ExistingFrameConstructorUsesDefaultTextAndSelectionColors()
+    {
+        TerminalShaderFrameContext frame = new(4, 6, 2, 0.5f, 3, 2, SKColors.Navy, SKColors.White,
+            SKColors.Yellow, new SKRect(1, 2, 3, 4), CursorStyle.Block, true);
+        Assert.Equal((4, 6, 2f, 0.5f, 3, 2f), (frame.Width, frame.Height, frame.Time, frame.TimeDelta, frame.Frame, frame.Scale));
+        Assert.Equal(SKColors.Yellow, frame.CursorColor);
+        Assert.Equal(new SKRect(1, 2, 3, 4), frame.CursorRect);
+        Assert.Equal(CursorStyle.Block, frame.CursorStyle);
+        Assert.True(frame.CursorVisible);
+        Assert.Equal(SKColors.Navy, frame.CursorTextColor);
+        Assert.Equal(SKColors.White, frame.SelectionForegroundColor);
+        Assert.Equal(SKColors.Navy, frame.SelectionBackgroundColor);
+    }
+
     [Theory]
     [InlineData("iSelectionForegroundColor", 255, 0, 0)]
     [InlineData("iSelectionBackgroundColor", 0, 0, 255)]

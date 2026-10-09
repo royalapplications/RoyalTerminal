@@ -27,6 +27,27 @@ public readonly record struct TerminalShaderFrameContext
         SKColor cursorColor,
         SKRect cursorRect,
         CursorStyle cursorStyle,
+        bool cursorVisible)
+        : this(width, height, time, timeDelta, frame, scale, backgroundColor, foregroundColor,
+            cursorColor, cursorRect, cursorStyle, cursorVisible, null, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a shader frame context with cursor-text and selection colors.
+    /// </summary>
+    public TerminalShaderFrameContext(
+        int width,
+        int height,
+        float time,
+        float timeDelta,
+        int frame,
+        float scale,
+        SKColor backgroundColor,
+        SKColor foregroundColor,
+        SKColor cursorColor,
+        SKRect cursorRect,
+        CursorStyle cursorStyle,
         bool cursorVisible,
         SKColor? cursorTextColor = null,
         SKColor? selectionForegroundColor = null,

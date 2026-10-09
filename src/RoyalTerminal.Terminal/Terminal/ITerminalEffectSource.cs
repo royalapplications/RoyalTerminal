@@ -135,7 +135,22 @@ public sealed record TerminalUnknownSequence(
     TerminalUnknownSequenceType Type,
     byte[] Content,
     bool Truncated,
-    TerminalOscTerminator Terminator = TerminalOscTerminator.St);
+    TerminalOscTerminator Terminator)
+{
+    /// <summary>Initializes a captured sequence with the default ST terminator.</summary>
+    public TerminalUnknownSequence(TerminalUnknownSequenceType Type, byte[] Content, bool Truncated)
+        : this(Type, Content, Truncated, TerminalOscTerminator.St)
+    {
+    }
+
+    /// <summary>Deconstructs the sequence without requiring terminator metadata.</summary>
+    public void Deconstruct(out TerminalUnknownSequenceType Type, out byte[] Content, out bool Truncated)
+    {
+        Type = this.Type;
+        Content = this.Content;
+        Truncated = this.Truncated;
+    }
+}
 
 /// <summary>A terminal-requested desktop notification.</summary>
 /// <param name="Title">Notification title, or an empty string.</param>
