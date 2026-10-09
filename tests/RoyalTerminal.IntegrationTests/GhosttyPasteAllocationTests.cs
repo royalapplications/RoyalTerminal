@@ -32,17 +32,27 @@ public unsafe class GhosttyPasteAllocationTests
                 request.Reader = new((nint)(delegate* unmanaged[Cdecl]<nint, GhosttyString, GhosttyWriter, byte>)&Read,
                     (nint)(&context));
                 context.Fail = true;
-                Assert.Equal(GhosttyResult.OutOfMemory, TerminalPaste(terminal, &request, out bool written));
-                Assert.False(written);
+                // paste.h defines out_written only on success. On failure,
+                // verify the PTY effect directly instead of reading unspecified data.
+                Assert.Equal(GhosttyResult.OutOfMemory, TerminalPaste(terminal, &request, out _));
                 Assert.Equal(1, context.Reads);
                 Assert.Equal(1, context.Refusals);
                 Assert.Equal(0, context.Writes);
+                Assert.Equal(0, context.BytesWritten);
+
+                context.Fail = false;
+                Assert.Equal(GhosttyResult.Success, TerminalPaste(terminal, &request, out bool written));
+                Assert.True(written);
+                Assert.Equal(2, context.Reads);
+                Assert.Equal(1, context.Refusals);
+                Assert.True(context.Writes > 0);
+                Assert.Equal(5, context.BytesWritten);
             }
         }
         finally { TerminalFree(terminal); }
     }
 
-    private struct Context { public bool Fail; public int Reads; public int Refusals; public int Writes; }
+    private struct Context { public bool Fail; public int Reads; public int Refusals; public int Writes; public int BytesWritten; }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void* Allocate(void* context, nuint length, byte alignment, nuint returnAddress)
@@ -74,5 +84,9 @@ public unsafe class GhosttyPasteAllocationTests
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void WritePty(nint terminal, nint userdata, nint data, nuint length) => ((Context*)userdata)->Writes++;
+    private static void WritePty(nint terminal, nint userdata, nint data, nuint length)
+    {
+        ((Context*)userdata)->Writes++;
+        ((Context*)userdata)->BytesWritten += (int)length;
+    }
 }

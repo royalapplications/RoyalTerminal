@@ -837,6 +837,9 @@ public static partial class GhosttyVtNative
         }
     }
 
+    /// <summary>Pastes according to terminal modes. <paramref name="written"/>
+    /// is defined only when the result is <see cref="GhosttyResult.Success"/>;
+    /// errors send no output to the PTY.</summary>
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_paste")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult TerminalPaste(
