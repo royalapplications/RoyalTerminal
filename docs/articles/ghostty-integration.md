@@ -13,10 +13,15 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
-The current dependency target is `b40acce58dcf77df52231c3798ea58e924647c89`,
-refreshed from `622b4eec` after checking upstream HEAD. Ghostling remains the
+The current dependency target is `246f702876b924a1cb7cade1e99274d1470302fc`,
+refreshed from `b40acce58` after checking upstream HEAD on October 9. Ghostling remains the
 reference consumer at `63842bf8e5e481160f81d348da9ff6fd27986798`.
-The native refresh includes [word-selection hard-break fixes](https://github.com/ghostty-org/ghostty/pull/14354),
+The [October update audit](../specs/ghostty-update-2026-10-09.md) tracks native and
+managed delivery. The native wrapper now exposes OSC 7501, OSC 133/reset callbacks,
+unknown OSC capture, checksum options, pointer shape, memory usage, and compressed
+snapshot restoration through public upstream APIs.
+
+The preceding native refresh includes [word-selection hard-break fixes](https://github.com/ghostty-org/ghostty/pull/14354),
 [wide-character selection](https://github.com/ghostty-org/ghostty/pull/14391),
 [reverse-wrap correction](https://github.com/ghostty-org/ghostty/pull/14390),
 [charset batching](https://github.com/ghostty-org/ghostty/pull/14356),
@@ -35,7 +40,7 @@ height excludes overscan. Dirty iterator indices start at the highest captured
 row, so callers requesting overscan must use signed viewport Y for placement.
 IDs support equality/hash lookup only; reusing a row cache also requires a clear
 dirty flag. Existing callers request zero overscan and retain their viewport-only
-iteration contract. Native builds, the 161-type/27-callback ABI manifest and
+iteration contract. Native builds, the 172-type/30-callback ABI manifest and
 regression execution passed in the current integration validation.
 
 The desktop action mirror also includes the appended `CopyTitleToClipboard`,

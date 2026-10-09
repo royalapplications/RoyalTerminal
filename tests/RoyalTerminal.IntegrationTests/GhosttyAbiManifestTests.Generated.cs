@@ -586,6 +586,50 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     }
 
     [GhosttyNativeFact]
+    public unsafe void GhosttyMouseShape()
+    {
+        JsonElement type = Type("GhosttyMouseShape", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyMouseShape>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(35, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Default, values.GetProperty("DEFAULT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.ContextMenu, values.GetProperty("CONTEXT_MENU").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Help, values.GetProperty("HELP").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Pointer, values.GetProperty("POINTER").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Progress, values.GetProperty("PROGRESS").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Wait, values.GetProperty("WAIT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Cell, values.GetProperty("CELL").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Crosshair, values.GetProperty("CROSSHAIR").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Text, values.GetProperty("TEXT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.VerticalText, values.GetProperty("VERTICAL_TEXT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Alias, values.GetProperty("ALIAS").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Copy, values.GetProperty("COPY").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Move, values.GetProperty("MOVE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NoDrop, values.GetProperty("NO_DROP").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NotAllowed, values.GetProperty("NOT_ALLOWED").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Grab, values.GetProperty("GRAB").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.Grabbing, values.GetProperty("GRABBING").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.AllScroll, values.GetProperty("ALL_SCROLL").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.ColResize, values.GetProperty("COL_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.RowResize, values.GetProperty("ROW_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NResize, values.GetProperty("N_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.EResize, values.GetProperty("E_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.SResize, values.GetProperty("S_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.WResize, values.GetProperty("W_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NeResize, values.GetProperty("NE_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NwResize, values.GetProperty("NW_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.SeResize, values.GetProperty("SE_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.SwResize, values.GetProperty("SW_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.EwResize, values.GetProperty("EW_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NsResize, values.GetProperty("NS_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NeswResize, values.GetProperty("NESW_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.NwseResize, values.GetProperty("NWSE_RESIZE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.ZoomIn, values.GetProperty("ZOOM_IN").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyMouseShape.ZoomOut, values.GetProperty("ZOOM_OUT").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
     public unsafe void GhosttyMouseTrackingMode()
     {
         JsonElement type = Type("GhosttyMouseTrackingMode", "enum");
@@ -634,9 +678,12 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyOscCommandData", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyOscCommandData>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(3, values.EnumerateObject().Count());
+        Assert.Equal(6, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandData.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandData.ChangeWindowTitleStr, values.GetProperty("CHANGE_WINDOW_TITLE_STR").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandData.UnknownContent, values.GetProperty("UNKNOWN_CONTENT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandData.UnknownTruncated, values.GetProperty("UNKNOWN_TRUNCATED").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandData.UnknownTerminator, values.GetProperty("UNKNOWN_TERMINATOR").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -646,7 +693,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyOscCommandType", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyOscCommandType>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(28, values.EnumerateObject().Count());
+        Assert.Equal(30, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.ChangeWindowTitle, values.GetProperty("CHANGE_WINDOW_TITLE").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.ChangeWindowIcon, values.GetProperty("CHANGE_WINDOW_ICON").GetInt64());
@@ -674,7 +721,32 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.KittyDragAndDropProtocol, values.GetProperty("KITTY_DND_PROTOCOL").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.ContextSignal, values.GetProperty("CONTEXT_SIGNAL").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.KittyDesktopNotification, values.GetProperty("KITTY_DESKTOP_NOTIFICATION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.Unknown, values.GetProperty("UNKNOWN").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscCommandType.ProgramStatus, values.GetProperty("PROGRAM_STATUS").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("TYPE_MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyOscOption()
+    {
+        JsonElement type = Type("GhosttyOscOption", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyOscOption>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(2, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscOption.UnknownMaxBytes, values.GetProperty("UNKNOWN_MAX_BYTES").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyOscTerminator()
+    {
+        JsonElement type = Type("GhosttyOscTerminator", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyOscTerminator>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(3, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscTerminator.St, values.GetProperty("ST").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyOscTerminator.Bel, values.GetProperty("BEL").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
     [GhosttyNativeFact]
@@ -700,6 +772,36 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttyPointTag.Viewport, values.GetProperty("VIEWPORT").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyPointTag.Screen, values.GetProperty("SCREEN").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyPointTag.History, values.GetProperty("HISTORY").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyProgramStatusKind()
+    {
+        JsonElement type = Type("GhosttyProgramStatusKind", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyProgramStatusKind>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(5, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusKind.None, values.GetProperty("NONE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusKind.Permission, values.GetProperty("PERMISSION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusKind.Question, values.GetProperty("QUESTION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusKind.Auth, values.GetProperty("AUTH").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyProgramStatusState()
+    {
+        JsonElement type = Type("GhosttyProgramStatusState", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyProgramStatusState>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(7, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Idle, values.GetProperty("IDLE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Working, values.GetProperty("WORKING").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Done, values.GetProperty("DONE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Blocked, values.GetProperty("BLOCKED").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Error, values.GetProperty("ERROR").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyProgramStatusState.Clear, values.GetProperty("CLEAR").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1042,6 +1144,35 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     }
 
     [GhosttyNativeFact]
+    public unsafe void GhosttySemanticPromptKind()
+    {
+        JsonElement type = Type("GhosttySemanticPromptKind", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttySemanticPromptKind>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(6, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptKind.Invalid, values.GetProperty("INVALID").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptKind.PromptStart, values.GetProperty("PROMPT_START").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptKind.InputStart, values.GetProperty("INPUT_START").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptKind.OutputStart, values.GetProperty("OUTPUT_START").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptKind.CommandEnd, values.GetProperty("COMMAND_END").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttySemanticPromptPromptKind()
+    {
+        JsonElement type = Type("GhosttySemanticPromptPromptKind", "enum");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttySemanticPromptPromptKind>(type);
+        JsonElement values = type.GetProperty("values");
+        Assert.Equal(5, values.EnumerateObject().Count());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptPromptKind.Primary, values.GetProperty("PRIMARY").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptPromptKind.Right, values.GetProperty("RIGHT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptPromptKind.Continuation, values.GetProperty("CONTINUATION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySemanticPromptPromptKind.Secondary, values.GetProperty("SECONDARY").GetInt64());
+        Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
+    }
+
+    [GhosttyNativeFact]
     public unsafe void GhosttySgrAttributeTag()
     {
         JsonElement type = Type("GhosttySgrAttributeTag", "enum");
@@ -1118,7 +1249,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttySnapshotDecoderData", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttySnapshotDecoderData>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(10, values.EnumerateObject().Count());
+        Assert.Equal(11, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.MaxContinuationBytes, values.GetProperty("MAX_CONTINUATION_BYTES").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.SourceOffset, values.GetProperty("SOURCE_OFFSET").GetInt64());
@@ -1128,6 +1259,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.ProgressRows, values.GetProperty("PROGRESS_ROWS").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.ProgressRemaining, values.GetProperty("PROGRESS_REMAINING").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.RetainContinuation, values.GetProperty("RETAIN_CONTINUATION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderData.CompressHistory, values.GetProperty("COMPRESS_HISTORY").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1137,9 +1269,10 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttySnapshotDecoderOption", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttySnapshotDecoderOption>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(3, values.EnumerateObject().Count());
+        Assert.Equal(4, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderOption.MaxContinuationBytes, values.GetProperty("MAX_CONTINUATION_BYTES").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderOption.RetainContinuation, values.GetProperty("RETAIN_CONTINUATION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttySnapshotDecoderOption.CompressHistory, values.GetProperty("COMPRESS_HISTORY").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1229,7 +1362,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyTerminalData", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalData>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(42, values.EnumerateObject().Count());
+        Assert.Equal(44, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.Invalid, values.GetProperty("INVALID").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.Cols, values.GetProperty("COLS").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.Rows, values.GetProperty("ROWS").GetInt64());
@@ -1271,6 +1404,8 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.VtGround, values.GetProperty("VT_GROUND").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.CursorAtPrompt, values.GetProperty("CURSOR_AT_PROMPT").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.ClipboardWriteMaxBytes, values.GetProperty("CLIPBOARD_WRITE_MAX_BYTES").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.MouseShape, values.GetProperty("MOUSE_SHAPE").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalData.MemoryUsage, values.GetProperty("MEMORY_USAGE").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1280,7 +1415,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyTerminalOption", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalOption>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(43, values.EnumerateObject().Count());
+        Assert.Equal(48, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.Userdata, values.GetProperty("USERDATA").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.WritePty, values.GetProperty("WRITE_PTY").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.Bell, values.GetProperty("BELL").GetInt64());
@@ -1323,6 +1458,11 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.ClipboardWriteMaxBytes, values.GetProperty("CLIPBOARD_WRITE_MAX_BYTES").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.ResizePullScrollback, values.GetProperty("RESIZE_PULL_SCROLLBACK").GetInt64());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.RenderHold, values.GetProperty("RENDER_HOLD").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.SemanticPrompt, values.GetProperty("SEMANTIC_PROMPT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.Reset, values.GetProperty("RESET").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.XtChecksumReport, values.GetProperty("XT_CHECKSUM_REPORT").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.XtChecksumExtension, values.GetProperty("XT_CHECKSUM_EXTENSION").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalOption.ProgramStatus, values.GetProperty("PROGRAM_STATUS").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -1373,8 +1513,9 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         JsonElement type = Type("GhosttyTerminalUnknownSequenceTag", "enum");
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalUnknownSequenceTag>(type);
         JsonElement values = type.GetProperty("values");
-        Assert.Equal(2, values.EnumerateObject().Count());
+        Assert.Equal(3, values.EnumerateObject().Count());
         Assert.Equal((long)GhosttyVtNative.GhosttyTerminalUnknownSequenceTag.Apc, values.GetProperty("APC").GetInt64());
+        Assert.Equal((long)GhosttyVtNative.GhosttyTerminalUnknownSequenceTag.Osc, values.GetProperty("OSC").GetInt64());
         Assert.Equal(int.MaxValue, values.GetProperty("MAX_VALUE").GetInt64());
     }
 
@@ -2091,6 +2232,30 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     }
 
     [GhosttyNativeFact]
+    public unsafe void GhosttyTerminalMemoryUsage()
+    {
+        JsonElement type = Type("GhosttyTerminalMemoryUsage", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalMemoryUsage>(type);
+        GhosttyVtNative.GhosttyTerminalMemoryUsage value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Equal(14, fields.EnumerateObject().Count());
+        CheckField(fields, "size", (byte*)(&value.Size) - (byte*)&value, sizeof(nuint));
+        CheckField(fields, "compression_supported", (byte*)(&value.CompressionSupported) - (byte*)&value, sizeof(bool));
+        CheckField(fields, "primary_pages", (byte*)(&value.PrimaryPages) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "primary_virtual_bytes", (byte*)(&value.PrimaryVirtualBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "primary_resident_bytes", (byte*)(&value.PrimaryResidentBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "primary_compressed_pages", (byte*)(&value.PrimaryCompressedPages) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "primary_compressed_bytes", (byte*)(&value.PrimaryCompressedBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "primary_image_bytes", (byte*)(&value.PrimaryImageBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_pages", (byte*)(&value.AlternatePages) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_virtual_bytes", (byte*)(&value.AlternateVirtualBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_resident_bytes", (byte*)(&value.AlternateResidentBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_compressed_pages", (byte*)(&value.AlternateCompressedPages) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_compressed_bytes", (byte*)(&value.AlternateCompressedBytes) - (byte*)&value, sizeof(ulong));
+        CheckField(fields, "alternate_image_bytes", (byte*)(&value.AlternateImageBytes) - (byte*)&value, sizeof(ulong));
+    }
+
+    [GhosttyNativeFact]
     public unsafe void GhosttyTerminalModeConfig()
     {
         JsonElement type = Type("GhosttyTerminalModeConfig", "struct");
@@ -2100,6 +2265,24 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal(2, fields.EnumerateObject().Count());
         CheckField(fields, "mode", (byte*)(&value.Mode) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyMode));
         CheckField(fields, "value", (byte*)(&value.Value) - (byte*)&value, sizeof(bool));
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyTerminalProgramStatus()
+    {
+        JsonElement type = Type("GhosttyTerminalProgramStatus", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalProgramStatus>(type);
+        GhosttyVtNative.GhosttyTerminalProgramStatus value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Equal(8, fields.EnumerateObject().Count());
+        CheckField(fields, "size", (byte*)(&value.Size) - (byte*)&value, sizeof(nuint));
+        CheckField(fields, "state", (byte*)(&value.State) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyProgramStatusState));
+        CheckField(fields, "kind", (byte*)(&value.Kind) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyProgramStatusKind));
+        CheckField(fields, "progress", (byte*)(&value.Progress) - (byte*)&value, sizeof(sbyte));
+        CheckField(fields, "id", (byte*)(&value.Id) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+        CheckField(fields, "app", (byte*)(&value.App) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+        CheckField(fields, "title", (byte*)(&value.Title) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+        CheckField(fields, "message", (byte*)(&value.Message) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
     }
 
     [GhosttyNativeFact]
@@ -2213,6 +2396,36 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     }
 
     [GhosttyNativeFact]
+    public unsafe void GhosttyTerminalSemanticPrompt()
+    {
+        JsonElement type = Type("GhosttyTerminalSemanticPrompt", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalSemanticPrompt>(type);
+        GhosttyVtNative.GhosttyTerminalSemanticPrompt value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Equal(7, fields.EnumerateObject().Count());
+        CheckField(fields, "size", (byte*)(&value.Size) - (byte*)&value, sizeof(nuint));
+        CheckField(fields, "kind", (byte*)(&value.Kind) - (byte*)&value, sizeof(GhosttyVtNative.GhosttySemanticPromptKind));
+        CheckField(fields, "prompt_kind", (byte*)(&value.PromptKind) - (byte*)&value, sizeof(GhosttyVtNative.GhosttySemanticPromptPromptKind));
+        CheckField(fields, "has_exit_code", (byte*)(&value.HasExitCode) - (byte*)&value, sizeof(bool));
+        CheckField(fields, "exit_code", (byte*)(&value.ExitCode) - (byte*)&value, sizeof(int));
+        CheckField(fields, "command", (byte*)(&value.Command) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+        CheckField(fields, "error", (byte*)(&value.Error) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+    }
+
+    [GhosttyNativeFact]
+    public unsafe void GhosttyTerminalUnknownOscSequence()
+    {
+        JsonElement type = Type("GhosttyTerminalUnknownOscSequence", "struct");
+        CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalUnknownOscSequence>(type);
+        GhosttyVtNative.GhosttyTerminalUnknownOscSequence value = default;
+        JsonElement fields = type.GetProperty("fields");
+        Assert.Equal(3, fields.EnumerateObject().Count());
+        CheckField(fields, "truncated", (byte*)(&value.Truncated) - (byte*)&value, sizeof(bool));
+        CheckField(fields, "content", (byte*)(&value.Content) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyString));
+        CheckField(fields, "terminator", (byte*)(&value.Terminator) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyOscTerminator));
+    }
+
+    [GhosttyNativeFact]
     public unsafe void GhosttyTerminalUnknownSequence()
     {
         JsonElement type = Type("GhosttyTerminalUnknownSequence", "struct");
@@ -2231,8 +2444,9 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         CheckSizeAndAlignment<GhosttyVtNative.GhosttyTerminalUnknownSequenceValue>(type);
         GhosttyVtNative.GhosttyTerminalUnknownSequenceValue value = default;
         JsonElement fields = type.GetProperty("fields");
-        Assert.Equal(2, fields.EnumerateObject().Count());
+        Assert.Equal(3, fields.EnumerateObject().Count());
         CheckField(fields, "apc", (byte*)(&value.Apc) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyTerminalUnknownStringSequence));
+        CheckField(fields, "osc", (byte*)(&value.Osc) - (byte*)&value, sizeof(GhosttyVtNative.GhosttyTerminalUnknownOscSequence));
         Assert.Equal(0, fields.GetProperty("_padding").GetProperty("offset").GetInt32());
     }
 
@@ -2449,7 +2663,7 @@ public sealed class GhosttyAbiManifestTests : IDisposable
     {
         _manifest ??= JsonDocument.Parse(GhosttyVtHelpers.GetTypeMetadataJson());
         JsonElement types = _manifest.RootElement.GetProperty("types");
-        Assert.Equal(161, types.EnumerateObject().Count());
+        Assert.Equal(172, types.EnumerateObject().Count());
         JsonElement type = types.GetProperty(name);
         Assert.Equal(kind, type.GetProperty("kind").GetString());
         return type;

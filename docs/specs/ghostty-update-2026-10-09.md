@@ -44,8 +44,8 @@ checked on October 9; there are no subsequent changes to port.
 
 ## Delivery checklist
 
-- [ ] Refresh native pin, review overlays, build both native libraries.
-- [ ] Bind new public C types/options/callbacks/functions; regenerate ABI audit.
+- [x] Refresh native pin, review overlays, build both native libraries (macOS arm64).
+- [x] Bind new public C types/options/callbacks/functions; regenerate ABI audit.
 - [ ] OSC 7501 parser, bounded record store, native callbacks, lifecycle and host UI.
 - [ ] Unknown OSC capture, terminators, cancellation and numeric validation.
 - [ ] DECSTR and RIS palette behavior; charset single shift and Unicode handling.
@@ -60,4 +60,17 @@ checked on October 9; there are no subsequent changes to port.
 ## Validation log
 
 Initial environment: .NET SDK 10.0.201; Zig 0.16.0. Native runtime host: macOS.
-No validation has been claimed yet.
+Both native libraries rebuilt successfully. The six changed overlay inputs retain
+all exact fragment matches; none of the upstream changes replaces the separate
+dirty-row, hyperlink ownership, clone rollback or notification/resize hooks.
+Reviewed changes add checksum/reset/parser effects, correct charset printing,
+reflow pins/wide-cell cuts and add memory/compression APIs. The three other
+overlay input files are byte-for-byte unchanged. All nine full-file hash guards
+and fragment-count checks remain enabled.
+
+The native ABI now contains 172 types and 30 callbacks. Source audit and generated
+ABI checks pass. Release integration build: zero warnings/errors. Focused native
+API and ABI suite: 152 passed, zero skipped. Cases cover OSC 7501 opt-in queries,
+BEL/ST replies, validated report fields, prompt/reset callbacks, unknown OSC
+capture/cancellation, null command access, memory queries, incremental compressed
+snapshot restoration, pointer reset and opt-in rectangular checksums.
