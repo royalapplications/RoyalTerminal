@@ -17,6 +17,7 @@ internal struct ManagedUnknownApcCapture
 
     internal int MaximumBytes { get; private set; }
     internal int Capacity => _buffer?.Length ?? 0;
+    internal bool Truncated => _truncated;
     internal Action<ManagedUnknownApcAllocation>? AllocationCheckpoint { get; set; }
 
     internal void Begin(int maximumBytes)

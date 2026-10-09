@@ -6,7 +6,7 @@ using RoyalTerminal.GhosttySharp.Native;
 
 namespace RoyalTerminal.Terminal;
 
-public sealed partial class GhosttyVtProcessor : ITerminalProgramStatusSource
+public sealed partial class GhosttyVtProcessor : ITerminalProgramStatusSource, ITerminalLifecycleEffectSource
 {
     private readonly TerminalProgramStatusStore _programStatuses = new();
     private GhosttyVtNative.GhosttyTerminalProgramStatusCallback? _programStatusDelegate;
@@ -18,6 +18,12 @@ public sealed partial class GhosttyVtProcessor : ITerminalProgramStatusSource
 
     /// <inheritdoc />
     public Action? ProgramStatusChangedCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action<TerminalSemanticPromptReport>? SemanticPromptCallback { get; set; }
+
+    /// <inheritdoc />
+    public Action? ResetCallback { get; set; }
 
     /// <inheritdoc />
     public string GetProgramStatusApplication(string id) => _programStatuses.GetApplication(id);
@@ -66,13 +72,16 @@ public sealed partial class GhosttyVtProcessor : ITerminalProgramStatusSource
         {
             if (prompt->Kind == GhosttyVtNative.GhosttySemanticPromptKind.PromptStart)
                 NotifyProgramStatusProcessExit();
+            SemanticPromptCallback?.Invoke(new((TerminalSemanticPromptKind)prompt->Kind,
+                (TerminalSemanticPromptRole)prompt->PromptKind, prompt->HasExitCode ? prompt->ExitCode : null,
+                prompt->Command.ToArray(), prompt->Error.ToArray()));
         }
         catch { /* Managed exceptions must not cross the native callback boundary. */ }
     }
 
     private void OnNativeReset(nint terminal, nint userdata)
     {
-        try { ResetProgramStatuses(); }
+        try { ResetProgramStatuses(); ResetCallback?.Invoke(); }
         catch { /* Managed exceptions must not cross the native callback boundary. */ }
     }
 }

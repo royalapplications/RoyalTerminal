@@ -1051,6 +1051,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void EnterOscState()
     {
         _state = ParserState.OscString;
+        ResetOscCapture();
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
     }
@@ -1939,9 +1940,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'c': // RIS — Full reset
-                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll);
+                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll, clearProgramStatuses: false);
                 ClearActiveProgressReport();
+                ResetProgramStatuses();
                 _state = ParserState.Ground;
+                ResetCallback?.Invoke();
                 break;
 
             case (byte)'=': // DECKPAM — Application keypad
@@ -2077,6 +2080,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleOscString(bool bellTerminator)
     {
+        if (FinishUnknownOsc(bellTerminator)) return;
         if (_isDiscardingOscPayload)
         {
             _oscBuffer.Clear();
@@ -2090,6 +2094,15 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("133;"u8))
+        {
+            string command = Encoding.UTF8.GetString(rawPayload[4..]);
+            HandleSemanticPrompt(command.AsSpan());
+            PublishSemanticPrompt(rawPayload[4..]);
+            _shellIntegrationParser.TryHandleOsc(133, command);
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("7501;"u8))
         {
             HandleProgramStatus(rawPayload[5..], bellTerminator);
@@ -2550,36 +2563,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         byte? progress = state == TerminalProgressState.Set ? (byte)0 : null;
-        if (value.Length > 3)
+        if (state is TerminalProgressState.Set or TerminalProgressState.Error or TerminalProgressState.Pause &&
+            value.Length > 3 && value[3] == ';')
         {
-            if (value[3] != ';')
-            {
-                return false;
-            }
-
             ReadOnlySpan<char> percentage = value.AsSpan(4);
-            if (percentage.IsEmpty)
-            {
-                return false;
-            }
-
-            int parsed = 0;
-            foreach (char character in percentage)
-            {
-                if (character is < '0' or > '9')
-                {
-                    return false;
-                }
-
-                parsed = Math.Min(100, (parsed * 10) + (character - '0'));
-            }
-
-            if (state is TerminalProgressState.Set or
-                TerminalProgressState.Error or
-                TerminalProgressState.Pause)
-            {
-                progress = checked((byte)parsed);
-            }
+            progress = ulong.TryParse(percentage, NumberStyles.None, CultureInfo.InvariantCulture, out ulong parsed)
+                ? (byte)Math.Min(100UL, parsed) : null;
         }
 
         report = new TerminalProgressReport(state, progress);
@@ -2976,6 +2965,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (!_oscHasKnownSelector && !_oscIsUnknown) ClassifyOscByte(b);
+        if (_isDiscardingOscPayload) return;
+        if (_oscIsUnknown)
+        {
+            AppendUnknownOsc(new ReadOnlySpan<byte>(in b));
+            return;
+        }
+
         if (_oscBuffer.Count >= GetOscBufferLimit([]))
         {
             _oscBuffer.Clear();
@@ -2991,6 +2988,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Span's vectorized control-byte search and one bulk copy mirror
         // Ghostty's OSC scanner while preserving control dispatch at boundaries.
         bool osc = _state == ParserState.OscString;
+        if (osc)
+        {
+            while (!payload.IsEmpty && !_oscHasKnownSelector && !_oscIsUnknown && !_isDiscardingOscPayload)
+            {
+                AppendOscByteOrDiscard(payload[0]);
+                payload = payload[1..];
+            }
+            if (_oscIsUnknown)
+            {
+                AppendUnknownOsc(payload);
+                return;
+            }
+        }
         if (osc ? _isDiscardingOscPayload : _isDiscardingDcsPayload)
         {
             return;
@@ -3031,6 +3041,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8) || selector.SequenceEqual("22"u8))
             return 2047 + separator + 1;
         if (selector.SequenceEqual("9"u8)) return 2048 + separator + 1;
+        if (selector.SequenceEqual("133"u8)) return 2048 + separator + 1;
         return TryOscColorOperation(selector, out _) ? 2048 + separator + 1 : MaxOscBufferBytes;
     }
 
@@ -3052,6 +3063,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void AbortActiveControlString()
     {
+        ResetOscCapture();
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;
@@ -3080,6 +3092,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
+
+        if (_csiPrivateMarker == '\0' && _intermediateChar is '*' or '#' && finalByte == 'y')
+        {
+            HandleChecksum(_intermediateChar);
+            return;
+        }
 
         if (_csiPrivateMarker == '\0' && _intermediateChar == '$' && finalByte == '}')
         {
@@ -4515,6 +4533,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SoftReset()
     {
+        _checksumFlags = _defaultChecksumFlags;
         // Ghostty DECSTR resets this precise mode subset to configured defaults.
         // Other protocol modes, saved mode banks, tabs and pending wrap survive.
         foreach (int mode in (ReadOnlySpan<int>)[25, 6, 7, 45, 1045, 1, 66, 69])
@@ -4592,9 +4611,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetDelayedWrap();
     }
 
-    private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
+    private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode, bool clearProgramStatuses = true)
     {
-        ResetProgramStatuses();
+        _checksumFlags = _defaultChecksumFlags;
+        ResetOscCapture();
+        if (clearProgramStatuses) ResetProgramStatuses();
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _notifications?.ResetParser();
         _dragDrop?.ResetParser();

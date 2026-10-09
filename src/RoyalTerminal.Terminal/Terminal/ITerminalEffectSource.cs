@@ -113,16 +113,29 @@ public enum TerminalUnknownSequenceType
 {
     /// <summary>Application Program Command string.</summary>
     Apc,
+    /// <summary>Operating System Command string.</summary>
+    Osc,
+}
+
+/// <summary>Terminator of a captured operating-system command.</summary>
+public enum TerminalOscTerminator
+{
+    /// <summary>String terminator (ESC followed by backslash).</summary>
+    St,
+    /// <summary>Bell (BEL).</summary>
+    Bel,
 }
 
 /// <summary>An unsupported terminal sequence retained for host-level extensions.</summary>
 /// <param name="Type">The sequence family.</param>
 /// <param name="Content">Binary-safe bytes between the introducer and terminator.</param>
 /// <param name="Truncated">Whether the configured retention limit shortened the content.</param>
+/// <param name="Terminator">OSC terminator; ST for APC commands.</param>
 public sealed record TerminalUnknownSequence(
     TerminalUnknownSequenceType Type,
     byte[] Content,
-    bool Truncated);
+    bool Truncated,
+    TerminalOscTerminator Terminator = TerminalOscTerminator.St);
 
 /// <summary>A terminal-requested desktop notification.</summary>
 /// <param name="Title">Notification title, or an empty string.</param>

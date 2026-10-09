@@ -1436,6 +1436,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetContinuationMaxBytes(64 * 1024);
         _terminal.SetTitleReport(_titleReportEnabled);
         _terminal.SetUnknownSequenceMaxBytes((nuint)_unknownSequenceMaxBytes);
+        _terminal.SetXtChecksumReport(_checksumReportsEnabled);
+        _terminal.SetXtChecksumExtension((byte)_defaultChecksumFlags);
         _terminal.SetTerminfoName("xterm-ghostty");
         _terminal.SetClipboardWriteMaxBytes(16 * 1024 * 1024);
         _terminal.SetResizePullScrollback(OperatingSystem.IsWindows());
@@ -2956,6 +2958,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                         TerminalUnknownSequenceType.Apc,
                         apc.Content.ToArray(),
                         apc.Truncated));
+            }
+            else if (sequence->Tag == GhosttyVtNative.GhosttyTerminalUnknownSequenceTag.Osc)
+            {
+                GhosttyVtNative.GhosttyTerminalUnknownOscSequence osc = sequence->Value.Osc;
+                UnknownSequenceCallback(new TerminalUnknownSequence(TerminalUnknownSequenceType.Osc,
+                    osc.Content.ToArray(), osc.Truncated, (TerminalOscTerminator)osc.Terminator));
             }
         }
         catch

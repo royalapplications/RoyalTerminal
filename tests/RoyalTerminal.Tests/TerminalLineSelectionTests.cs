@@ -16,6 +16,21 @@ namespace RoyalTerminal.Tests;
 /// </summary>
 public sealed class TerminalLineSelectionTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnwrittenGapDoesNotCrossPromptSemanticBoundary(bool native)
+    {
+        if (native && !GhosttyVtProcessor.IsAvailable()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(5, 1)) : new BasicVtProcessor(new TerminalScreen(5, 1));
+        processor.Process("\u001b]133;P\ax\u001b[2Cm"u8);
+        ITerminalLineSelectionSource source = (ITerminalLineSelectionSource)processor;
+        Assert.False(source.TryGetLineExtent(new(1, 0), [], true, out _));
+        Assert.False(source.TryGetLineExtent(new(2, 0), [], true, out _));
+        Assert.True(source.TryGetLineExtent(new(3, 0), [], true, out TerminalLineExtent extent));
+        Assert.Equal(new TerminalGridPosition(3, 0), extent.Start);
+    }
+
     public static TheoryData<string, int, int, int, int, int, int, string> Cases => new()
     {
         { "  ab ", 0, 0, 2, 0, 4, 0, "ab" },

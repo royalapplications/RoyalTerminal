@@ -50,9 +50,9 @@ checked on October 9; there are no subsequent changes to port.
 - [x] Refresh native pin, review overlays, build both native libraries (macOS arm64).
 - [x] Bind new public C types/options/callbacks/functions; regenerate ABI audit.
 - [x] OSC 7501 parser, bounded record store, native callbacks, lifecycle and host UI.
-- [ ] Unknown OSC capture, terminators, cancellation and numeric validation.
+- [x] Unknown OSC capture, terminators, cancellation and numeric validation.
 - [x] DECSTR and RIS palette behavior; charset single shift and Unicode handling.
-- [ ] DECRQCRA/XTCHECKSUM and configurable device attributes.
+- [x] DECRQCRA/XTCHECKSUM and explicit host checksum policy.
 - [ ] Mouse shape, UTF-8 mouse buttons, modified backspace and prompt-click fixes.
 - [ ] Resize/reflow, saved cursor, line-selection and Kitty placeholder regressions.
 - [ ] Snapshot decode compression and memory queries, with managed equivalents.
@@ -103,3 +103,19 @@ consumed by exactly one input scalar, including combining characters; internal
 spacers are raw writes and non-8-bit Unicode bypasses legacy charset mapping.
 Live pending-wrap cursors advance after resize when no longer at the right edge.
 Empty OSC 22 restores the text pointer in both engines.
+
+Protocol/input/lifecycle batch: 539 passed, zero skipped. Unknown OSC selectors
+have bounded, owned byte payloads, captured BEL/ST terminators and fixed limits
+per command; supported-but-malformed payloads and CAN/SUB never reach that
+callback. OSC 105 is recognized without changing unsupported special colors.
+Color/progress integer fields reject signs on unsigned fields, separators and
+whitespace. Ctrl+Alt+Shift+Backspace matches the new native legacy encoding.
+DECRQCRA/XTCHECKSUM uses explicit opt-in and preserves host defaults across
+RIS/DECSTR; every flag combination was compared against native using Unicode,
+combining marks, attributes, margins, empty rectangles and held output.
+Public lifecycle callbacks expose owned OSC 133 command/error bytes, prompt
+roles and exit codes, plus ordered protocol-only RIS effects. Native uses the
+new official callbacks. Managed decoding matches first-option/quoting/percent
+decoding rules and the 2048-byte capture, including malformed and split input.
+The shared line selector already bounds whitespace trimming to the semantic
+range; the new upstream unwritten-gap regression passes in both engines.
