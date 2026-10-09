@@ -2086,6 +2086,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("7501;"u8))
+        {
+            HandleProgramStatus(rawPayload[5..], bellTerminator);
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("99;"u8))
         {
             HandleNotification(rawPayload[3..], bellTerminator);
@@ -3015,6 +3021,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int separator = combined.IndexOf((byte)';');
         if (separator < 0) return MaxOscBufferBytes;
         ReadOnlySpan<byte> selector = combined[..separator];
+        if (selector.SequenceEqual("7501"u8)) return ProgramStatusParser.MaxBodyBytes + 5;
         // Title/PWD parsers reserve one byte of their fixed capture for NUL.
         if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8) || selector.SequenceEqual("22"u8))
             return 2047 + separator + 1;
@@ -3029,8 +3036,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        // Ghostty dispatches a valid OSC on every exit, including CAN/SUB.
-        if (_state == ParserState.OscString) HandleOscString(bellTerminator: false);
+        // CAN/SUB discard OSC completely, matching Ghostty #14453 and xterm.
         // Unknown APCs are suppressed on abort, but parsed Kitty commands still
         // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
         if (_state == ParserState.ApcString) CompleteApc(terminated: false);
@@ -4602,6 +4608,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
     {
+        ResetProgramStatuses();
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _notifications?.ResetParser();
         _dragDrop?.ResetParser();

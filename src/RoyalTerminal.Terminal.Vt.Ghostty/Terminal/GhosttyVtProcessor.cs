@@ -792,6 +792,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         ObjectDisposedException.ThrowIf(_disposed, this);
         _notifications?.ResetParser();
 
+        ResetProgramStatuses();
+
         TerminalModeState before = ModeState;
         ResetSessionInputState();
         _terminal.Reset();
@@ -813,6 +815,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _historyPrimary.NativeEpoch = 0;
         _historyAlternate.NativeEpoch = 0;
         ClearSessionNotifications();
+        ResetProgramStatuses();
         _terminal.SendDragDropEvent(5);
 
         if (!preserveScrollback)
@@ -1392,6 +1395,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
+        SetupProgramStatusEffects();
         if (_windowResizeCallback is not null) _terminal.SetWindowResizeCallback(OnNativeWindowResize);
         _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;

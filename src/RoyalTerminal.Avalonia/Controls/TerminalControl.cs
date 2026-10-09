@@ -1790,6 +1790,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _appliedVtProcessorPreference = VtProcessorPreference;
+        BindProgramStatusSource(processor);
         return processor;
     }
 
@@ -5859,6 +5860,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            EndProgramStatusProcess();
             _windowResizeQueue?.Reset();
             throw;
         }
@@ -6485,6 +6487,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 DisposeOutputWorker();
                 ResetNotificationHostSession();
+                EndProgramStatusProcess();
                 _windowResizeQueue?.Reset();
                 _activeTransportId = null;
                 StopPasswordInputMonitoring();

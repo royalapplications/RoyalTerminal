@@ -50,6 +50,27 @@ RoyalTerminal also implements the separate opt-in shared-host resize policy.
 
 ## Supported implementation boundary
 
+### Program status (OSC 7501)
+
+Both engines implement the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status).
+The native engine uses Ghostty's public program-status, semantic-prompt and reset
+callbacks; the managed engine validates reports with the same bounds and syntax.
+`ITerminalProgramStatusSource` exposes records, change callbacks, inherited app
+names and process-exit cleanup. A shared store retains at most 256 records,
+replaces each record completely and clears subtrees by path segment. Working and
+blocked records expire at a new prompt or process exit; done, error and idle
+remain until replaced/cleared. RIS and new sessions clear everything, while
+DECSTR and alternate-screen changes preserve records. OSC 9;4 remains independent.
+
+`TerminalControl.ProgramStatuses` publishes immutable snapshots on the UI thread
+with inherited names resolved. The app shows the most urgent record in the
+status bar and all records in its tooltip. Text is displayed as plain text, with
+direction controls escaped and the originating terminal identified. Reports do
+not trigger commands, sounds or desktop notifications. Detection replies preserve
+BEL/ST and contain only the fixed `OSC 7501;?` response.
+
+### Platform boundaries
+
 The dependency versions are fixed for this delivery: no Avalonia or other
 dependency upgrade, fork, reflection into private framework state, or new
 third-party patch is required. The existing pinned Ghostty integration and its

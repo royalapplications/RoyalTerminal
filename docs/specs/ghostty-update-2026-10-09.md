@@ -39,14 +39,17 @@ checked on October 9; there are no subsequent changes to port.
 - Standalone platform UI/build changes (Swift/GTK, translations, packaging and
   Ghostty CLI) require a recorded applicability decision; they are not evidence
   of a new VT feature. Shared-host behavior changes must be evaluated separately.
-- Inspect PowerShell source before any change involving its output, startup,
-  prompt production, environment or ConPTY behavior.
+- PowerShell `4c462e3d39478277bb8e89a7e01783efa375f25d`,
+  `ConsoleHostUserInterfaceProgress.cs`, writes OSC 9;4 progress only with VT,
+  nonredirected stdout and `UseOSCIndicator`; completion writes OSC 9;4;0.
+  Preserve that independent progress channel rather than replacing OSC 7501
+  records. No heuristic matching of PowerShell prompts or screen text is added.
 
 ## Delivery checklist
 
 - [x] Refresh native pin, review overlays, build both native libraries (macOS arm64).
 - [x] Bind new public C types/options/callbacks/functions; regenerate ABI audit.
-- [ ] OSC 7501 parser, bounded record store, native callbacks, lifecycle and host UI.
+- [x] OSC 7501 parser, bounded record store, native callbacks, lifecycle and host UI.
 - [ ] Unknown OSC capture, terminators, cancellation and numeric validation.
 - [ ] DECSTR and RIS palette behavior; charset single shift and Unicode handling.
 - [ ] DECRQCRA/XTCHECKSUM and configurable device attributes.
@@ -74,3 +77,19 @@ API and ABI suite: 152 passed, zero skipped. Cases cover OSC 7501 opt-in queries
 BEL/ST replies, validated report fields, prompt/reset callbacks, unknown OSC
 capture/cancellation, null command access, memory queries, incremental compressed
 snapshot restoration, pointer reset and opt-in rectangular checksums.
+
+Full required-native integration suite: 274 passed, zero skipped. Initial OSC
+7501 cross-engine suite: 12 passed, including every input split, hierarchy,
+replacement, eviction, prompt/exit/reset lifetimes and malformed-report limits.
+The adjacent regression suite found two cursor reflow differences from the
+new upstream pending-wrap correction; these belong to the resize parity work.
+
+OSC 7501 plus presentation/headless suite: 18 passed, zero skipped. Both engines
+keep 256 records, inherit application names dynamically, preserve done/error/idle
+on prompt and process exit, retain all records on DECSTR/screen switches, and
+clear on RIS/new sessions. Native semantic prompt-start events (A/N/P) and their
+managed equivalents drive transient cleanup. OSC 9;4 remains independent.
+TerminalControl coalesces immutable snapshots onto the UI thread, handles real
+transport exit/stop, and discards old processor state on replacement. The app's
+compiled-XAML status bar displays the most urgent record and all records in a
+tooltip, labels the originating terminal, and escapes invisible direction text.

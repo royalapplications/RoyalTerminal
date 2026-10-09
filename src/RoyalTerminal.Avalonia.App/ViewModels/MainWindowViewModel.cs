@@ -30,6 +30,9 @@ namespace RoyalTerminal.Avalonia.App.ViewModels;
 /// </summary>
 public sealed class MainWindowViewModel : ReactiveObject
 {
+    /// <summary>Program-status presentation for the active terminal pane.</summary>
+    public ProgramStatusViewModel ProgramStatus { get; } = new();
+
     private double _fontSize = 14.0;
     private TerminalFontSource _fontSource = TerminalFontSource.System;
     private string _fontFamilyName = GetDefaultMonospaceFont();
