@@ -115,6 +115,25 @@ public sealed class TerminalProgramStatusTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void NonzeroBase64PaddingBitsDoNotReplaceStoredStatus(bool native)
+    {
+        using IVtProcessor processor = Create(native);
+        ITerminalProgramStatusSource status = (ITerminalProgramStatusSource)processor;
+        Write(processor, "state=idle:app=original");
+        // Ghostty's RFC 4648 decoder rejects unused nonzero bits, even when
+        // padding is omitted. Exercise both short and vector-sized payloads.
+        foreach (string prefix in new[] { "", "QUJDQUJDQUJDQUJDQUJDQUJDQUJDQUJD" })
+        foreach (string field in new[] { "title", "msg" })
+        foreach (string encoded in new[] { "QR==", "QR", "QUJ=", "QUJ" })
+        {
+            Write(processor, $"state=done:{field}={prefix}{encoded}");
+            Assert.Equal(new(TerminalProgramStatusState.Idle, App: "original"), Assert.Single(status.ProgramStatuses));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void MalformedPairsAreSkippedAndLastValidPairWins(bool native)
     {
         using IVtProcessor processor = Create(native);

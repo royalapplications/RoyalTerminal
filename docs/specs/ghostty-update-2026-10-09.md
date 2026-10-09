@@ -218,3 +218,26 @@ file-store roundtrips. None was added by this update. Total passing .NET cases
 across unit/headless, native integration and history suites: 8,210. Generated
 X11 colors and whitespace checks also pass. Final cross-platform CI remains a
 separate PR check; local runtime validation is macOS arm64.
+
+## PR review follow-up
+
+Reviewed the complete change set, including public API compatibility, native
+bindings, parser/lifecycle behavior, snapshot ownership, input, shaders and host
+presentation. Fixed two issues found during review:
+
+- Explicit `StopPty()` detaches the transport's exit callback before stopping it,
+  leaving working/blocked OSC 7501 records behind. The stop cleanup now drops
+  transient records directly, preserving completed records. Headless tests cover
+  both managed and native processors without relying on an exit callback.
+- Adding optional constructor parameters removed the existing CLR signatures
+  for `TerminalUnknownSequence` and `TerminalShaderFrameContext`, and the sequence
+  record lost its three-value deconstruction. Explicit overloads preserve those
+  signatures alongside the new metadata and shader colors. A consumer compiled
+  against the pre-update API sources runs unchanged with the updated assemblies.
+
+The review regression suite passes 142 cases with no skips, including seven new
+tests for explicit stop, public compatibility, strict Base64 padding and active
+pane status routing. Background-pane updates cannot replace the active pane's
+status; changing focus shows the corresponding snapshot. All six native CI
+builds and ABI checks also passed at `64456587`, whose native code is unchanged
+by these review fixes.
