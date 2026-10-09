@@ -11,6 +11,61 @@ namespace RoyalTerminal.Tests;
 
 public sealed class ManagedHistoryCompressionTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(32)]
+    [InlineData(80)]
+    [InlineData(127)]
+    [InlineData(240)]
+    [InlineData(513)]
+    public void PooledCompressionRoundTripsMixedFieldsAndHiddenColumns(int columns)
+    {
+        // Like Ghostty's compression property tests, compare complete decoded
+        // cells, including metadata unrelated to their visible glyphs.
+        Random random = new(columns);
+        for (int pass = 0; pass < 8; pass++)
+        {
+            TerminalRow row = new(columns);
+            string?[] text = [null, "", "e\u0301", "😀", "\ud800", "\udfff", new string('x', 4097)];
+            for (int i = 0; i < columns; i++)
+                row[i] = new TerminalCell
+                {
+                    Codepoint = random.Next(0x110000), Grapheme = text[random.Next(text.Length)],
+                    Foreground = (uint)random.NextInt64(1L << 32), Background = (uint)random.NextInt64(1L << 32),
+                    ForegroundIdentity = Color(), BackgroundIdentity = Color(), UnderlineIdentity = Color(),
+                    UnderlineColor = (uint)random.NextInt64(1L << 32), HyperlinkId = random.Next(),
+                    Attributes = (CellAttributes)random.Next(256), UnderlineStyle = (TerminalUnderlineStyle)random.Next(6),
+                    Decorations = (CellDecorations)random.Next(2), Width = (byte)random.Next(3),
+                    HasUnderlineColor = random.Next(2) != 0, HasBackground = random.Next(2) != 0,
+                    IsWideSpacerHead = random.Next(2) != 0, IsProtected = random.Next(2) != 0,
+                    SemanticContent = (TerminalSemanticContent)random.Next(4),
+                };
+            TerminalCell[] expected = row.ReadOnlyCells.ToArray();
+            row.Resize(columns / 2);
+            Assert.True(row.TryCompressCells());
+            TerminalRow held = row.CreateStateCopy();
+            ulong encodedSize = row.CompressedCellBytes;
+            // Reuse the temporary buffers for a different row before reading
+            // either owner. An encoded row must own all of its payload.
+            TerminalRow unrelated = new(columns);
+            Assert.True(unrelated.TryCompressCells());
+            Assert.Equal(columns, held.PreservedColumns);
+            Assert.Equal(expected[..(columns / 2)], row.ReadOnlyCells.ToArray());
+            row.Resize(columns);
+            Assert.Equal(expected, row.ReadOnlyCells.ToArray());
+            row[0].Grapheme = "changed";
+            Assert.True(held.IsCompressed);
+            Assert.Equal(encodedSize, held.CompressedCellBytes);
+            Assert.Equal(expected, held.ReadOnlyPreservedCells.ToArray());
+        }
+
+        TerminalColorIdentity Color() => random.Next(3) switch
+        {
+            1 => TerminalColorIdentity.Palette((byte)random.Next(256)),
+            2 => TerminalColorIdentity.Rgb((uint)random.Next(0x1000000)),
+            _ => default,
+        };
+    }
+
     [Fact]
     public void RowCompressionPreservesEveryFieldAndCopyOnWriteOwnership()
     {

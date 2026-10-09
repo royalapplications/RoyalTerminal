@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 using System.Buffers;
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -11,8 +12,9 @@ namespace RoyalTerminal.Avalonia.Rendering;
 // Owned, process-local payload, never an external file format. Row flags and
 // snapshot allocation metadata stay on the row. Numeric fields are explicit:
 // copying TerminalCell bytes would serialize managed references and padding.
-internal sealed class CompressedTerminalRow(byte[] bytes, int columns, ulong logicalBytes)
+internal sealed class CompressedTerminalRow(byte[] bytes, int columns, ulong logicalBytes, int decodedLength)
 {
+    private const int CellHeaderBytes = 41;
     internal int Columns => columns;
     internal ulong LogicalBytes => logicalBytes;
     internal ulong StoredBytes => (ulong)bytes.Length;
@@ -20,76 +22,108 @@ internal sealed class CompressedTerminalRow(byte[] bytes, int columns, ulong log
     internal static CompressedTerminalRow? TryCreate(ReadOnlySpan<TerminalCell> cells)
     {
         ulong logical = Measure(cells);
-        ulong serializedLength = logical - (ulong)cells.Length * (uint)Unsafe.SizeOf<TerminalCell>() + (ulong)cells.Length * 41;
+        ulong serializedLength = logical - (ulong)cells.Length * (uint)Unsafe.SizeOf<TerminalCell>() + (ulong)cells.Length * CellHeaderBytes;
         if (serializedLength == 0 || serializedLength > int.MaxValue) return null;
-        using MemoryStream raw = new((int)serializedLength);
-        using (BinaryWriter writer = new(raw, System.Text.Encoding.UTF8, leaveOpen: true))
-        {
-            foreach (ref readonly TerminalCell cell in cells)
-            {
-                writer.Write(cell.Codepoint);
-                writer.Write(cell.Foreground);
-                writer.Write(cell.Background);
-                WriteColor(writer, cell.ForegroundIdentity);
-                WriteColor(writer, cell.BackgroundIdentity);
-                WriteColor(writer, cell.UnderlineIdentity);
-                writer.Write(cell.UnderlineColor);
-                writer.Write(cell.HyperlinkId);
-                writer.Write((byte)cell.Attributes);
-                writer.Write((byte)cell.UnderlineStyle);
-                writer.Write((byte)cell.Decorations);
-                writer.Write(cell.Width);
-                writer.Write((byte)((cell.HasUnderlineColor ? 1 : 0) | (cell.HasBackground ? 2 : 0) |
-                    (cell.IsWideSpacerHead ? 4 : 0) | (cell.IsProtected ? 8 : 0) | ((byte)cell.SemanticContent << 4)));
-                writer.Write(cell.Grapheme?.Length ?? -1);
-                if (cell.Grapheme is { } grapheme)
-                    writer.Write(MemoryMarshal.AsBytes(grapheme.AsSpan()));
-            }
-        }
-        // Compress a complete row in one call. Tiny streaming writes at low
-        // Brotli quality create independent blocks and can enlarge the payload.
-        byte[] scratch = ArrayPool<byte>.Shared.Rent((int)raw.Length);
+        byte[] raw = ArrayPool<byte>.Shared.Rent((int)serializedLength);
         try
         {
-            return BrotliEncoder.TryCompress(raw.GetBuffer().AsSpan(0, (int)raw.Length), scratch, out int written,
-                quality: 1, window: 22) && (ulong)written < logical
-                ? new(scratch.AsSpan(0, written).ToArray(), cells.Length, logical) : null;
+            Span<byte> serialized = raw.AsSpan(0, (int)serializedLength);
+            WriteCells(cells, serialized);
+            // One complete row per call preserves the compression ratio at
+            // quality 1. Both temporary buffers are reusable across rows.
+            byte[] scratch = ArrayPool<byte>.Shared.Rent(serialized.Length);
+            try
+            {
+                return BrotliEncoder.TryCompress(serialized, scratch, out int written, quality: 1, window: 22) &&
+                    (ulong)written < logical
+                    ? new(scratch.AsSpan(0, written).ToArray(), cells.Length, logical, serialized.Length) : null;
+            }
+            finally { ArrayPool<byte>.Shared.Return(scratch); }
         }
-        finally { ArrayPool<byte>.Shared.Return(scratch); }
+        finally { ArrayPool<byte>.Shared.Return(raw); }
+    }
+
+    private static void WriteCells(ReadOnlySpan<TerminalCell> cells, Span<byte> destination)
+    {
+        foreach (ref readonly TerminalCell cell in cells)
+        {
+            Span<byte> header = destination[..CellHeaderBytes];
+            BinaryPrimitives.WriteInt32LittleEndian(header, cell.Codepoint);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[4..], cell.Foreground);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[8..], cell.Background);
+            WriteColor(header[12..], cell.ForegroundIdentity);
+            WriteColor(header[16..], cell.BackgroundIdentity);
+            WriteColor(header[20..], cell.UnderlineIdentity);
+            BinaryPrimitives.WriteUInt32LittleEndian(header[24..], cell.UnderlineColor);
+            BinaryPrimitives.WriteInt32LittleEndian(header[28..], cell.HyperlinkId);
+            header[32] = (byte)cell.Attributes;
+            header[33] = (byte)cell.UnderlineStyle;
+            header[34] = (byte)cell.Decorations;
+            header[35] = cell.Width;
+            header[36] = (byte)((cell.HasUnderlineColor ? 1 : 0) | (cell.HasBackground ? 2 : 0) |
+                (cell.IsWideSpacerHead ? 4 : 0) | (cell.IsProtected ? 8 : 0) | ((byte)cell.SemanticContent << 4));
+            BinaryPrimitives.WriteInt32LittleEndian(header[37..], cell.Grapheme?.Length ?? -1);
+            destination = destination[CellHeaderBytes..];
+            if (cell.Grapheme is { } grapheme)
+            {
+                ReadOnlySpan<byte> text = MemoryMarshal.AsBytes(grapheme.AsSpan());
+                text.CopyTo(destination);
+                destination = destination[text.Length..];
+            }
+        }
     }
 
     internal TerminalCell[] Restore()
     {
+        // Decompress once, instead of reentering the Brotli stream for every
+        // numeric field. Publication still waits for all cells to be restored.
+        byte[] raw = ArrayPool<byte>.Shared.Rent(decodedLength);
+        try
+        {
+            Span<byte> serialized = raw.AsSpan(0, decodedLength);
+            if (!BrotliDecoder.TryDecompress(bytes, serialized, out int written) || written != decodedLength)
+                throw new InvalidDataException("Invalid compressed terminal row.");
+            return ReadCells(serialized);
+        }
+        finally { ArrayPool<byte>.Shared.Return(raw); }
+    }
+
+    private TerminalCell[] ReadCells(ReadOnlySpan<byte> source)
+    {
         TerminalCell[] cells = new TerminalCell[columns];
-        using MemoryStream encoded = new(bytes, writable: false);
-        using BrotliStream decompressor = new(encoded, CompressionMode.Decompress);
-        using BinaryReader reader = new(decompressor);
         for (int i = 0; i < cells.Length; i++)
         {
+            ReadOnlySpan<byte> header = source[..CellHeaderBytes];
             ref TerminalCell cell = ref cells[i];
-            cell.Codepoint = reader.ReadInt32();
-            cell.Foreground = reader.ReadUInt32();
-            cell.Background = reader.ReadUInt32();
-            cell.ForegroundIdentity = ReadColor(reader);
-            cell.BackgroundIdentity = ReadColor(reader);
-            cell.UnderlineIdentity = ReadColor(reader);
-            cell.UnderlineColor = reader.ReadUInt32();
-            cell.HyperlinkId = reader.ReadInt32();
-            cell.Attributes = (CellAttributes)reader.ReadByte();
-            cell.UnderlineStyle = (TerminalUnderlineStyle)reader.ReadByte();
-            cell.Decorations = (CellDecorations)reader.ReadByte();
-            cell.Width = reader.ReadByte();
-            byte flags = reader.ReadByte();
+            cell.Codepoint = BinaryPrimitives.ReadInt32LittleEndian(header);
+            cell.Foreground = BinaryPrimitives.ReadUInt32LittleEndian(header[4..]);
+            cell.Background = BinaryPrimitives.ReadUInt32LittleEndian(header[8..]);
+            cell.ForegroundIdentity = ReadColor(header[12..]);
+            cell.BackgroundIdentity = ReadColor(header[16..]);
+            cell.UnderlineIdentity = ReadColor(header[20..]);
+            cell.UnderlineColor = BinaryPrimitives.ReadUInt32LittleEndian(header[24..]);
+            cell.HyperlinkId = BinaryPrimitives.ReadInt32LittleEndian(header[28..]);
+            cell.Attributes = (CellAttributes)header[32];
+            cell.UnderlineStyle = (TerminalUnderlineStyle)header[33];
+            cell.Decorations = (CellDecorations)header[34];
+            cell.Width = header[35];
+            byte flags = header[36];
             cell.HasUnderlineColor = (flags & 1) != 0;
             cell.HasBackground = (flags & 2) != 0;
             cell.IsWideSpacerHead = (flags & 4) != 0;
             cell.IsProtected = (flags & 8) != 0;
             cell.SemanticContent = (TerminalSemanticContent)(flags >> 4);
-            int length = reader.ReadInt32();
+            int length = BinaryPrimitives.ReadInt32LittleEndian(header[37..]);
+            source = source[CellHeaderBytes..];
             if (length >= 0)
-                cell.Grapheme = string.Create(length, decompressor,
-                    static (text, stream) => stream.ReadExactly(MemoryMarshal.AsBytes(text)));
+            {
+                int byteLength = checked(length * sizeof(char));
+                // Raw UTF-16 preserves null vs empty and unpaired surrogates.
+                cell.Grapheme = new string(MemoryMarshal.Cast<byte, char>(source[..byteLength]));
+                source = source[byteLength..];
+            }
         }
+        if (!source.IsEmpty) throw new InvalidDataException("Unexpected terminal row payload.");
         return cells;
     }
 
@@ -101,12 +135,12 @@ internal sealed class CompressedTerminalRow(byte[] bytes, int columns, ulong log
         return bytes;
     }
 
-    private static void WriteColor(BinaryWriter writer, TerminalColorIdentity color)
-        => writer.Write(((uint)color.Kind << 24) | color.Value);
+    private static void WriteColor(Span<byte> destination, TerminalColorIdentity color)
+        => BinaryPrimitives.WriteUInt32LittleEndian(destination, ((uint)color.Kind << 24) | color.Value);
 
-    private static TerminalColorIdentity ReadColor(BinaryReader reader)
+    private static TerminalColorIdentity ReadColor(ReadOnlySpan<byte> source)
     {
-        uint value = reader.ReadUInt32();
+        uint value = BinaryPrimitives.ReadUInt32LittleEndian(source);
         return (TerminalColorKind)(value >> 24) switch
         {
             TerminalColorKind.Palette => TerminalColorIdentity.Palette((byte)value),
