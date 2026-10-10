@@ -2833,6 +2833,11 @@ internal sealed class MainWindowController
         {
             AppendEventLog($"[{GetTabDisplayName(standaloneControl)}] Process exited with code {code}.");
         };
+        standaloneControl.ProgramStatusesChanged += (_, _) =>
+        {
+            if (ReferenceEquals(GetActiveStandaloneControl(), standaloneControl))
+                _viewModel.ProgramStatus.Update(GetTabDisplayName(standaloneControl), standaloneControl.ProgramStatuses);
+        };
         standaloneControl.TerminalResized += (_, args) =>
         {
             UpdateDimensions(args.Columns, args.Rows);
@@ -5017,6 +5022,8 @@ internal sealed class MainWindowController
     private void SyncActiveTerminalSurface()
     {
         TerminalControl? control = GetActiveStandaloneControl();
+        _viewModel.ProgramStatus.Update(control is null ? string.Empty : GetTabDisplayName(control),
+            control?.ProgramStatuses ?? []);
         if (control is null)
         {
             _viewModel.ClearSearchState();

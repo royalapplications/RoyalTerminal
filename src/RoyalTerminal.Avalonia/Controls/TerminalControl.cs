@@ -706,6 +706,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     private bool _leftPointerDown;
     private bool _middlePointerDown;
     private bool _rightPointerDown;
+    private bool _backPointerDown;
+    private bool _forwardPointerDown;
     private bool _pointerInputStartedInContent;
     private bool _suppressGridPropertyApply;
     private bool _suppressLegacyColorThemeBridge;
@@ -1790,6 +1792,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         _appliedVtProcessorPreference = VtProcessorPreference;
+        BindProgramStatusSource(processor);
         return processor;
     }
 
@@ -3569,6 +3572,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
     private void HandlePointerPressedCore(PointerPressedEventArgs e)
     {
         Focus();
+        _promptClickCell = null;
 
         Point controlPoint = e.GetPosition(this);
         PointerPointProperties props = e.GetCurrentPoint(this).Properties;
@@ -3612,6 +3616,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
                 Action: TerminalInputAction.Press,
                 Modifiers: ConvertTerminalModifiers(e.KeyModifiers)));
         }
+
+        BeginPromptClick(button, e.KeyModifiers, e.ClickCount, pointerSent);
 
         // Start text selection on left click
         if ((!IsMouseReportingActiveForInput() || !pointerSent) &&
@@ -3667,6 +3673,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         }
 
         UpdatePointerCell(point);
+        ContinuePromptClick(inContent);
         // Preserve tracked button state when move events omit button flags.
         SyncPointerButtonState(props, preserveWhenNoButtons: true);
         TerminalMouseButton button = GetPrimaryPressedMouseButton(props);
@@ -3767,6 +3774,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             }
         }
 
+        FinishPromptClick(button, e.KeyModifiers, inContent);
         _isMouseSelecting = false;
         _pointerInputStartedInContent = false;
         if (wasMouseSelecting)
@@ -5859,6 +5867,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            EndProgramStatusProcess();
             _windowResizeQueue?.Reset();
             throw;
         }
@@ -6088,6 +6097,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             if (ReferenceEquals(_activeTransportExitHandler, exitHandler)) _activeTransportExitHandler = null;
             DisposeOutputWorker();
             ResetNotificationHostSession();
+            EndProgramStatusProcess();
             _windowResizeQueue?.Reset();
             ResetPendingTransportOutputQueue();
             ResetKeyboardInputState();
@@ -6485,6 +6495,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             {
                 DisposeOutputWorker();
                 ResetNotificationHostSession();
+                EndProgramStatusProcess();
                 _windowResizeQueue?.Reset();
                 _activeTransportId = null;
                 StopPasswordInputMonitoring();
@@ -8467,6 +8478,7 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
 
     private void ResetPointerButtons()
     {
+        _promptClickCell = null;
         if (_vtProcessor is ITerminalPointerStateResetSink reset && _screen is not null)
         {
             lock (_screen.SyncRoot) reset.ResetPointerState();
@@ -8474,6 +8486,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _leftPointerDown = false;
         _middlePointerDown = false;
         _rightPointerDown = false;
+        _backPointerDown = false;
+        _forwardPointerDown = false;
         _pointerInputStartedInContent = false;
     }
 
@@ -8482,7 +8496,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         bool anyButtonPressed =
             properties.IsLeftButtonPressed ||
             properties.IsMiddleButtonPressed ||
-            properties.IsRightButtonPressed;
+            properties.IsRightButtonPressed ||
+            properties.IsXButton1Pressed ||
+            properties.IsXButton2Pressed;
 
         if (preserveWhenNoButtons && !anyButtonPressed)
         {
@@ -8492,6 +8508,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         _leftPointerDown = properties.IsLeftButtonPressed;
         _middlePointerDown = properties.IsMiddleButtonPressed;
         _rightPointerDown = properties.IsRightButtonPressed;
+        _backPointerDown = properties.IsXButton1Pressed;
+        _forwardPointerDown = properties.IsXButton2Pressed;
     }
 
     private void SetPointerButtonState(TerminalMouseButton button, bool isDown)
@@ -8506,6 +8524,12 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
                 break;
             case TerminalMouseButton.Right:
                 _rightPointerDown = isDown;
+                break;
+            case TerminalMouseButton.Back:
+                _backPointerDown = isDown;
+                break;
+            case TerminalMouseButton.Forward:
+                _forwardPointerDown = isDown;
                 break;
         }
     }
@@ -8526,6 +8550,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             return TerminalMouseButton.Right;
         }
+        if (_backPointerDown || properties.IsXButton1Pressed) return TerminalMouseButton.Back;
+        if (_forwardPointerDown || properties.IsXButton2Pressed) return TerminalMouseButton.Forward;
 
         return TerminalMouseButton.None;
     }
@@ -8546,6 +8572,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         {
             return TerminalMouseButton.Right;
         }
+        if (_backPointerDown) return TerminalMouseButton.Back;
+        if (_forwardPointerDown) return TerminalMouseButton.Forward;
 
         return TerminalMouseButton.None;
     }
@@ -8562,6 +8590,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             PointerUpdateKind.LeftButtonPressed => TerminalMouseButton.Left,
             PointerUpdateKind.MiddleButtonPressed => TerminalMouseButton.Middle,
             PointerUpdateKind.RightButtonPressed => TerminalMouseButton.Right,
+            PointerUpdateKind.XButton1Pressed => TerminalMouseButton.Back,
+            PointerUpdateKind.XButton2Pressed => TerminalMouseButton.Forward,
             _ => TerminalMouseButton.None,
         };
 
@@ -8579,6 +8609,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             PointerUpdateKind.LeftButtonReleased => TerminalMouseButton.Left,
             PointerUpdateKind.MiddleButtonReleased => TerminalMouseButton.Middle,
             PointerUpdateKind.RightButtonReleased => TerminalMouseButton.Right,
+            PointerUpdateKind.XButton1Released => TerminalMouseButton.Back,
+            PointerUpdateKind.XButton2Released => TerminalMouseButton.Forward,
             _ => TerminalMouseButton.None,
         };
 
@@ -8587,6 +8619,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
         if (properties.IsLeftButtonPressed) return TerminalMouseButton.Left;
         if (properties.IsMiddleButtonPressed) return TerminalMouseButton.Middle;
         if (properties.IsRightButtonPressed) return TerminalMouseButton.Right;
+        if (properties.IsXButton1Pressed) return TerminalMouseButton.Back;
+        if (properties.IsXButton2Pressed) return TerminalMouseButton.Forward;
         return TerminalMouseButton.None;
     }
 
@@ -8596,6 +8630,8 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             MouseButton.Left => TerminalMouseButton.Left,
             MouseButton.Middle => TerminalMouseButton.Middle,
             MouseButton.Right => TerminalMouseButton.Right,
+            MouseButton.XButton1 => TerminalMouseButton.Back,
+            MouseButton.XButton2 => TerminalMouseButton.Forward,
             _ => TerminalMouseButton.None,
         };
 

@@ -48,15 +48,15 @@ public sealed class ManagedGraphemeModeTests
     }
 
     [Theory]
-    [InlineData("\u001bc")]
-    [InlineData("\u001b[!p")]
-    public void ResetsRestoreNonClusterMode(string reset)
+    [InlineData("\u001bc", 2)]
+    [InlineData("\u001b[!p", 1)]
+    public void OnlyFullResetRestoresNonClusterMode(string reset, int expected)
     {
         using BasicVtProcessor processor = new(new TerminalScreen(12, 3, 0));
         string? reply = null;
         processor.ResponseCallback = bytes => reply = Encoding.ASCII.GetString(bytes);
         processor.Process(Encoding.ASCII.GetBytes("\u001b[?2027h" + reset + "\u001b[?2027$p"));
-        Assert.Equal("\u001b[?2027;2$y", reply);
+        Assert.Equal($"\u001b[?2027;{expected}$y", reply);
     }
 
     [Theory]

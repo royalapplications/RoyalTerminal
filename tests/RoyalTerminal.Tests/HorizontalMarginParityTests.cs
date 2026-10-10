@@ -115,8 +115,7 @@ public sealed class HorizontalMarginParityTests(ITestOutputHelper output)
     [Fact]
     public void ManagedSoftResetClearsMarginsAsPartOfExistingDecstrContract()
     {
-        // Ghostty currently ignores DECSTR; RoyalTerminal deliberately retains
-        // its existing VT soft-reset feature, including resetting all margins.
+        // Ghostty DECSTR resets all margins without moving the current cursor.
         using BasicVtProcessor processor = new(new TerminalScreen(8, 5));
         processor.Process("\u001b[?69h\u001b[3;6s\u001b[2;4r\u001b[!p\u001b[3;8H\rQ"u8);
         Assert.Equal((1, 2), (processor.CursorCol, processor.CursorRow));

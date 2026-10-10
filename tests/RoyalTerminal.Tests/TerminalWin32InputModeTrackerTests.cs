@@ -34,7 +34,7 @@ public sealed class TerminalWin32InputModeTrackerTests
     }
 
     [Fact]
-    public void Tracker_DecstrAndRis_ResetMode()
+    public void Tracker_DecstrPreservesModesAndRisResetsThem()
     {
         TerminalWin32InputModeTracker tracker = new();
         tracker.Process("\x1b[?9001h"u8);
@@ -43,9 +43,9 @@ public sealed class TerminalWin32InputModeTrackerTests
         Assert.True(tracker.FocusEventMode);
 
         bool changed = tracker.Process("\x1b[!p"u8);
-        Assert.True(changed);
-        Assert.False(tracker.Win32InputMode);
-        Assert.False(tracker.FocusEventMode);
+        Assert.False(changed);
+        Assert.True(tracker.Win32InputMode);
+        Assert.True(tracker.FocusEventMode);
 
         tracker.Process("\x1b[?9001h"u8);
         tracker.Process("\x1b[?1004h"u8);

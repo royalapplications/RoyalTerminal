@@ -13,10 +13,15 @@ The [generated ABI inventory](../specs/ghostty-abi-inventory-2026.md) documents
 the pinned native type and callback bindings; regenerate it with
 `scripts/audit-ghostty-abi.py` after a dependency update.
 
-The current dependency target is `b40acce58dcf77df52231c3798ea58e924647c89`,
-refreshed from `622b4eec` after checking upstream HEAD. Ghostling remains the
+The current dependency target is `246f702876b924a1cb7cade1e99274d1470302fc`,
+refreshed from `b40acce58` after checking upstream HEAD on October 9. Ghostling remains the
 reference consumer at `63842bf8e5e481160f81d348da9ff6fd27986798`.
-The native refresh includes [word-selection hard-break fixes](https://github.com/ghostty-org/ghostty/pull/14354),
+The [October update audit](../specs/ghostty-update-2026-10-09.md) tracks native and
+managed delivery. The native wrapper now exposes OSC 7501, OSC 133/reset callbacks,
+unknown OSC capture, checksum options, pointer shape, memory usage, and compressed
+snapshot restoration through public upstream APIs.
+
+The preceding native refresh includes [word-selection hard-break fixes](https://github.com/ghostty-org/ghostty/pull/14354),
 [wide-character selection](https://github.com/ghostty-org/ghostty/pull/14391),
 [reverse-wrap correction](https://github.com/ghostty-org/ghostty/pull/14390),
 [charset batching](https://github.com/ghostty-org/ghostty/pull/14356),
@@ -35,7 +40,7 @@ height excludes overscan. Dirty iterator indices start at the highest captured
 row, so callers requesting overscan must use signed viewport Y for placement.
 IDs support equality/hash lookup only; reusing a row cache also requires a clear
 dirty flag. Existing callers request zero overscan and retain their viewport-only
-iteration contract. Native builds, the 161-type/27-callback ABI manifest and
+iteration contract. Native builds, the 172-type/30-callback ABI manifest and
 regression execution passed in the current integration validation.
 
 The desktop action mirror also includes the appended `CopyTitleToClipboard`,
@@ -44,6 +49,62 @@ The raw action binding alone does not enable application-driven resizing.
 RoyalTerminal also implements the separate opt-in shared-host resize policy.
 
 ## Supported implementation boundary
+
+### Program status (OSC 7501)
+
+Both engines implement the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status).
+The native engine uses Ghostty's public program-status, semantic-prompt and reset
+callbacks; the managed engine validates reports with the same bounds and syntax.
+`ITerminalProgramStatusSource` exposes records, change callbacks, inherited app
+names and process-exit cleanup. A shared store retains at most 256 records,
+replaces each record completely and clears subtrees by path segment. Working and
+blocked records expire at a new prompt or process exit; done, error and idle
+remain until replaced/cleared. RIS and new sessions clear everything, while
+DECSTR and alternate-screen changes preserve records. OSC 9;4 remains independent.
+
+`TerminalControl.ProgramStatuses` publishes immutable snapshots on the UI thread
+with inherited names resolved. The app shows the most urgent record in the
+status bar and all records in its tooltip. Text is displayed as plain text, with
+direction controls escaped and the originating terminal identified. Reports do
+not trigger commands, sounds or desktop notifications. Detection replies preserve
+BEL/ST and contain only the fixed `OSC 7501;?` response.
+
+### October protocol and host additions
+
+Both processors expose `ITerminalLifecycleEffectSource` for owned OSC 133
+command/error bytes and ordered protocol reset effects, and
+`ITerminalUnknownSequencePolicy` for bounded unknown OSC capture. Hosts receive
+reports through `ITerminalEffectSource.UnknownSequenceCallback`; capture defaults
+to 4096 bytes and can be disabled with a zero limit. Known but malformed commands
+and canceled sequences are excluded.
+`ITerminalChecksumPolicy` enables DECRQCRA/XTCHECKSUM explicitly; checksum replies
+remain disabled by default.
+
+`TerminalControl.CursorClickToMove` defaults to true. Unmodified prompt clicks
+use OSC 133's advertised click mode, with correct coordinates across history
+pages. Selection drags and application mouse reporting keep their existing input
+paths. Back/forward mouse buttons are supported through the shared host and both
+encoders, including UTF-8 mouse reports. X10 accepts only the three standard
+buttons. Shared custom shaders now receive `iCursorText`,
+`iSelectionForegroundColor` and `iSelectionBackgroundColor` as RGB uniforms.
+
+### Snapshot compression and memory accounting
+
+Set `GhosttySnapshotDecoder.SetCompressHistory(true)` or
+`ManagedTerminalSnapshotOptions.CompressHistory = true` to compress restored
+scrollback incrementally. Compression is optional and defaults to false. Managed
+rows use lossless Brotli storage, retain copy-on-write ownership and restore only
+when their cells are read or edited. Compression does not change history quotas,
+snapshot formats, READY admission or the active visible viewport.
+
+Both processors implement `ITerminalMemoryUsageSource.GetMemoryUsage()`. The
+report separates primary/alternate storage, compressed payload and Kitty images.
+Native reports use upstream page accounting. Managed reports estimate cell arrays
+and referenced text, excluding CLR headers, allocation metadata, external retained
+snapshots and renderer caches; these values are not process memory measurements.
+Querying memory or cloning row state does not inflate compressed rows.
+
+### Platform boundaries
 
 The dependency versions are fixed for this delivery: no Avalonia or other
 dependency upgrade, fork, reflection into private framework state, or new

@@ -14,6 +14,23 @@ namespace RoyalTerminal.Tests;
 public sealed class TerminalProgressLifecycleTests(ITestOutputHelper output)
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NumericFieldsRejectSeparatorsSignsWhitespaceAndOverflow(bool native)
+    {
+        using IVtProcessor? processor = Create(native);
+        if (processor is null) return;
+        List<TerminalProgressReport> reports = [];
+        ((ITerminalEffectSource)processor).ProgressReportCallback = reports.Add;
+        foreach (string value in new[] { "4_2", "+42", "-0", " 42", "42 ", "18446744073709551616", "" })
+        {
+            processor.Process(Encoding.ASCII.GetBytes($"\u001b]9;4;1;{value}\a"));
+            Assert.Equal(new(TerminalProgressState.Set, null), Assert.Single(reports));
+            reports.Clear();
+        }
+    }
+
+    [Theory]
     [InlineData(false, 1)]
     [InlineData(true, 1)]
     [InlineData(false, 2)]

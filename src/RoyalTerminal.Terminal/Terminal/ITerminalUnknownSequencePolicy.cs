@@ -7,7 +7,7 @@ namespace RoyalTerminal.Terminal;
 public interface ITerminalUnknownSequencePolicy
 {
     /// <summary>
-    /// Gets or sets the maximum retained unknown-APC payload bytes, excluding
+    /// Gets or sets the maximum retained unknown APC or OSC bytes, excluding
     /// introducer and terminator. Zero disables capture; negative values are
     /// rejected. The default is 4096 bytes. A capture keeps the limit selected
     /// when unknown capture begins, even if policy changes
@@ -16,7 +16,8 @@ public interface ITerminalUnknownSequencePolicy
     /// <remarks>
     /// Serialize policy updates with processor operations. The policy survives
     /// terminal resets and is not serialized into terminal snapshots. Empty APCs
-    /// and unfinished prefixes of recognized protocols are not unknown commands.
+    /// are not reported. Incomplete OSC selector prefixes that do not name a
+    /// supported command are reported; malformed known OSC payloads are not.
     /// Captured payloads are reported through <see cref="ITerminalEffectSource.UnknownSequenceCallback"/>.
     /// </remarks>
     int UnknownSequenceMaxBytes { get; set; }

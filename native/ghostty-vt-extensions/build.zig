@@ -55,7 +55,7 @@ pub fn build(b: *std.Build) !void {
             b.pathJoin(&.{ "terminal", "c", "terminal.zig" }),
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "4ca194a422f9400f4337daccfea8d8ae98d475db47042626e647875a049dc2b5", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "48b951d255f0e2f54f54eff6e09a4e2576315f8c2da321751d11109ede42becf", &.{
         .{
             .before = "            assert(self.screens.active_key == .alternate);\n            self.eraseDisplay(.complete, false);",
             .after = "            assert(self.screens.active_key == .alternate);\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
             .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "09d759a005b392be35f3c6a42a2513ed586b2f32999b9ea9d76c05cfe6ec04b6", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "0f7fe1fa956b429ba7341cafac5acfdc85119c706b28231dd6c9cacc8512f782", &.{
         .{
             // PageList pruning can remap the cursor before cursorReload gets
             // a chance to migrate its page-local style and hyperlink IDs.
@@ -110,7 +110,7 @@ pub fn build(b: *std.Build) !void {
             .after = "    // On the new page, we need to migrate our hyperlink\n    if (self.cursor.hyperlink) |link| {\n        if (self.cursor.hyperlink_id != 0) {\n            const page = self.cursor.page_pin.node.page();\n            page.hyperlink_set.release(page.memory, self.cursor.hyperlink_id);\n            self.cursor.hyperlink_id = 0;\n        }\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{
+    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "f78db57000f7d6690dce94798a596f3a2bcbe12780b7f03b9dbfc8cec02ef066", &.{
         .{
             .before = "page_serial_epoch: u64,",
             .after = "page_serial_epoch: u64,\n\n// Bounded history coordinates: prefix eviction preserves layout identity.\nroyal_history_epoch: u64 = 1,\nroyal_history_origin: u64 = 0,\n",
@@ -212,14 +212,14 @@ pub fn build(b: *std.Build) !void {
     }});
     // Route the already-validated upstream OSC 99 command to our shared host.
     // Deliberately do not add an Action enum member: that would change upstream's C ABI.
-    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "7a32e3f1dbf516d2204a789b8f74cc4ffbcbb3e223ed0f2c66f7a2a953d360f9", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "5a4b2339870cffc669744823c7990187ef8fe1df46f9f3424c599a6df785f14a", &.{ .{
         .before = "                .kitty_desktop_notification,\n",
         .after = "",
     }, .{
         .before = "                .conemu_sleep,\n",
         .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
     } });
-    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "49dbd67f02e2af36bcd17235b7552bae33fe37e36014fe87221f0d539a277360", &.{
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "bd143733b7ca2baff24ec820dcc92d44a775586c223f1cb8fbf9c99f3c3dda55", &.{
         .{
             .before = "    pub const Effects = struct {\n",
             .after = "    pub const Effects = struct {\n        royal_window_resize: ?*const fn (*Handler, u16, u16) void = null,\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
@@ -243,7 +243,7 @@ pub fn build(b: *std.Build) !void {
             .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "9b06653cb34f7407b510f25111cb45c83014a3adfc9c031c48ecc537c6f67136", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "65ac5166ce02cc6a4e90df6b5673eaeebfb104393f95d0f2dd3e05ede87eb389", &.{ .{
         .before = "const Effects = struct {\n",
         .after = "const Effects = struct {\n    royal_window_resize: ?*const fn (Terminal, ?*anyopaque, u16, u16) callconv(.c) void = null,\n    royal_window_resize_userdata: ?*anyopaque = null,\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
     }, .{

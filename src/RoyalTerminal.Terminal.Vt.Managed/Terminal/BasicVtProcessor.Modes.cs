@@ -69,6 +69,10 @@ public sealed partial class BasicVtProcessor
         }
     }
 
+    private void RestoreDefaultMode(int mode, bool ansi)
+        => SetPolicyModeValue(mode,
+            (_defaultModeValues & (1UL << TerminalModeRegistry.IndexOf(mode, ansi))) != 0, ansi);
+
     private void SetPolicyModeValue(int mode, bool enabled, bool ansi)
     {
         if (ansi) { HandleAnsiMode(mode, enabled); return; }

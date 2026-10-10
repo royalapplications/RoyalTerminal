@@ -8,6 +8,10 @@ namespace RoyalTerminal.GhosttySharp.Native;
 
 public static partial class GhosttyVtNative
 {
+    /// <summary>
+    /// Native allocation callbacks. Alignment arguments are base-2 exponents:
+    /// a value n requests alignment 1 &lt;&lt; n bytes, not n bytes.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct GhosttyAllocatorVtable
     {

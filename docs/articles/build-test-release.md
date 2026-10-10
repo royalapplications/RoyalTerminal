@@ -209,6 +209,13 @@ You can capture benchmark baselines with:
 dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
 ```
 
+Focused update benchmarks accept `--terminal-update` (managed parser, native
+adapter and native core), `--program-status` (OSC 7501 and application
+inheritance), and `--history-compression` (row codec and snapshot restoration).
+Build first, then run separate revisions serially with identical JIT settings
+and alternating order. See the [October performance report](../specs/ghostty-performance-2026-10-09.md)
+for workloads, allocation accounting and measured tradeoffs.
+
 ## Documentation site
 
 This docs site lives under `docs/` and uses VitePress. Local commands:

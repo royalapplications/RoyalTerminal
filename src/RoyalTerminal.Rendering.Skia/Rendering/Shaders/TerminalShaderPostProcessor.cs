@@ -290,6 +290,9 @@ public sealed class TerminalShaderPostProcessor : IDisposable
         AddUniformIfPresent(uniforms, "iBackgroundColor", ToRgbFloats(frameContext.BackgroundColor));
         AddUniformIfPresent(uniforms, "iForegroundColor", ToRgbFloats(frameContext.ForegroundColor));
         AddUniformIfPresent(uniforms, "iCursorColor", ToRgbFloats(frameContext.CursorColor));
+        AddColorUniformIfPresent(uniforms, "iCursorText", frameContext.CursorTextColor);
+        AddColorUniformIfPresent(uniforms, "iSelectionForegroundColor", frameContext.SelectionForegroundColor);
+        AddColorUniformIfPresent(uniforms, "iSelectionBackgroundColor", frameContext.SelectionBackgroundColor);
         AddUniformIfPresent(uniforms, "iCurrentCursor", ToRectFloats(frameContext.CursorRect));
         AddUniformIfPresent(uniforms, "iCurrentCursorColor", ToRgbaFloats(frameContext.CursorColor));
         AddUniformIfPresent(uniforms, "iCurrentCursorStyle", ToCursorStyleFloats(frameContext.CursorStyle));
@@ -310,6 +313,11 @@ public sealed class TerminalShaderPostProcessor : IDisposable
         {
             uniforms[name] = value;
         }
+    }
+
+    private static void AddColorUniformIfPresent(SKRuntimeEffectUniforms uniforms, string name, SKColor color)
+    {
+        if (uniforms.Contains(name)) uniforms[name] = ToRgbFloats(color);
     }
 
     private static float[] ToRgbFloats(SKColor color)

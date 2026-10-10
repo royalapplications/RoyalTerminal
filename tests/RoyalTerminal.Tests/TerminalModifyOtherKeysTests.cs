@@ -103,7 +103,7 @@ public sealed class TerminalModifyOtherKeysTests(ITestOutputHelper output)
         using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(8, 3)) : new BasicVtProcessor(new TerminalScreen(8, 3));
         ITerminalModifyOtherKeysStateSource state = (ITerminalModifyOtherKeysStateSource)processor;
         processor.Process("\u001b[?2026h\u001b[>4;2m"u8); Assert.True(state.ModifyOtherKeys2);
-        processor.Process("\u001b[?1049h\u001b[!p\u001b[?1049l"u8); Assert.True(state.ModifyOtherKeys2);
+        processor.Process("\u001b[?1049h\u001b[!p\u001b[?1049l"u8); Assert.False(state.ModifyOtherKeys2);
         processor.Process("\u001bc"u8); Assert.False(state.ModifyOtherKeys2);
         foreach (bool preserve in new[] { true, false })
         {

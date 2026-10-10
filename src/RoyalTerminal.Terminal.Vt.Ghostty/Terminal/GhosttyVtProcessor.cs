@@ -233,7 +233,6 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         Ground,
         Escape,
         OscString,
-        OscEscape,
     }
 
     /// <inheritdoc />
@@ -521,6 +520,15 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private void ProcessShellIntegrationOscByte(byte value)
     {
+        // Match the native parser's global CAN/SUB cancellation. The legacy
+        // command-history observer must not publish a discarded OSC report.
+        if (value is 0x18 or 0x1A)
+        {
+            _shellIntegrationOscBuffer.Clear();
+            _shellIntegrationOscDiscarding = false;
+            _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+            return;
+        }
         switch (_shellIntegrationOscState)
         {
             case ShellIntegrationOscParserState.Ground:
@@ -548,33 +556,19 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 break;
 
             case ShellIntegrationOscParserState.OscString:
-                if (value == 0x07 || value == 0x9C)
+                if (value == 0x07)
                 {
                     HandleShellIntegrationOsc();
                     _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
                 }
                 else if (value == 0x1B)
                 {
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscEscape;
-                }
-                else
-                {
-                    AppendShellIntegrationOscByte(value);
-                }
-
-                break;
-
-            case ShellIntegrationOscParserState.OscEscape:
-                if (value == (byte)'\\')
-                {
                     HandleShellIntegrationOsc();
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.Ground;
+                    _shellIntegrationOscState = ShellIntegrationOscParserState.Escape;
                 }
-                else
+                else if (value >= 0x20)
                 {
-                    AppendShellIntegrationOscByte(0x1B);
                     AppendShellIntegrationOscByte(value);
-                    _shellIntegrationOscState = ShellIntegrationOscParserState.OscString;
                 }
 
                 break;
@@ -628,15 +622,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             return;
         }
 
-        if (!int.TryParse(payload.AsSpan(0, separator), out int selectorCode))
+        int selectorCode = payload.AsSpan(0, separator) switch
         {
-            return;
-        }
-
-        if (selectorCode is not 7 and not 133)
-        {
-            return;
-        }
+            "7" => 7,
+            "133" => 133,
+            _ => -1,
+        };
+        if (selectorCode < 0) return;
 
         string value = separator + 1 < payload.Length
             ? payload[(separator + 1)..]
@@ -792,6 +784,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         ObjectDisposedException.ThrowIf(_disposed, this);
         _notifications?.ResetParser();
 
+        ResetProgramStatuses();
+
         TerminalModeState before = ModeState;
         ResetSessionInputState();
         _terminal.Reset();
@@ -813,6 +807,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _historyPrimary.NativeEpoch = 0;
         _historyAlternate.NativeEpoch = 0;
         ClearSessionNotifications();
+        ResetProgramStatuses();
         _terminal.SendDragDropEvent(5);
 
         if (!preserveScrollback)
@@ -1392,6 +1387,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SetupTerminalEffects()
     {
+        SetupProgramStatusEffects();
         if (_windowResizeCallback is not null) _terminal.SetWindowResizeCallback(OnNativeWindowResize);
         _terminal.SetNotificationCallback(OnNativeNotification);
         _writePtyDelegate ??= OnNativeWritePty;
@@ -1432,6 +1428,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _terminal.SetContinuationMaxBytes(64 * 1024);
         _terminal.SetTitleReport(_titleReportEnabled);
         _terminal.SetUnknownSequenceMaxBytes((nuint)_unknownSequenceMaxBytes);
+        _terminal.SetXtChecksumReport(_checksumReportsEnabled);
+        _terminal.SetXtChecksumExtension((byte)_defaultChecksumFlags);
         _terminal.SetTerminfoName("xterm-ghostty");
         _terminal.SetClipboardWriteMaxBytes(16 * 1024 * 1024);
         _terminal.SetResizePullScrollback(OperatingSystem.IsWindows());
@@ -2953,6 +2951,12 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                         apc.Content.ToArray(),
                         apc.Truncated));
             }
+            else if (sequence->Tag == GhosttyVtNative.GhosttyTerminalUnknownSequenceTag.Osc)
+            {
+                GhosttyVtNative.GhosttyTerminalUnknownOscSequence osc = sequence->Value.Osc;
+                UnknownSequenceCallback(new TerminalUnknownSequence(TerminalUnknownSequenceType.Osc,
+                    osc.Content.ToArray(), osc.Truncated, (TerminalOscTerminator)osc.Terminator));
+            }
         }
         catch
         {
@@ -3343,6 +3347,8 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             TerminalMouseButton.Left => 1 << 0,
             TerminalMouseButton.Middle => 1 << 1,
             TerminalMouseButton.Right => 1 << 2,
+            TerminalMouseButton.Back => 1 << 3,
+            TerminalMouseButton.Forward => 1 << 4,
             _ => 0,
         };
     }
@@ -3383,6 +3389,10 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
                 return true;
             case TerminalMouseButton.Right:
                 value = GhosttyVtNative.GhosttyMouseButtonId.Right;
+                return true;
+            case TerminalMouseButton.Back:
+            case TerminalMouseButton.Forward:
+                value = (GhosttyVtNative.GhosttyMouseButtonId)button;
                 return true;
             default:
                 value = GhosttyVtNative.GhosttyMouseButtonId.Unknown;

@@ -81,6 +81,8 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
                 Pointer(TerminalPointerEventKind.Scroll, 10.5, 20.5) with { DeltaY = -1 },
                 Pointer(TerminalPointerEventKind.Scroll, 10.5, 20.5) with { DeltaX = -1 },
                 Pointer(TerminalPointerEventKind.Scroll, 10.5, 20.5) with { DeltaX = 1 },
+                Pointer(TerminalPointerEventKind.Scroll, 10.5, 20.5) with { DeltaY = -1,
+                    Modifiers = TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift },
                 Pointer(TerminalPointerEventKind.Move, 10.4999999999, 20.4999999999),
                 Pointer(TerminalPointerEventKind.Move, 10.5000000001, 20.5000000001),
             ];
@@ -243,6 +245,7 @@ public sealed class TerminalPointerEncoderParityTests(ITestOutputHelper output)
         GhosttyVtNative.GhosttyVtMods mods = 0;
         if ((pointer.Modifiers & TerminalModifiers.Shift) != 0) mods |= GhosttyVtNative.GhosttyVtMods.Shift;
         if ((pointer.Modifiers & TerminalModifiers.Control) != 0) mods |= GhosttyVtNative.GhosttyVtMods.Ctrl;
+        if ((pointer.Modifiers & TerminalModifiers.Alt) != 0) mods |= GhosttyVtNative.GhosttyVtMods.Alt;
         evt.SetModifiers(mods);
         evt.SetAction(pointer.Kind == TerminalPointerEventKind.Move ? GhosttyVtNative.GhosttyMouseAction.Motion :
             pointer.Kind == TerminalPointerEventKind.Button && pointer.Action == TerminalInputAction.Release ? GhosttyVtNative.GhosttyMouseAction.Release : GhosttyVtNative.GhosttyMouseAction.Press);

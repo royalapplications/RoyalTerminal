@@ -1269,11 +1269,19 @@
                          TextTrimming="CharacterEllipsis"
                          VerticalAlignment="Center" />
             </Border>
-            <TextBlock Grid.Column="2"
-                       Text="{Binding StatusText}"
-                       Classes="statusText"
-                       TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Center" />
+            <Grid Grid.Column="2">
+              <TextBlock Text="{Binding StatusText}"
+                         IsVisible="{Binding !ProgramStatus.HasStatus}"
+                         Classes="statusText"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center" />
+              <TextBlock Text="{Binding ProgramStatus.Summary}"
+                         IsVisible="{Binding ProgramStatus.HasStatus}"
+                         ToolTip.Tip="{Binding ProgramStatus.Details}"
+                         Classes="statusText"
+                         TextTrimming="CharacterEllipsis"
+                         VerticalAlignment="Center" />
+            </Grid>
             <Border x:Name="ReplayStatusControls"
                     Grid.Column="3"
                     Classes="statusChip replayTransport"
