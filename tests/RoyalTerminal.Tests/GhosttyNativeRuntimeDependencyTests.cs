@@ -9,7 +9,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-public sealed class GhosttyNativeRuntimeDependencyTests
+public sealed partial class GhosttyNativeRuntimeDependencyTests
 {
     private const string ConsumerTargetFramework = "net10.0";
 
