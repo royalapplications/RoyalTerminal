@@ -269,3 +269,10 @@ engines, with managed row access and native public grid/cell/row accessors. Only
 the emitted byte array is allocated; native references are borrowed under the
 existing processor lock. No native ABI extension or shell-specific handler is
 needed. Focused processor and headless input tests cover both engines.
+
+Validation: 186 focused tests pass with zero skips on macOS, including clean
+Bash and Zsh PTYs with each backend. The tests edit `abcdef` into `abcXdeYf`
+using actual encoded left/right clicks and assert the executed command's result;
+neither shell installs a mouse handler. Allocation checks confirm only the
+returned byte array is allocated, and no-op clicks allocate zero bytes.
+This fix follows the published `v0.7.0-preview.1` tag.

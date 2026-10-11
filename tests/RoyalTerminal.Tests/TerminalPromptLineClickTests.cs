@@ -122,6 +122,36 @@ public sealed class TerminalPromptLineClickTests
         Assert.Equal(Arrows(-(2 + scroll) * 8), Encoding.ASCII.GetString(sequence));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LineClickAllocatesOnlyTheResultAndNoOpAllocatesNothing(bool native)
+    {
+        using IVtProcessor processor = CreateProcessor(native, new(20, 4));
+        processor.Process(Encoding.ASCII.GetBytes(Prompt + "hello"));
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        for (int index = 0; index < 128; index++)
+        {
+            encoder.TryEncodePromptClick(2, 0, out _);
+            encoder.TryEncodePromptClick(7, 0, out _);
+        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        byte[] expected = new byte[15];
+        long arrayBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(expected);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 128; index++)
+        {
+            encoder.TryEncodePromptClick(2, 0, out byte[] sequence);
+            GC.KeepAlive(sequence);
+        }
+        Assert.Equal(arrayBytes * 128, GC.GetAllocatedBytesForCurrentThread() - before);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 128; index++)
+            encoder.TryEncodePromptClick(7, 0, out _);
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
     private static IVtProcessor CreateProcessor(bool native, TerminalScreen screen)
     {
         Assert.SkipWhen(native && !GhosttyVtProcessor.IsAvailable(), "Native unavailable.");
