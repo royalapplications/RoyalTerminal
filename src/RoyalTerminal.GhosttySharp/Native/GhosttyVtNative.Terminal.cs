@@ -220,6 +220,8 @@ public static partial class GhosttyVtNative
     public enum GhosttyTerminalUnknownSequenceTag : int
     {
         Apc = 0,
+        /// <summary>Unsupported OSC sequence.</summary>
+        Osc = 1,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -236,6 +238,10 @@ public static partial class GhosttyVtNative
     {
         [FieldOffset(0)]
         public GhosttyTerminalUnknownStringSequence Apc;
+
+        /// <summary>Unsupported OSC content and terminator.</summary>
+        [FieldOffset(0)]
+        public GhosttyTerminalUnknownOscSequence Osc;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -404,6 +410,16 @@ public static partial class GhosttyVtNative
         ClipboardWriteMaxBytes = 39,
         ResizePullScrollback = 40,
         RenderHold = 41,
+        /// <summary>OSC 133 lifecycle callback.</summary>
+        SemanticPrompt = 42,
+        /// <summary>RIS callback.</summary>
+        Reset = 43,
+        /// <summary>Enable DECRQCRA replies.</summary>
+        XtChecksumReport = 44,
+        /// <summary>Default XTCHECKSUM flags (0–31).</summary>
+        XtChecksumExtension = 45,
+        /// <summary>OSC 7501 report callback; enables feature detection.</summary>
+        ProgramStatus = 46,
     }
 
     public enum GhosttyTerminalData : int
@@ -449,6 +465,10 @@ public static partial class GhosttyVtNative
         VtGround = 38,
         CursorAtPrompt = 39,
         ClipboardWriteMaxBytes = 40,
+        /// <summary>Application-requested pointer shape.</summary>
+        MouseShape = 41,
+        /// <summary>Native page and image memory usage.</summary>
+        MemoryUsage = 42,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_new")]

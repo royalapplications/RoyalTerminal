@@ -26,7 +26,9 @@ internal sealed class ManagedMouseEncoder
 
     private static byte ButtonMask(TerminalMouseButton button) => button switch
     {
-        TerminalMouseButton.Left => 1, TerminalMouseButton.Middle => 2, TerminalMouseButton.Right => 4, _ => 0,
+        TerminalMouseButton.Left => 1, TerminalMouseButton.Middle => 2, TerminalMouseButton.Right => 4,
+        TerminalMouseButton.Back => 8, TerminalMouseButton.Forward => 16,
+        _ => 0,
     };
 
     internal bool TryEncode(in TerminalPointerEvent pointer, in TerminalPointerEncodingContext context,

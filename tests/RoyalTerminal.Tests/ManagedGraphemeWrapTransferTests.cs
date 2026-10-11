@@ -153,14 +153,16 @@ public sealed class ManagedGraphemeWrapTransferTests
     }
 
     [Fact]
-    public void RemappedBaseDoesNotRetainTheOldInlineScalarInItsGraphemeText()
+    public void UnicodeBaseRetainsItsScalarWhenCharsetChangesBeforeTheWrap()
     {
         TerminalScreen screen = Screen();
         using BasicVtProcessor processor = new(screen);
         Process(processor, "\u001b[?2027h\u001b[1;8H" + Prefix(1) + "\u001b(0\u2764");
         TerminalCell cell = screen.GetViewportRow(1).ReadOnlyCells[0];
-        Assert.Equal(' ', cell.Codepoint);
-        Assert.Equal(" \u200d\u2764", cell.Grapheme);
+        // Ghostty #14554 leaves Unicode above FF unchanged by DEC charsets,
+        // including when a widening grapheme moves its base to the next row.
+        Assert.Equal(0x263a, cell.Codepoint);
+        Assert.Equal("\u263a\u200d\u2764", cell.Grapheme);
     }
 
     [Fact]

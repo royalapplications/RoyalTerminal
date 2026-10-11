@@ -54,6 +54,7 @@
   <ItemGroup>
     <None Include="Fixtures\NcursesHarness.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\Unicode18\*.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\external\ghostty\src\terminal\kitty\testdata\image-png-zlib_deflate-50x76-2147483647-raw.data" Link="Fixtures\Kitty\compressed-png.data" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\terminal\snapshot\testdata\*.hex" Link="Fixtures\GhosttySnapshot\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\font\res\JetBrainsMonoNoNF-Regular.ttf" Link="Fixtures\Fonts\JetBrainsMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\external\ghostty\src\font\res\NotoEmoji-Regular.ttf" Link="Fixtures\Fonts\NotoEmoji-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />

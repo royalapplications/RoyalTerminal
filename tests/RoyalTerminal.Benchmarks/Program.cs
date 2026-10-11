@@ -11,6 +11,24 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--program-status", StringComparer.Ordinal))
+{
+    ProgramStatusBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--history-compression", StringComparer.Ordinal))
+{
+    HistoryCompressionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--terminal-update", StringComparer.Ordinal))
+{
+    TerminalUpdateBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-search-prepend", StringComparer.Ordinal))
 {
     ManagedSearchPrependBenchmark.Run();

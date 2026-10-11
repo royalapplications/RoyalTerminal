@@ -1593,6 +1593,54 @@ public sealed class MainWindowControllerModeStartupTests
     }
 
     [AvaloniaFact]
+    public async Task Controller_ProgramStatusesFollowTheActivePaneAndIgnoreBackgroundUpdates()
+    {
+        using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);
+        using IDisposable autostart = SetProcessEnvironmentVariable("ROYALTERMINAL_DEMO_DISABLE_SESSION_AUTOSTART", "1");
+        MainWindowViewModel viewModel = new();
+        viewModel.SelectedTransportMode = FindTransportMode(viewModel, TerminalTransportIds.Pipe);
+        Window window = CreateControllerHostWindow(viewModel, out Grid terminalHost);
+        MainWindowController controller = new(
+            window, viewModel, new TerminalModeCapabilityResolver(), TerminalModeResolver.Default,
+            workspaceStore: new InMemoryWorkspaceStore(),
+            settingsProfileStore: CreateEmptyProfileStore(),
+            commandHistoryStore: new InMemoryCommandHistoryStore());
+        IDisposable? lifetime = null;
+        try
+        {
+            lifetime = controller.Activate();
+            Assert.True(await WaitUntilAsync(() => GetStandaloneControls(terminalHost).Count == 1, TimeSpan.FromSeconds(2)));
+            TerminalControl first = Assert.Single(GetStandaloneControls(terminalHost));
+            await viewModel.SplitPaneRightCommand.Execute().ToTask();
+            Assert.True(await WaitUntilAsync(() => GetStandaloneControls(terminalHost).Count == 2, TimeSpan.FromSeconds(2)));
+            TerminalControl second = Assert.Single(GetStandaloneControls(terminalHost), control => !ReferenceEquals(control, first));
+            first.WriteOutput("\u001b]7501;state=blocked:app=left\a"u8);
+            second.WriteOutput("\u001b]7501;state=working:app=right\a"u8);
+            await viewModel.FocusPaneLeftCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains("left: Waiting for you", viewModel.ProgramStatus.Summary, StringComparison.Ordinal);
+            Assert.True(viewModel.ProgramStatus.HasStatus);
+
+            second.WriteOutput("\u001b]7501;state=error:app=right\a"u8);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains("left: Waiting for you", viewModel.ProgramStatus.Summary, StringComparison.Ordinal);
+            await viewModel.FocusPaneRightCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+            Assert.Contains("right: Failed", viewModel.ProgramStatus.Summary, StringComparison.Ordinal);
+            Assert.DoesNotContain("left", viewModel.ProgramStatus.Details, StringComparison.Ordinal);
+            second.WriteOutput("\u001b]7501;state=clear\a"u8);
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(viewModel.ProgramStatus.HasStatus);
+            Assert.Empty(viewModel.ProgramStatus.Details);
+        }
+        finally
+        {
+            lifetime?.Dispose();
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Controller_SplitPaneCommands_CreatePanes_AndShutdownPreservesLiveRatio()
     {
         using IDisposable environment = SetProcessEnvironmentVariable(StartAllRenderModesEnvVar, null);

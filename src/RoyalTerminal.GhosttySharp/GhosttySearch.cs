@@ -44,7 +44,8 @@ public sealed class GhosttySearch : IDisposable
         }
     }
 
-    /// <summary>Advances the search using only search-owned state.</summary>
+    /// <summary>Advances the search. The terminal must still be alive.</summary>
+    /// <exception cref="InvalidOperationException">The bound terminal has been freed.</exception>
     public GhosttyVtNative.GhosttySearchStatus Tick()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

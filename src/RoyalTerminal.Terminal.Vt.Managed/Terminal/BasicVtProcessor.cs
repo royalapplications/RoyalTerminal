@@ -387,6 +387,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         _screen = screen;
         _publishedScreen = screen;
+        _lastResizeColumns = screen.Columns;
+        _lastResizeRows = screen.ViewportRows;
         _options = options ?? BasicVtProcessorOptions.Default;
         UnknownSequenceMaxBytes = _options.UnknownSequenceMaxBytes;
         TitleReportEnabled = _options.TitleReportEnabled;
@@ -892,9 +894,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         builder.Append("\x1b[")
-            .Append(_cursorRow - (options.Extras.IncludeModes && _originMode ? _scrollTop : 0) + 1)
+            .Append(Math.Max(0, _cursorRow - (options.Extras.IncludeModes && options.Extras.IncludeScrollingRegion && _originMode ? _scrollTop : 0)) + 1)
             .Append(';')
-            .Append(cursorColumn - (options.Extras.IncludeModes && _originMode ? _scrollLeft : 0) + 1)
+            .Append(Math.Max(0, cursorColumn - (options.Extras.IncludeModes && options.Extras.IncludeScrollingRegion && _originMode ? _scrollLeft : 0)) + 1)
             .Append('H');
 
         if (!restoreWrap)
@@ -1051,6 +1053,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void EnterOscState()
     {
         _state = ParserState.OscString;
+        ResetOscCapture();
         _oscBuffer.Clear();
         _isDiscardingOscPayload = false;
     }
@@ -1248,6 +1251,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        // A single shift belongs to one input scalar, including a combining
+        // character. Internal spacer writes must not consume or remap it.
+        int mappedCodepoint = _charsets.MapPrintedCell(codepoint);
         bool graphemeClusters = _extendedDecModes.Contains(ManagedDecModeFlag.GraphemeClusters);
         // The byte-sized fast path never joins a grapheme in Ghostty's printer.
         // Zero-width and cluster continuations must be considered before wrapping.
@@ -1269,6 +1275,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         if (width == 2 && _screen.Columns == 1)
         {
             codepoint = 0;
+            mappedCodepoint = 0;
             width = 1;
         }
 
@@ -1332,7 +1339,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             ClearCellAndWideArtifacts(row, _cursorCol + 1);
         }
 
-        WriteCellFromPen(row, _cursorCol, codepoint, (byte)width);
+        WriteCellFromPen(row, _cursorCol, mappedCodepoint, (byte)width);
         if (width == 2 && _cursorCol + 1 < row.Columns)
         {
             WriteCellFromPen(row, _cursorCol + 1, 0, 0);
@@ -1346,7 +1353,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void WriteCellFromPen(ref TerminalCell cell, int codepoint, byte width)
     {
         if (_screen.TracksSnapshotMetadata) ApplySnapshotCursorStyleDrops();
-        cell.Codepoint = _charsets.MapPrintedCell(codepoint);
+        cell.Codepoint = codepoint;
         cell.Grapheme = null;
         cell.Foreground = _currentFg;
         cell.Background = _currentBg;
@@ -1935,9 +1942,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case (byte)'c': // RIS — Full reset
-                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll);
+                ResetInternal(raiseModeChanged: false, SessionScreenResetMode.ClearAll, clearProgramStatuses: false);
                 ClearActiveProgressReport();
+                ResetProgramStatuses();
                 _state = ParserState.Ground;
+                ResetCallback?.Invoke();
                 break;
 
             case (byte)'=': // DECKPAM — Application keypad
@@ -2073,6 +2082,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleOscString(bool bellTerminator)
     {
+        if (FinishUnknownOsc(bellTerminator)) return;
         if (_isDiscardingOscPayload)
         {
             _oscBuffer.Clear();
@@ -2086,6 +2096,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         ReadOnlySpan<byte> rawPayload = CollectionsMarshal.AsSpan(_oscBuffer);
+        if (rawPayload.StartsWith("133;"u8))
+        {
+            string command = Encoding.UTF8.GetString(rawPayload[4..]);
+            HandleSemanticPrompt(command.AsSpan());
+            PublishSemanticPrompt(rawPayload[4..]);
+            _shellIntegrationParser.TryHandleOsc(133, command);
+            _oscBuffer.Clear();
+            return;
+        }
+        if (rawPayload.StartsWith("7501;"u8))
+        {
+            HandleProgramStatus(rawPayload[5..], bellTerminator);
+            _oscBuffer.Clear();
+            return;
+        }
         if (rawPayload.StartsWith("99;"u8))
         {
             HandleNotification(rawPayload[3..], bellTerminator);
@@ -2101,7 +2126,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
         if (rawPayload.StartsWith("22;"u8))
         {
-            if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
+            if (rawPayload.Length == 3) MouseShape = TerminalMouseShape.Text;
+            else if (TerminalMouseShapeNames.TryParse(rawPayload[3..], out TerminalMouseShape shape)) MouseShape = shape;
             _oscBuffer.Clear();
             return;
         }
@@ -2539,36 +2565,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         byte? progress = state == TerminalProgressState.Set ? (byte)0 : null;
-        if (value.Length > 3)
+        if (state is TerminalProgressState.Set or TerminalProgressState.Error or TerminalProgressState.Pause &&
+            value.Length > 3 && value[3] == ';')
         {
-            if (value[3] != ';')
-            {
-                return false;
-            }
-
             ReadOnlySpan<char> percentage = value.AsSpan(4);
-            if (percentage.IsEmpty)
-            {
-                return false;
-            }
-
-            int parsed = 0;
-            foreach (char character in percentage)
-            {
-                if (character is < '0' or > '9')
-                {
-                    return false;
-                }
-
-                parsed = Math.Min(100, (parsed * 10) + (character - '0'));
-            }
-
-            if (state is TerminalProgressState.Set or
-                TerminalProgressState.Error or
-                TerminalProgressState.Pause)
-            {
-                progress = checked((byte)parsed);
-            }
+            progress = ulong.TryParse(percentage, NumberStyles.None, CultureInfo.InvariantCulture, out ulong parsed)
+                ? (byte)Math.Min(100UL, parsed) : null;
         }
 
         report = new TerminalProgressReport(state, progress);
@@ -2965,6 +2967,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return;
         }
 
+        if (!_oscHasKnownSelector && !_oscIsUnknown) ClassifyOscByte(b);
+        if (_isDiscardingOscPayload) return;
+        if (_oscIsUnknown)
+        {
+            AppendUnknownOsc(new ReadOnlySpan<byte>(in b));
+            return;
+        }
+
         if (_oscBuffer.Count >= GetOscBufferLimit([]))
         {
             _oscBuffer.Clear();
@@ -2980,6 +2990,19 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // Span's vectorized control-byte search and one bulk copy mirror
         // Ghostty's OSC scanner while preserving control dispatch at boundaries.
         bool osc = _state == ParserState.OscString;
+        if (osc)
+        {
+            while (!payload.IsEmpty && !_oscHasKnownSelector && !_oscIsUnknown && !_isDiscardingOscPayload)
+            {
+                AppendOscByteOrDiscard(payload[0]);
+                payload = payload[1..];
+            }
+            if (_oscIsUnknown)
+            {
+                AppendUnknownOsc(payload);
+                return;
+            }
+        }
         if (osc ? _isDiscardingOscPayload : _isDiscardingDcsPayload)
         {
             return;
@@ -3015,10 +3038,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         int separator = combined.IndexOf((byte)';');
         if (separator < 0) return MaxOscBufferBytes;
         ReadOnlySpan<byte> selector = combined[..separator];
+        if (selector.SequenceEqual("7501"u8)) return ProgramStatusParser.MaxBodyBytes + 5;
         // Title/PWD parsers reserve one byte of their fixed capture for NUL.
         if (selector is [(byte)'0'] or [(byte)'1'] or [(byte)'2'] or [(byte)'7'] || selector.SequenceEqual("1337"u8) || selector.SequenceEqual("22"u8))
             return 2047 + separator + 1;
         if (selector.SequenceEqual("9"u8)) return 2048 + separator + 1;
+        if (selector.SequenceEqual("133"u8)) return 2048 + separator + 1;
         return TryOscColorOperation(selector, out _) ? 2048 + separator + 1 : MaxOscBufferBytes;
     }
 
@@ -3029,8 +3054,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             return false;
         }
 
-        // Ghostty dispatches a valid OSC on every exit, including CAN/SUB.
-        if (_state == ParserState.OscString) HandleOscString(bellTerminator: false);
+        // CAN/SUB discard OSC completely, matching Ghostty #14453 and xterm.
         // Unknown APCs are suppressed on abort, but parsed Kitty commands still
         // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
         if (_state == ParserState.ApcString) CompleteApc(terminated: false);
@@ -3041,6 +3065,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void AbortActiveControlString()
     {
+        ResetOscCapture();
         _params.Clear();
         _currentParam = 0;
         _hasParam = false;
@@ -3069,6 +3094,12 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         var p0 = _params.Count > 0 ? _params[0] : 0;
         var p1 = _params.Count > 1 ? _params[1] : 0;
+
+        if (_csiPrivateMarker == '\0' && _intermediateChar is '*' or '#' && finalByte == 'y')
+        {
+            HandleChecksum(_intermediateChar);
+            return;
+        }
 
         if (_csiPrivateMarker == '\0' && _intermediateChar == '$' && finalByte == '}')
         {
@@ -4504,42 +4535,24 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void SoftReset()
     {
-        EndRenderHold();
-        _screen.EndSnapshotCursorHyperlink(_inAltScreen ? 1 : 0);
-        _cursorVisible = true;
-        _originMode = false;
-        _autoWrap = true;
-        _applicationCursorKeys = false;
-        _applicationKeypad = false;
-        _backarrowKeyMode = false;
-        _saveCursorMode = false;
-        _bracketedPaste = false;
-        _win32InputMode = false;
-        _keyboardLocked = false;
-        _sendReceiveMode = true;
-        ResetExtendedDecModesToDefaults();
-        _sixelDisplayMode = false;
-        ResetSavedAndScreenModes();
-        _insertMode = false;
-        _lineFeedNewLineMode = false;
-        ResetDelayedWrap();
+        _checksumFlags = _defaultChecksumFlags;
+        // Ghostty DECSTR resets this precise mode subset to configured defaults.
+        // Other protocol modes, saved mode banks, tabs and pending wrap survive.
+        foreach (int mode in (ReadOnlySpan<int>)[25, 6, 7, 45, 1045, 1, 66, 69])
+            RestoreDefaultMode(mode, ansi: false);
+        RestoreDefaultMode(2, ansi: true);
+        RestoreDefaultMode(4, ansi: true);
         _scrollTop = 0;
         _scrollBottom = _screen.ViewportRows - 1;
         ResetHorizontalMargins();
         _charsets = new();
-        _lastGraphicCodepoint = -1;
-        _oscBuffer.Clear();
-        _isDiscardingOscPayload = false;
-        _dcsBuffer.Clear();
-        _isDiscardingDcsPayload = false;
-        ResetApcCommand();
-        _currentHyperlinkId = 0;
-        _kittyKeyboardMain = default;
-        _kittyKeyboardAlt = default;
+        _currentProtected = false;
+        SavedCursor = null;
+        _statusDisplay = 0;
+        ModifyOtherKeys2 = false;
         ResetAttributes();
-        InitTabStops();
-        ApplyConfiguredModeDefaults();
         SetCursorStyle(0);
+        ResetPaletteOverrides();
     }
 
     #endregion
@@ -4600,8 +4613,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetDelayedWrap();
     }
 
-    private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode)
+    private void ResetInternal(bool raiseModeChanged, SessionScreenResetMode screenResetMode, bool clearProgramStatuses = true)
     {
+        _checksumFlags = _defaultChecksumFlags;
+        ResetOscCapture();
+        if (clearProgramStatuses) ResetProgramStatuses();
         using SnapshotCursorStyleScope snapshotCursor = TrackSnapshotCursorMovement();
         _notifications?.ResetParser();
         _dragDrop?.ResetParser();
@@ -4715,6 +4731,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetAttributes();
         InitTabStops();
         ApplyConfiguredModeDefaults();
+        ResetPaletteOverrides();
 
         // Ghostty fullReset selects the configured cursor after modes.reset;
         // this policy takes precedence over the restored default mode bank.
@@ -4859,7 +4876,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     ResizeInactiveScreen(oldColumns, oldRows, columns, rows, reflowOnResize, preserveViewportTopOnRowsIncrease);
                 ApplyResizeState(columns, rows);
             }
-            else if (notifyOnly) ApplyResizeState(columns, rows);
+            else if (notifyOnly && (columns != _lastResizeColumns || rows != _lastResizeRows))
+                ApplyResizeState(columns, rows);
             ResizeCheckpoint?.Invoke(ManagedResizeCheckpoint.Layout);
             _renderHold = null;
             AdvanceKittyAnimations();
@@ -4877,6 +4895,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // No allocation or host callback between these ownership transfers.
         _publishedScreen.AdoptStateFrom(_screen);
         _screen = _publishedScreen;
+        _lastResizeColumns = columns;
+        _lastResizeRows = rows;
         if (_inAltScreen) _alternateKittyStore = _kittyStore;
         else _primaryKittyStore = _kittyStore;
         SetExtendedDecMode(2026, false);
@@ -5039,6 +5059,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         _cursorCol = Math.Clamp(mappedCursor.Column, 0, safeColumns - 1);
         _delayedWrap = restoreDelayedWrapAtEnd;
+        if (_delayedWrap && _cursorCol != safeColumns - 1)
+        {
+            _cursorCol++;
+            _delayedWrap = false;
+        }
     }
 
     /// <inheritdoc />

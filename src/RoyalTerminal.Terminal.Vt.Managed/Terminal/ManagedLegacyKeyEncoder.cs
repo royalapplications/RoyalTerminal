@@ -129,10 +129,6 @@ internal static class ManagedLegacyKeyEncoder
                 sequence = Numeric("\u001b[27;"u8, modifier, code, (byte)'~');
             else if (mods is 0 or TerminalModifiers.Control)
                 sequence = [((mods == TerminalModifiers.Control) != backarrow) ? (byte)8 : (byte)127];
-            // Upstream has no normal-mode Ctrl+Alt+Shift entry: the final
-            // any-modifier default applies, including its DECBKM override.
-            else if (mods == (TerminalModifiers.Control | TerminalModifiers.Alt | TerminalModifiers.Shift))
-                sequence = [backarrow ? (byte)8 : (byte)127];
             else
             {
                 byte value = (mods & TerminalModifiers.Control) != 0 ? (byte)8 : (byte)127;

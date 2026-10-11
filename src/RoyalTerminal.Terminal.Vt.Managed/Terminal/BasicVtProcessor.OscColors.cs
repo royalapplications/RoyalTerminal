@@ -9,6 +9,11 @@ namespace RoyalTerminal.Terminal;
 
 public sealed partial class BasicVtProcessor
 {
+    private void ResetPaletteOverrides()
+    {
+        if (_colors.ResetPalette(null)) ApplyEffectiveTheme(_colors.GetEffectiveTheme());
+    }
+
     private static bool TryOscColorOperation(ReadOnlySpan<byte> selector, out int operation)
     {
         operation = 0;
@@ -18,7 +23,7 @@ public sealed partial class BasicVtProcessor
             if (digit is < (byte)'0' or > (byte)'9') return false;
             operation = operation * 10 + digit - '0';
         }
-        return operation is 4 or 5 or 21 or 104 or >= 10 and <= 19 or >= 110 and <= 119;
+        return operation is 4 or 5 or 21 or 104 or 105 or >= 10 and <= 19 or >= 110 and <= 119;
     }
 
     private void HandleOscColors(int operation, ReadOnlySpan<char> payload, bool bellTerminator)
@@ -87,7 +92,7 @@ public sealed partial class BasicVtProcessor
                 }
             }
         }
-        // OSC 5 and dynamic targets 13-19/113-119 are recognized by native
+        // OSC 5/105 and dynamic targets 13-19/113-119 are recognized by native
         // parsing but have no state/effects in libghostty-vt.
         if (changed) ApplyEffectiveTheme(_colors.GetEffectiveTheme());
         if (replies is not null) ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(replies.ToString()));
@@ -107,11 +112,7 @@ public sealed partial class BasicVtProcessor
 
     private static bool TryXtermColorIndex(ReadOnlySpan<char> token, out int index)
     {
-        // Zig parseInt(u9) permits +, -0, and interior underscores, but not
-        // surrounding whitespace. These rules differ from OSC 21 unsigned keys.
-        bool negative = !token.IsEmpty && token[0] == '-';
-        if (!token.IsEmpty && token[0] is '+' or '-') token = token[1..];
-        return ManagedColorParser.Unsigned(token, 10, 511, out index) && index <= 260 && (!negative || index == 0);
+        return ManagedColorParser.Unsigned(token, 10, 511, out index) && index <= 260;
     }
 
     private void AppendOscColorReply(ref StringBuilder? replies, int selector, int? paletteIndex, uint color, bool bell)

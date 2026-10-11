@@ -28,11 +28,12 @@ CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 ## Reviewed correctness overlays
 
 The generated source copy also applies twelve corrections to pinned upstream
-`b40acce58dcf77df52231c3798ea58e924647c89`. The refresh from `622b4eec`
-changes terminal printing/cursor behavior, word selection and stream window-resize
-dispatch; the four affected overlay source hashes are updated without removing
-the separate correctness corrections. Native rebuild/overlay execution remains
-part of final validation. Each overlay checks the original file's full
+`246f702876b924a1cb7cade1e99274d1470302fc`. The October refresh from `b40acce58`
+changes charset printing, reset/checksum behavior, reflow, memory accounting and
+stream effects. Six changed source hashes were reviewed; all existing exact
+fragments remain valid and the separate corrections are retained. Both native
+libraries rebuilt on macOS arm64; the ABI and new API suite passed (152 tests).
+OSC 7501 uses the upstream public callback directly and requires no overlay. Each overlay checks the original file's full
 SHA-256 and the exact expected source-fragment count; any upstream file change
 fails the build until reviewed. The submodule checkout is never changed.
 

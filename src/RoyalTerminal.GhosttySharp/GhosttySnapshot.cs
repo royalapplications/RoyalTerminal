@@ -159,6 +159,15 @@ public sealed class GhosttySnapshotDecoder : IDisposable
         SetOption(GhosttyVtNative.GhosttySnapshotDecoderOption.RetainContinuation, &value);
     }
 
+    /// <summary>Compresses restored history page by page on supported platforms,
+    /// avoiding a temporary fully uncompressed history allocation.</summary>
+    public unsafe void SetCompressHistory(bool value)
+        => SetOption(GhosttyVtNative.GhosttySnapshotDecoderOption.CompressHistory, &value);
+
+    /// <summary>Gets whether restored history is compressed when supported.</summary>
+    public bool GetCompressHistory()
+        => GetValue<bool>(GhosttyVtNative.GhosttySnapshotDecoderData.CompressHistory);
+
     /// <summary>Decodes the renderable prefix and returns its caller-owned terminal.</summary>
     public GhosttyTerminal Ready()
     {

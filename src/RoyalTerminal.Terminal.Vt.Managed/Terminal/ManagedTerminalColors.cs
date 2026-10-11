@@ -110,19 +110,20 @@ internal sealed class ManagedTerminalColors(TerminalTheme configuredTheme)
     internal uint GetPalette(int index) => _paletteOverrides is not null && _paletteOverrides.TryGetValue(index, out uint color)
         ? color : _configuredTheme.Palette[index];
 
-    internal void ResetPalette(int? index)
+    internal bool ResetPalette(int? index)
     {
         if (index is int value)
         {
-            if (_paletteOverrides?.Remove(value) != true) return;
+            if (_paletteOverrides?.Remove(value) != true) return false;
         }
         else
         {
-            if (_paletteOverrides is not { Count: > 0 }) return;
+            if (_paletteOverrides is not { Count: > 0 }) return false;
             _paletteOverrides.Clear();
         }
         _effectiveTheme = null;
         _effectivePalette = null;
+        return true;
     }
 
     internal void SetDynamic(int selector, uint? color)

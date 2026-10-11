@@ -54,7 +54,7 @@ internal struct ManagedCharsetState
         // Current Ghostty maps through GL even for UTF-8 input; GR is retained
         // state but not yet consulted by its printer. Width is determined first.
         if (set <= 1) return codepoint;
-        if (codepoint > 255) return ' ';
+        if (codepoint > 255) return codepoint;
         if (set == 2) return codepoint == '#' ? 0xA3 : codepoint;
         return codepoint switch
         {

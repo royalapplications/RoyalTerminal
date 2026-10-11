@@ -87,6 +87,8 @@ public sealed class ManagedTerminalSnapshotDecoder : IDisposable
         {
             if (_reader.ReadNextHistoryPage() is not { } page) return null;
             GhosttySnapshotHistoryProgress progress = _terminal.Processor.ApplySnapshotHistory(_history!, page);
+            if (_options.CompressHistory && progress.Rows > 0)
+                _terminal.Processor.CompressSnapshotHistory(progress.Key, progress.Rows);
             return new(progress.Key, progress.Rows, progress.Remaining);
         }
         catch { _failed = true; throw; }

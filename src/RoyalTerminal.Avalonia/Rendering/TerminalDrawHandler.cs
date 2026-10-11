@@ -665,7 +665,10 @@ public class TerminalDrawHandler : CompositionCustomVisualHandler
             renderer.CursorColor,
             cursorRect,
             renderer.CursorStyle,
-            renderer.CursorVisible);
+            renderer.CursorVisible,
+            renderer.CursorTextColor,
+            renderer.SelectionForegroundColor == SKColors.Empty ? new SKColor(screen.DefaultForeground) : renderer.SelectionForegroundColor,
+            renderer.SelectionColor);
         _shaderFrame++;
         return context;
     }

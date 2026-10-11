@@ -47,6 +47,9 @@ public sealed class TerminalModeDefaultsTests(ITestOutputHelper output)
             Assert.True(managed.TrySetDefaultMode(mode, enabled, ansi));
             Compare();
             if (!ansi) Write($"\u001b[?{mode}s");
+            Write($"\u001b[{(ansi ? "" : "?")}{mode}{(enabled ? 'l' : 'h')}");
+            Write("\u001b[!p");
+            Compare();
             Write("\u001bc");
             Compare();
             if (!ansi) { Write($"\u001b[?{mode}r"); Compare(); }

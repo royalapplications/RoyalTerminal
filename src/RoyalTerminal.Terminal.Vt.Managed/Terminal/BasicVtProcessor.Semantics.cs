@@ -53,6 +53,7 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
                 ReadPromptPolicy(command.Length > 1 ? command[2..] : default);
                 goto case 'P';
             case 'P':
+                NotifyProgramStatusProcessExit();
                 CurrentPromptPolicy.Seen = true;
                 CurrentSemanticPen = new() { Content = TerminalSemanticContent.Prompt };
                 ReadOnlySpan<char> kind = ReadFirstSemanticOption(command.Length > 1 ? command[2..] : default, "k");

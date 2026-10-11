@@ -81,7 +81,7 @@ public sealed record BasicVtProcessorOptions
     public int ContinuationMaxBytes { get; init; } = 64 * 1024;
 
     /// <summary>
-    /// Initial unknown-APC capture limit in payload bytes. Zero disables capture;
+    /// Initial unknown APC/OSC capture limit in payload bytes. Zero disables capture;
     /// known Kitty/glyph protocols have separate limits. May be changed later
     /// through <see cref="ITerminalUnknownSequencePolicy.UnknownSequenceMaxBytes"/>.
     /// </summary>

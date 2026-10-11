@@ -28,6 +28,30 @@ public readonly record struct TerminalShaderFrameContext
         SKRect cursorRect,
         CursorStyle cursorStyle,
         bool cursorVisible)
+        : this(width, height, time, timeDelta, frame, scale, backgroundColor, foregroundColor,
+            cursorColor, cursorRect, cursorStyle, cursorVisible, null, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a shader frame context with cursor-text and selection colors.
+    /// </summary>
+    public TerminalShaderFrameContext(
+        int width,
+        int height,
+        float time,
+        float timeDelta,
+        int frame,
+        float scale,
+        SKColor backgroundColor,
+        SKColor foregroundColor,
+        SKColor cursorColor,
+        SKRect cursorRect,
+        CursorStyle cursorStyle,
+        bool cursorVisible,
+        SKColor? cursorTextColor = null,
+        SKColor? selectionForegroundColor = null,
+        SKColor? selectionBackgroundColor = null)
     {
         Width = Math.Max(1, width);
         Height = Math.Max(1, height);
@@ -41,6 +65,9 @@ public readonly record struct TerminalShaderFrameContext
         CursorRect = cursorRect;
         CursorStyle = cursorStyle;
         CursorVisible = cursorVisible;
+        CursorTextColor = cursorTextColor ?? backgroundColor;
+        SelectionForegroundColor = selectionForegroundColor ?? foregroundColor;
+        SelectionBackgroundColor = selectionBackgroundColor ?? backgroundColor;
     }
 
     /// <summary>Gets the framebuffer width in pixels.</summary>
@@ -69,6 +96,15 @@ public readonly record struct TerminalShaderFrameContext
 
     /// <summary>Gets the current cursor color.</summary>
     public SKColor CursorColor { get; }
+
+    /// <summary>Gets the text color under the cursor, exposed as iCursorText.</summary>
+    public SKColor CursorTextColor { get; }
+
+    /// <summary>Gets the selection text color, exposed as iSelectionForegroundColor.</summary>
+    public SKColor SelectionForegroundColor { get; }
+
+    /// <summary>Gets the selection fill color, exposed as iSelectionBackgroundColor.</summary>
+    public SKColor SelectionBackgroundColor { get; }
 
     /// <summary>Gets the current cursor rectangle in framebuffer coordinates.</summary>
     public SKRect CursorRect { get; }

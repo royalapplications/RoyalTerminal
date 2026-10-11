@@ -12,6 +12,8 @@ public static partial class GhosttyVtNative
     {
         MaxContinuationBytes = 0,
         RetainContinuation = 1,
+        /// <summary>Compress each restored history page when supported.</summary>
+        CompressHistory = 2,
     }
 
     public enum GhosttySnapshotDecoderData : int
@@ -25,6 +27,8 @@ public static partial class GhosttyVtNative
         ProgressRows = 6,
         ProgressRemaining = 7,
         RetainContinuation = 8,
+        /// <summary>Whether restored history is compressed.</summary>
+        CompressHistory = 9,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_snapshot_encode")]
