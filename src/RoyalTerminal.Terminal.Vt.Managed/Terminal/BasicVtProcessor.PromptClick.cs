@@ -11,17 +11,25 @@ public sealed partial class BasicVtProcessor : ITerminalPromptClickEncoderSource
     public bool TryEncodePromptClick(int column, int row, out byte[] sequence)
     {
         sequence = [];
+        TerminalPromptState state = PromptState;
         if (_inAltScreen || (uint)column >= (uint)_screen.Columns || (uint)row >= (uint)_screen.ViewportRows ||
-            PromptState.Click is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative)) return false;
+            (state.Click is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative) &&
+                !TerminalPromptLineClickEncoder.Supports(state.Click))) return false;
         uint cursor = (uint)(_screen.TotalRows - _screen.ViewportRows + _cursorRow);
         PromptRowReader reader = new(_screen);
         if (!reader.TryReadPrompt(cursor, out TerminalSemanticPrompt marker) ||
-            marker == TerminalSemanticPrompt.None && PromptState.Content == TerminalSemanticContent.Output ||
+            marker == TerminalSemanticPrompt.None && state.Content == TerminalSemanticContent.Output ||
             !TerminalPromptClickEncoder.TryFindPrompt(reader, cursor, out uint prompt)) return false;
         uint click = (uint)(_screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset + row);
         if (click < prompt) return false;
+        if (TerminalPromptLineClickEncoder.Supports(state.Click))
+        {
+            PromptLineReader lineReader = new(_screen);
+            return TerminalPromptLineClickEncoder.TryEncode(ref lineReader, _screen.Columns,
+                (_cursorCol, cursor), (column, click), state.Content, _applicationCursorKeys, out sequence);
+        }
         sequence = TerminalPromptClickEncoder.Encode(column,
-            PromptState.Click == TerminalPromptClick.Relative ? click - prompt + 1 : (uint)row + 1);
+            state.Click == TerminalPromptClick.Relative ? click - prompt + 1 : (uint)row + 1);
         return true;
     }
 
@@ -32,6 +40,26 @@ public sealed partial class BasicVtProcessor : ITerminalPromptClickEncoderSource
             prompt = TerminalSemanticPrompt.None;
             if (row >= (uint)screen.TotalRows) return false;
             prompt = screen.GetRow((int)row).SemanticPrompt;
+            return true;
+        }
+    }
+
+    private struct PromptLineReader(TerminalScreen screen) : ITerminalPromptLineReader
+    {
+        private TerminalRow? _row;
+
+        public bool TryReadRow(uint row, out TerminalPromptLine line)
+        {
+            _row = row < (uint)screen.TotalRows ? screen.GetRow((int)row) : null;
+            line = _row is null ? default : new(_row.SemanticPrompt, _row.WrapsToNext, _row.IsWrapContinuation);
+            return _row is not null;
+        }
+
+        public bool TryReadInputCell(int column, out bool input)
+        {
+            input = false;
+            if (_row is null || (uint)column >= (uint)_row.Columns) return false;
+            input = _row.ReadOnlyCells[column].SemanticContent == TerminalSemanticContent.Input;
             return true;
         }
     }

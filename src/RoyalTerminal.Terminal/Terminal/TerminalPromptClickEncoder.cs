@@ -6,12 +6,13 @@ using RoyalTerminal.Avalonia.Rendering;
 
 namespace RoyalTerminal.Terminal;
 
-/// <summary>Encodes shell-requested OSC 133 click events using live terminal coordinates.</summary>
+/// <summary>Encodes OSC 133 prompt clicks as shell mouse events or cursor movement.</summary>
 public interface ITerminalPromptClickEncoderSource
 {
     /// <summary>
     /// Encodes a primary click at a zero-based viewport cell. Returns false outside
-    /// the current prompt or when no click-event policy is active. The host must
+    /// the current prompt, when no click policy is active, or when no movement is
+    /// needed. Line movement uses input cells and the active cursor-key mode. The host must
     /// exclude selections, drags, modified clicks and application mouse reporting,
     /// and serialize this operation with processor access.
     /// </summary>

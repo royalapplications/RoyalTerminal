@@ -17,7 +17,7 @@ public partial class TerminalControl
     private bool _cursorClickToMove = true;
     private (int Column, int Row)? _promptClickCell;
 
-    /// <summary>Allows unmodified primary clicks to send the shell's OSC 133 click events.</summary>
+    /// <summary>Allows unmodified primary clicks to follow the shell's OSC 133 click or cursor-movement policy.</summary>
     public bool CursorClickToMove
     {
         get => _cursorClickToMove;

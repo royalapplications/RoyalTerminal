@@ -14,16 +14,24 @@ public sealed partial class GhosttyVtProcessor : ITerminalPromptClickEncoderSour
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         sequence = [];
-        TerminalPromptClick policy = PromptState.Click;
+        TerminalPromptState state = PromptState;
+        TerminalPromptClick policy = state.Click;
         if ((uint)column >= (uint)_screen.Columns || (uint)row >= (uint)_screen.ViewportRows ||
-            policy is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative) ||
+            (policy is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative) &&
+                !TerminalPromptLineClickEncoder.Supports(policy)) ||
             !_terminal.GetCursorAtPrompt() ||
-            !_terminal.TryGetGridReference(GhosttyPoint.Active(0, _terminal.GetCursorY()), out GhosttyGridRef cursor) ||
+            !_terminal.TryGetGridReference(GhosttyPoint.Active(_terminal.GetCursorX(), _terminal.GetCursorY()), out GhosttyGridRef cursor) ||
             !_terminal.TryGetPointFromGridReference(cursor, GhosttyPointTag.Screen, out GhosttyPointCoordinate cursorPoint) ||
             !_terminal.TryGetGridReference(GhosttyPoint.Viewport((ushort)column, (uint)row), out GhosttyGridRef click) ||
             !_terminal.TryGetPointFromGridReference(click, GhosttyPointTag.Screen, out GhosttyPointCoordinate clickPoint) ||
             !TerminalPromptClickEncoder.TryFindPrompt(new PromptRowReader(_terminal), cursorPoint.Y, out uint prompt) ||
             clickPoint.Y < prompt) return false;
+        if (TerminalPromptLineClickEncoder.Supports(policy))
+        {
+            PromptLineReader reader = new(_terminal);
+            return TerminalPromptLineClickEncoder.TryEncode(ref reader, _screen.Columns,
+                (cursorPoint.X, cursorPoint.Y), (column, clickPoint.Y), state.Content, _applicationCursorKeys, out sequence);
+        }
         sequence = TerminalPromptClickEncoder.Encode(column,
             policy == TerminalPromptClick.Relative ? clickPoint.Y - prompt + 1 : (uint)row + 1);
         return true;
@@ -39,6 +47,36 @@ public sealed partial class GhosttyVtProcessor : ITerminalPromptClickEncoderSour
                 GridRefRow(reference, out ulong raw) != GhosttyResult.Success ||
                 RowGet(raw, GhosttyRowData.SemanticPrompt, &value) != GhosttyResult.Success) return false;
             prompt = (TerminalSemanticPrompt)value;
+            return true;
+        }
+    }
+
+    private struct PromptLineReader(GhosttyTerminal terminal) : ITerminalPromptLineReader
+    {
+        private GhosttyGridRef _row;
+
+        public unsafe bool TryReadRow(uint row, out TerminalPromptLine line)
+        {
+            line = default;
+            bool wrap = false, continuation = false;
+            GhosttyRowSemanticPrompt prompt = default;
+            if (!terminal.TryGetGridReference(GhosttyPoint.Screen(0, row), out _row) ||
+                GridRefRow(in _row, out ulong raw) != GhosttyResult.Success ||
+                RowGet(raw, GhosttyRowData.Wrap, &wrap) != GhosttyResult.Success ||
+                RowGet(raw, GhosttyRowData.WrapContinuation, &continuation) != GhosttyResult.Success ||
+                RowGet(raw, GhosttyRowData.SemanticPrompt, &prompt) != GhosttyResult.Success) return false;
+            line = new((TerminalSemanticPrompt)prompt, wrap, continuation);
+            return true;
+        }
+
+        public unsafe bool TryReadInputCell(int column, out bool input)
+        {
+            input = false;
+            _row.X = checked((ushort)column);
+            GhosttyCellSemanticContent content = default;
+            if (GridRefCell(in _row, out ulong cell) != GhosttyResult.Success ||
+                CellGet(cell, GhosttyCellData.SemanticContent, &content) != GhosttyResult.Success) return false;
+            input = content == GhosttyCellSemanticContent.Input;
             return true;
         }
     }

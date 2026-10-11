@@ -241,3 +241,31 @@ pane status routing. Background-pane updates cannot replace the active pane's
 status; changing focus shows the corresponding snapshot. All six native CI
 builds and ABI checks also passed at `64456587`, whose native code is unchanged
 by these review fixes.
+
+## OSC 133 line-click follow-up (2026-10-11)
+
+Preview 1 parsed `cl=line` but the two host encoders accepted only
+`click_events=1/2`. The follow-up uses Ghostty's pinned
+[`Screen.promptClickMove` / `promptClickLine`](https://github.com/ghostty-org/ghostty/blob/246f702876b924a1cb7cade1e99274d1470302fc/src/terminal/Screen.zig)
+and [`Surface.maybePromptClick`](https://github.com/ghostty-org/ghostty/blob/246f702876b924a1cb7cade1e99274d1470302fc/src/Surface.zig)
+as the behavior contract: count only input-marked cells, traverse soft wraps,
+stop at hard line boundaries, clamp clicks beyond input, and use DECCKM to
+choose CSI or SS3 Left/Right sequences. The other `cl` values (`m`, `v`, `w`)
+currently use the same single-line fallback in Ghostty and RoyalTerminal.
+`click_events=1/2` retain priority. A zero-distance click emits no input.
+
+Compared with Windows Terminal's
+[`ControlCore::_repositionCursorWithMouse`](https://github.com/microsoft/terminal/blob/7d06b26f73ef4bcb78b56647c395251eeee4c2bc/src/cascadia/TerminalControl/ControlCore.cpp),
+which clamps to command marks and counts cell distance, Ghostty provides the
+explicit OSC 133 policy and per-cell input classifications needed here.
+[`xterm.js MoveToCell`](https://github.com/xtermjs/xterm.js/blob/master/src/browser/input/MoveToCell.ts)
+also uses horizontal arrows on the normal buffer and honors application cursor
+keys, but does not filter movement by OSC 133 input metadata. RoyalTerminal
+follows Ghostty's cell-based contract, including its current wide-cell counting,
+rather than inferring shell editing behavior from text or whitespace.
+
+The implementation shares an allocation-free movement calculation between the
+engines, with managed row access and native public grid/cell/row accessors. Only
+the emitted byte array is allocated; native references are borrowed under the
+existing processor lock. No native ABI extension or shell-specific handler is
+needed. Focused processor and headless input tests cover both engines.

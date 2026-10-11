@@ -17,9 +17,11 @@ namespace RoyalTerminal.Tests;
 public sealed partial class TerminalControlHeadlessInteractionTests
 {
     [AvaloniaTheory]
-    [InlineData(VtProcessorPreference.Managed)]
-    [InlineData(VtProcessorPreference.Native)]
-    public async Task Headless_PromptClickHonorsDragSelectionAndHostPolicy(VtProcessorPreference preference)
+    [InlineData(VtProcessorPreference.Managed, false)]
+    [InlineData(VtProcessorPreference.Native, false)]
+    [InlineData(VtProcessorPreference.Managed, true)]
+    [InlineData(VtProcessorPreference.Native, true)]
+    public async Task Headless_PromptClickHonorsDragSelectionAndHostPolicy(VtProcessorPreference preference, bool line)
     {
         Assert.SkipWhen(preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable(), "Native unavailable.");
         RecordingTransport transport = new();
@@ -31,14 +33,16 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         {
             await StabilizeWindowAsync(window, control);
             await control.StartSessionAsync(new FakeTransportOptions("fake"));
-            control.WriteOutput("out\r\n\u001b]133;A;click_events=2\a$ \u001b]133;B\aabcdef"u8);
+            control.WriteOutput(Encoding.ASCII.GetBytes(
+                $"out\r\n\u001b]133;A;{(line ? "cl=line" : "click_events=2")}\a$ \u001b]133;B\aabcdef"));
             Dispatcher.UIThread.RunJobs();
             Point start = await GetCellInteractionPointAsync(control, window, column: 2, row: 1);
             Point end = await GetCellInteractionPointAsync(control, window, column: 5, row: 1);
             transport.ClearInputs();
             RaiseMousePressReleaseSequence(control, window, start);
             Dispatcher.UIThread.RunJobs();
-            Assert.Equal("\u001b[<0;3;1M", Encoding.ASCII.GetString(Assert.Single(transport.Inputs)));
+            Assert.Equal(line ? string.Concat(Enumerable.Repeat("\u001b[D", 6)) : "\u001b[<0;3;1M",
+                Encoding.ASCII.GetString(Assert.Single(transport.Inputs)));
             transport.ClearInputs();
             RaiseMouseDragReleaseSequence(control, window, start, end);
             Dispatcher.UIThread.RunJobs();
@@ -52,6 +56,12 @@ public sealed partial class TerminalControlHeadlessInteractionTests
             RaiseMousePressReleaseSequence(control, window, start, KeyModifiers.Alt);
             Dispatcher.UIThread.RunJobs();
             Assert.Empty(transport.Inputs);
+            control.WriteOutput("\u001b[?1000;1006h"u8);
+            Dispatcher.UIThread.RunJobs();
+            RaiseMousePressReleaseSequence(control, window, start);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new[] { "\u001b[<0;3;2M", "\u001b[<0;3;2m" },
+                transport.Inputs.Select(Encoding.ASCII.GetString));
         }
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
