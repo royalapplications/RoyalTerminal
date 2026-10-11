@@ -16,17 +16,19 @@ public sealed partial class GhosttyVtProcessor : ITerminalPromptClickEncoderSour
         sequence = [];
         TerminalPromptState state = PromptState;
         TerminalPromptClick policy = state.Click;
+        bool lineClick = TerminalPromptLineClickEncoder.Supports(policy);
         if ((uint)column >= (uint)_screen.Columns || (uint)row >= (uint)_screen.ViewportRows ||
             (policy is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative) &&
-                !TerminalPromptLineClickEncoder.Supports(policy)) ||
+                !lineClick) ||
             !_terminal.GetCursorAtPrompt() ||
             !_terminal.TryGetGridReference(GhosttyPoint.Active(_terminal.GetCursorX(), _terminal.GetCursorY()), out GhosttyGridRef cursor) ||
             !_terminal.TryGetPointFromGridReference(cursor, GhosttyPointTag.Screen, out GhosttyPointCoordinate cursorPoint) ||
             !_terminal.TryGetGridReference(GhosttyPoint.Viewport((ushort)column, (uint)row), out GhosttyGridRef click) ||
             !_terminal.TryGetPointFromGridReference(click, GhosttyPointTag.Screen, out GhosttyPointCoordinate clickPoint) ||
-            !TerminalPromptClickEncoder.TryFindPrompt(new PromptRowReader(_terminal), cursorPoint.Y, out uint prompt) ||
+            !TerminalPromptClickEncoder.TryFindPrompt(new PromptRowReader(_terminal), cursorPoint.Y, out uint prompt,
+                includeRetainedContinuation: lineClick) ||
             clickPoint.Y < prompt) return false;
-        if (TerminalPromptLineClickEncoder.Supports(policy))
+        if (lineClick)
         {
             PromptLineReader reader = new(_terminal);
             return TerminalPromptLineClickEncoder.TryEncode(ref reader, _screen.Columns,

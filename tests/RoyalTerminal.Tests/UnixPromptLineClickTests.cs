@@ -64,12 +64,17 @@ public sealed class UnixPromptLineClickTests
             const string command = "printf '<%s>' abcdef";
             pty.Write(command);
             WaitFor(() => CurrentLine().Contains(command, StringComparison.Ordinal));
-            ClickAtCursorOffset(-3);
+            (int Column, int Row) left = ClickAtCursorOffset(-3);
             pty.Write("X");
-            WaitFor(() => CurrentLine().Contains("abcXdef", StringComparison.Ordinal));
-            ClickAtCursorOffset(2);
+            // Readline/ZLE may repaint the suffix before returning the cursor
+            // to the insertion point, across separate PTY reads. Wait for both
+            // text and cursor so the next click cannot use an interim position.
+            WaitFor(() => CurrentLine().Contains("abcXdef", StringComparison.Ordinal) &&
+                processor.CursorCol == left.Column + 1 && processor.CursorRow == left.Row);
+            (int Column, int Row) right = ClickAtCursorOffset(2);
             pty.Write("Y");
-            WaitFor(() => CurrentLine().Contains("abcXdeYf", StringComparison.Ordinal));
+            WaitFor(() => CurrentLine().Contains("abcXdeYf", StringComparison.Ordinal) &&
+                processor.CursorCol == right.Column + 1 && processor.CursorRow == right.Row);
             pty.Write("\r");
             WaitFor(() => output.ToString().Contains("<abcXdeYf>", StringComparison.Ordinal));
         }
@@ -87,15 +92,18 @@ public sealed class UnixPromptLineClickTests
             return text.ToString();
         }
 
-        void ClickAtCursorOffset(int columns)
+        (int Column, int Row) ClickAtCursorOffset(int columns)
         {
             byte[] sequence;
+            (int Column, int Row) target;
             lock (output)
             {
+                target = (processor.CursorCol + columns, processor.CursorRow);
                 Assert.True(((ITerminalPromptClickEncoderSource)processor).TryEncodePromptClick(
-                    processor.CursorCol + columns, processor.CursorRow, out sequence));
+                    target.Column, target.Row, out sequence));
             }
             pty.Write(sequence);
+            return target;
         }
 
         void WaitFor(Func<bool> condition)

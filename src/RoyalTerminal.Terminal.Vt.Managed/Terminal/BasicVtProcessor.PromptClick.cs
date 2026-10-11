@@ -12,17 +12,19 @@ public sealed partial class BasicVtProcessor : ITerminalPromptClickEncoderSource
     {
         sequence = [];
         TerminalPromptState state = PromptState;
+        bool lineClick = TerminalPromptLineClickEncoder.Supports(state.Click);
         if (_inAltScreen || (uint)column >= (uint)_screen.Columns || (uint)row >= (uint)_screen.ViewportRows ||
             (state.Click is not (TerminalPromptClick.Absolute or TerminalPromptClick.Relative) &&
-                !TerminalPromptLineClickEncoder.Supports(state.Click))) return false;
+                !lineClick)) return false;
         uint cursor = (uint)(_screen.TotalRows - _screen.ViewportRows + _cursorRow);
         PromptRowReader reader = new(_screen);
         if (!reader.TryReadPrompt(cursor, out TerminalSemanticPrompt marker) ||
             marker == TerminalSemanticPrompt.None && state.Content == TerminalSemanticContent.Output ||
-            !TerminalPromptClickEncoder.TryFindPrompt(reader, cursor, out uint prompt)) return false;
+            !TerminalPromptClickEncoder.TryFindPrompt(reader, cursor, out uint prompt,
+                includeRetainedContinuation: lineClick)) return false;
         uint click = (uint)(_screen.TotalRows - _screen.ViewportRows - _screen.ScrollOffset + row);
         if (click < prompt) return false;
-        if (TerminalPromptLineClickEncoder.Supports(state.Click))
+        if (lineClick)
         {
             PromptLineReader lineReader = new(_screen);
             return TerminalPromptLineClickEncoder.TryEncode(ref lineReader, _screen.Columns,

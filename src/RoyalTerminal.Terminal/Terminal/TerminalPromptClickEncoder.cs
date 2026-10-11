@@ -28,7 +28,8 @@ internal static class TerminalPromptClickEncoder
 {
     // Ghostty Pin.PromptIterator.nextLeftUp. Read absolute rows so a prompt
     // spanning multiple native pages or a scrolled viewport has one coordinate space.
-    internal static bool TryFindPrompt<T>(T reader, uint cursorRow, out uint promptRow)
+    internal static bool TryFindPrompt<T>(T reader, uint cursorRow, out uint promptRow,
+        bool includeRetainedContinuation = false)
         where T : struct, ITerminalPromptRowReader
     {
         promptRow = 0;
@@ -45,8 +46,11 @@ internal static class TerminalPromptClickEncoder
                     if (prior == TerminalSemanticPrompt.Prompt) { promptRow = end - 1; return true; }
                     end--;
                 }
-                // Match native's original continuation pin when history was trimmed.
-                promptRow = row;
+                // Reflow can replace the initial marker with a continuation,
+                // even without pruning. Line clicks can still reach retained
+                // input at row zero. Explicit mouse events keep Ghostty's
+                // original continuation pin as their shell-visible origin.
+                promptRow = includeRetainedContinuation && end == 0 ? 0 : row;
                 return true;
             }
             if (row == 0) break;

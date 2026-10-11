@@ -125,6 +125,103 @@ public sealed class TerminalPromptLineClickTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void LineClicksFollowReflowedInputCells(bool native)
+    {
+        TerminalScreen screen = new(8, 4);
+        using IVtProcessor processor = CreateProcessor(native, screen);
+        processor.Process(Encoding.ASCII.GetBytes(Prompt + "abcdefghijklmno"));
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        foreach (int columns in new[] { 12, 6, 20 })
+        {
+            if (processor is BasicVtProcessor managed)
+                managed.ResizeScreen(columns, 4, columns * 10, 80, reflowOnResize: true);
+            else
+            {
+                screen.Resize(columns, 4, reflowOnResize: false);
+                processor.NotifyResize(columns, 4, columns * 10, 80);
+            }
+            Assert.True(encoder.TryEncodePromptClick(2, 0, out byte[] sequence),
+                $"Columns={columns}, cursor=({processor.CursorCol}, {processor.CursorRow})");
+            Assert.Equal(Arrows(-15), Encoding.ASCII.GetString(sequence));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitMouseEventsKeepGhosttyOriginWhenReflowLosesInitialPromptMarker(bool native)
+    {
+        TerminalScreen screen = new(8, 4);
+        using IVtProcessor processor = CreateProcessor(native, screen);
+        processor.Process("\u001b]133;A;click_events=2\a> \u001b]133;B\aabcdefghijklmno"u8);
+        if (processor is BasicVtProcessor managed)
+            managed.ResizeScreen(12, 4, 120, 80, reflowOnResize: true);
+        else
+        {
+            screen.Resize(12, 4, reflowOnResize: false);
+            processor.NotifyResize(12, 4, 120, 80);
+        }
+        Assert.Equal(TerminalSemanticPrompt.PromptContinuation, screen.GetViewportRow(0).SemanticPrompt);
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        Assert.False(encoder.TryEncodePromptClick(2, 0, out _));
+        Assert.True(encoder.TryEncodePromptClick(2, 1, out byte[] sequence));
+        Assert.Equal("\u001b[<0;3;1M", Encoding.ASCII.GetString(sequence));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LineClicksReachInputRetainedAfterPromptScrollsOutOfHistory(bool native)
+    {
+        using IVtProcessor processor = CreateProcessor(native, new(8, 4, 0));
+        processor.Process(Encoding.ASCII.GetBytes(Prompt + new string('x', 47)));
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        Assert.True(encoder.TryEncodePromptClick(0, 0, out byte[] sequence));
+        Assert.Equal(Arrows(-25), Encoding.ASCII.GetString(sequence));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LineClicksUseLiveInputAndCursorKeyModeDuringSynchronizedOutput(bool native)
+    {
+        TerminalScreen screen = new(20, 4);
+        using IVtProcessor processor = CreateProcessor(native, screen);
+        processor.Process(Encoding.ASCII.GetBytes(Prompt + "abc"));
+        processor.Process("\u001b[?2026hdef\u001b[?1h"u8);
+        Assert.Equal(0, screen.GetViewportRow(0)[5].Codepoint);
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        Assert.True(encoder.TryEncodePromptClick(2, 0, out byte[] application));
+        Assert.Equal(Arrows(-6, application: true), Encoding.ASCII.GetString(application));
+        processor.Process("\u001b[?1l"u8);
+        Assert.True(encoder.TryEncodePromptClick(2, 0, out byte[] normal));
+        Assert.Equal(Arrows(-6), Encoding.ASCII.GetString(normal));
+        processor.Process("\u001b[?2026l"u8);
+        Assert.Equal('d', screen.GetViewportRow(0)[5].Codepoint);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LineClickPolicySurvivesAlternateScreenAndClearsOnReset(bool native)
+    {
+        using IVtProcessor processor = CreateProcessor(native, new(20, 4));
+        processor.Process(Encoding.ASCII.GetBytes(Prompt + "hello"));
+        ITerminalPromptClickEncoderSource encoder = (ITerminalPromptClickEncoderSource)processor;
+        processor.Process("\u001b[?1049h"u8);
+        Assert.False(encoder.TryEncodePromptClick(2, 0, out byte[] alternate));
+        Assert.Empty(alternate);
+        processor.Process("\u001b[?1049l"u8);
+        Assert.True(encoder.TryEncodePromptClick(2, 0, out byte[] primary));
+        Assert.Equal(Arrows(-5), Encoding.ASCII.GetString(primary));
+        processor.Process("\u001bc\u001b]133;A\a> \u001b]133;B\ahello"u8);
+        Assert.False(encoder.TryEncodePromptClick(2, 0, out byte[] reset));
+        Assert.Empty(reset);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void LineClickAllocatesOnlyTheResultAndNoOpAllocatesNothing(bool native)
     {
         using IVtProcessor processor = CreateProcessor(native, new(20, 4));

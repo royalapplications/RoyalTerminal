@@ -276,3 +276,24 @@ using actual encoded left/right clicks and assert the executed command's result;
 neither shell installs a mouse handler. Allocation checks confirm only the
 returned byte array is allocated, and no-op clicks allocate zero bytes.
 This fix follows the published `v0.7.0-preview.1` tag.
+
+### Line-click review
+
+Resize/reflow can replace the initial prompt row marker with a continuation.
+When that continuation reaches the beginning of retained history, Ghostty's
+`PageList.PromptIterator.nextLeftUp` returns the cursor's continuation row.
+Using that as the earliest permitted click incorrectly rejects earlier visible
+input after reflow, or after the original prompt scrolls out of history.
+Both RoyalTerminal backends now admit line clicks through the first retained
+continuation row; the movement calculator still stops at hard line boundaries
+and counts only input cells. This is a deliberate correction to the upstream
+host boundary check, using existing public native row accessors. Explicit
+`click_events` retain Ghostty's original shell-visible coordinate origin.
+
+Regression tests cover reflow in both directions, truncated prompt history,
+unchanged explicit mouse-event origins, live cursor-key mode/input during
+synchronized output, alternate-screen restoration, and reset. The Bash/Zsh
+test now waits for both repainted text and the final cursor position before
+sending another click, avoiding a race when a repaint crosses PTY reads.
+All 196 focused processor, headless, allocation and live-shell checks pass on
+macOS arm64 with no skipped tests.
