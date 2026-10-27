@@ -307,10 +307,12 @@ fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void
         }),
     });
     var found: usize = 0;
+    const shared_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt.pc" });
+    const static_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt-static.pc" });
     for (upstream_install.dependencies.items) |step| {
         const original = step.cast(std.Build.Step.InstallFile) orelse continue;
-        const is_static = std.mem.eql(u8, original.dest_rel_path, "share/pkgconfig/libghostty-vt-static.pc");
-        if (!is_static and !std.mem.eql(u8, original.dest_rel_path, "share/pkgconfig/libghostty-vt.pc")) continue;
+        const is_static = std.mem.eql(u8, original.dest_rel_path, static_path);
+        if (!is_static and !std.mem.eql(u8, original.dest_rel_path, shared_path)) continue;
         const run = b.addRunArtifact(generator);
         run.addFileArg(original.source);
         run.addArg(if (is_static) "static" else "shared");
