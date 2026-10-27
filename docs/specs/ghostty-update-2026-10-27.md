@@ -36,11 +36,33 @@ not test results. This report records the actual implementation and validation.
   alias rather than an append-only arena.
 - Pending Kitty pixel buffers and animation frames use stable transmission
   identities, remain invisible until complete, and prevent premature animation
-  scheduling. Snapshot serialization/interoperability is still being validated.
+  scheduling. Managed snapshots now preserve image/frame pixels, placements,
+  history anchors and unfinished transmissions using Ghostty's wire records.
+  Active viewport images and displayed frames arrive first, history images with
+  their pages, and unseen images last. Cross-engine tests cover pending/stale
+  pixels, quotas, malformed records, relative/history placements and resumed
+  raw, compressed and PNG transfers.
+- Skia selection highlighting expands to complete wide glyphs, including wrapped
+  spacer cells, and refreshes the following row after a wrapped glyph is replaced.
+  Native coordinate mapping now accounts for hidden allocation rows when
+  scrollback is disabled, preserving hyperlinks, selections, search and snapshots
+  without exposing those rows as user scrollback.
 - Native text-only refreshes reuse unchanged image scenes. At 128 placements,
   allocation falls from 10,304,000 to 64,000 bytes per 1,000 updates. Existing
   geometry projection is retained because the public unified iterator omits
   anonymous placement sizing identity needed for fractional-cell scaling.
+- Logical-line queries avoid materializing default whitespace spans, reducing
+  measured allocations from 72 bytes per query to zero. Immutable mode tables
+  also avoid runtime field-handle allocations in unoptimized builds: 1,000 mode
+  cycles fell from 72,000 bytes to zero, 1,000 mode installations/reads from
+  6,408,000 to zero, and 1,000 mouse tracking cycles from 864,000 to zero. Release
+  mode operations were already allocation-free and remain so.
+- Snapshot history placements are indexed once instead of rescanning the image
+  store for each page. A same-process component benchmark over 20,000 rows,
+  40 pages and 1,024 placements measured 40 captures at 22.2268 ms and
+  8,146,240 bytes before, versus 15.0379 ms and 5,851,200 bytes after. This is
+  about 32% less component time and 28% fewer allocations; timing outliers and
+  the distinction from full snapshot serialization are recorded in the audit.
 
 ## Reference decisions and host checks
 
@@ -65,19 +87,34 @@ the upstream click-state bounds fix does not add their wire encoding. Windows
 Terminal's `mouseInput.cpp` and xterm.js `MouseService.ts` accept fewer physical
 buttons, so no additional OS event mapping is inferred from that fix.
 
-## Validation recorded so far
+## Validation
 
 - macOS arm64 native build, native history tests and renderer unit tests passed
   with Zig 0.17. Linux x64 and Windows x64 GNU cross-builds passed; the Windows
   DLL passed AVX/VEX disassembly checks. MSVC builds use the Windows CI SDK.
-- Native integration: 301 passed; generated ABI audit covers 187 types,
+- Native integration: 302 passed; bounded history contracts: 45 passed, both
+  requiring native libraries with zero skips. Generated ABI audit covers 187 types,
   31 callbacks and 205 entry points.
 - Core/protocol/grapheme checks: 274 passed; formatter checks: 223 passed.
 - Image history/lifecycle/matrix checks: 183 passed; pending image/animation
   checks: 138 passed; local file/shared-memory checks: 48 passed.
 - Mouse/state checks: 47 passed; new paste/clipboard-alias/chunk replacement
   checks: 14 passed. These groups overlap and are not a unique-test total.
+- Wide-glyph rendering/selection checks: 250 passed; disabled-scrollback
+  coordinate regressions: 30 passed across the two focused groups.
+- Final managed selection/pruning checks: 63 passed; grapheme/metadata failure
+  checks: 70 passed; mode and allocation checks: 293 passed in each of Debug and
+  Release. The full Release solution builds with zero warnings and errors.
+- Final Kitty snapshot and page-codec checks: 58 passed with zero skips,
+  including placement indexing and native/managed interoperability.
+- All six native CI jobs passed at `847e6699` with the final native pin/toolchain.
+  The documentation site builds with the merged VitePress 2/Vite 8 dependencies;
+  the existing source-index fallback handles local XML documentation tool loading.
+  Docker reproduction now uses the same extension build, export verification and
+  history tests as CI; shell syntax/help checks passed. Docker is not installed
+  on this validation host.
 
-Full CI, final snapshot interoperability, final review and the next preview
-publication remain in progress. Release claims must be updated only after
-their corresponding checks and package publication succeed.
+Full matrix CI and preview publication status are tracked in
+[PR 121](https://github.com/royalapplications/RoyalTerminal/pull/121) and its
+associated Actions runs. The counts above are focused local validation groups,
+which overlap; they are not a unique-test total for the full suite.
