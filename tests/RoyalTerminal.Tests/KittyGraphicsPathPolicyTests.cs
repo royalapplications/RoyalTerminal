@@ -62,11 +62,13 @@ public sealed class KittyGraphicsPathPolicyTests
 
     [Theory]
     [InlineData("/image", true)]
-    [InlineData("image", false)]
+    [InlineData("image", true)]
+    [InlineData("TEAMID.group/image", true)]
+    [InlineData("", false)]
     [InlineData("/", false)]
-    [InlineData("/image/path", false)]
+    [InlineData("/image/path", true)]
     [InlineData("/image\0name", false)]
-    public void SharedMemoryNamesFollowPosixShape(string name, bool expected)
+    public void SharedMemoryNamesPreservePlatformSpecificShapes(string name, bool expected)
         => Assert.Equal(expected, KittyGraphicsPathPolicy.IsSharedMemoryName(Encoding.UTF8.GetBytes(name)));
 
     [Fact]

@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using RoyalTerminal.Terminal;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal.Services;
 using Xunit;
 
@@ -168,9 +169,52 @@ public sealed partial class KittyGraphicsMediumReaderTests
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
         using SharedMemory memory = new();
         LocalKittyGraphicsMediumReader reader = new(new() { SharedMemoryEnabled = true });
-        Assert.False(reader.TryRead(Request(memory.Name[1..], KittyGraphicsMedium.SharedMemory), 4096, out _, out _));
+        Assert.False(reader.TryRead(Request(memory.Name + "\0", KittyGraphicsMedium.SharedMemory), 4096, out _, out _));
         Assert.False(reader.TryRead(Request(memory.Name, KittyGraphicsMedium.SharedMemory, offset: uint.MaxValue), 4096, out _, out _));
         Assert.False(reader.TryRead(Request(memory.Name, KittyGraphicsMedium.SharedMemory), 4096, out _, out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlatformSharedMemoryNamesAreReadUnchangedAndUnlinked(bool native)
+    {
+        Assert.SkipWhen(!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS(), "POSIX shared memory requires Linux or macOS.");
+        Assert.SkipWhen(native && !GhosttyVtProcessor.IsAvailable(), "Native Ghostty is unavailable.");
+        using SharedMemory memory = new(platformName: true);
+        using IVtProcessor processor = native
+            ? new GhosttyVtProcessor(new TerminalScreen(8, 3))
+            : new BasicVtProcessor(new TerminalScreen(8, 3), new() { KittyGraphicsMediumReader = new LocalKittyGraphicsMediumReader(new() { SharedMemoryEnabled = true }) });
+        List<string> replies = [];
+        processor.ResponseCallback = bytes => replies.Add(Encoding.ASCII.GetString(bytes));
+        processor.Process(Encoding.ASCII.GetBytes($"\u001b_Ga=q,f=24,s=1,v=1,i=31,t=s,O=7,S=3;{Convert.ToBase64String(Encoding.UTF8.GetBytes(memory.Name))}\u001b\\"));
+        Assert.Equal(["\u001b_Gi=31;OK\u001b\\"], replies);
+        LocalKittyGraphicsMediumReader reader = new(new() { SharedMemoryEnabled = true });
+        Assert.False(reader.TryRead(Request(memory.Name, KittyGraphicsMedium.SharedMemory, expected: 3), 3, out _, out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DarwinCanonicalTmpRootWorksOutsideConfiguredDirectory(bool native)
+    {
+        Assert.SkipWhen(!OperatingSystem.IsMacOS(), "Darwin canonical temporary root.");
+        Assert.SkipWhen(native && !GhosttyVtProcessor.IsAvailable(), "Native Ghostty is unavailable.");
+        using Files files = new();
+        string path = $"/tmp/rt-{Guid.NewGuid():N}-tty-graphics-protocol-image.data";
+        File.WriteAllBytes(path, [1, 2, 3]);
+        try
+        {
+            using IVtProcessor processor = native
+                ? new GhosttyVtProcessor(new TerminalScreen(8, 3))
+                : new BasicVtProcessor(new TerminalScreen(8, 3), new() { KittyGraphicsMediumReader = files.Reader });
+            List<string> replies = [];
+            processor.ResponseCallback = bytes => replies.Add(Encoding.ASCII.GetString(bytes));
+            processor.Process(Encoding.ASCII.GetBytes($"\u001b_Ga=q,f=24,s=1,v=1,i=31,t=t;{Convert.ToBase64String(Encoding.UTF8.GetBytes(path))}\u001b\\"));
+            Assert.Equal(["\u001b_Gi=31;OK\u001b\\"], replies);
+            Assert.False(File.Exists(path));
+        }
+        finally { File.Delete(path); }
     }
 
     [Theory]
@@ -207,9 +251,10 @@ public sealed partial class KittyGraphicsMediumReaderTests
 
     private sealed class SharedMemory : IDisposable
     {
-        internal string Name { get; } = "/rt-" + Guid.NewGuid().ToString("N")[..20];
-        internal SharedMemory()
+        internal string Name { get; }
+        internal SharedMemory(bool platformName = false)
         {
+            Name = (platformName ? OperatingSystem.IsMacOS() ? "rt.test/" : "rt-" : "/rt-") + Guid.NewGuid().ToString("N")[..20];
             int fd = OperatingSystem.IsMacOS()
                 ? RuntimeInformation.ProcessArchitecture == Architecture.Arm64
                     ? CreateShmMacArm64(Name, 0xa02, 0, 0, 0, 0, 0, 0, 0x180)

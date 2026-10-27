@@ -11,10 +11,15 @@ public sealed record KittyGraphicsMediumPolicy
 
     /// <summary>
     /// Gets the host temporary directory, enabling temporary-file transmission when non-null.
-    /// Files must be inside this directory, /tmp, or /dev/shm and contain the protocol marker.
+    /// Files must be inside this directory, /tmp (also /private/tmp on macOS),
+    /// or /dev/shm and contain the protocol marker.
     /// </summary>
     public string? TemporaryDirectory { get; init; }
 
-    /// <summary>Gets whether POSIX shared-memory transmission is enabled (macOS/Linux only).</summary>
+    /// <summary>
+    /// Gets whether POSIX shared-memory transmission is enabled (macOS/Linux only).
+    /// Names are passed unchanged to the OS and unlinked after a successful open,
+    /// including when payload validation fails, as required by the Kitty protocol.
+    /// </summary>
     public bool SharedMemoryEnabled { get; init; }
 }
