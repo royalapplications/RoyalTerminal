@@ -54,7 +54,8 @@ public class GhosttyOctoberApiTests
         terminal.SetSemanticPromptCallback(Marshal.GetFunctionPointerForDelegate(prompt));
         terminal.SetResetCallback(Marshal.GetFunctionPointerForDelegate(reset));
         terminal.Write("\u001b]7501;?\a\u001b]7501;?\u001b\\"u8);
-        Assert.Equal("\u001b]7501;?\a\u001b]7501;?\u001b\\", replies.ToString());
+        const string capabilityReply = "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth";
+        Assert.Equal(capabilityReply + "\a" + capabilityReply + "\u001b\\", replies.ToString());
         terminal.Write("\u001b]7501;state=blocked:kind=permission:id=deploy/eu:app=terraform:title=RVU=:msg=QXBwbHk/\a"u8);
         terminal.Write("\u001b]7501;state=blocked:msg=AA==\a"u8); // Controls discard the whole report.
         terminal.Write("\u001b]133;A\a\u001b[!p\u001bc"u8);

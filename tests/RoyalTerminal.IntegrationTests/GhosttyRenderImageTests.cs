@@ -11,6 +11,34 @@ namespace RoyalTerminal.IntegrationTests;
 public sealed class GhosttyRenderImageTests
 {
     [GhosttyNativeFact]
+    public void AnonymousPlacementsWithDifferentScalingCanHaveIdenticalPublicRenderData()
+    {
+        if (!GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;
+        using GhosttyTerminal terminal = new(20, 6);
+        terminal.Resize(20, 6, 8, 16);
+        terminal.SetKittyImageStorageLimit(1024);
+        string pixels = Convert.ToBase64String(new byte[8 * 16 * 4]);
+        terminal.Write(System.Text.Encoding.ASCII.GetBytes($"\x1b_Ga=t,f=32,i=1,s=8,v=16;{pixels}\x1b\\"));
+        // p is omitted, so both receive distinct internal placement IDs. At
+        // integer cell metrics intrinsic pixels and c=1,r=1 look identical,
+        // but only the latter must follow the renderer's fractional cell size.
+        terminal.Write("\x1b_Ga=p,i=1,C=1\x1b\\\x1b_Ga=p,i=1,c=1,r=1,C=1\x1b\\"u8);
+        using GhosttyRenderState state = new();
+        state.Update(terminal);
+        List<GhosttyRenderImagePlacement> placements = Read(state);
+        Assert.Equal(2, placements.Count);
+        Assert.Equal((uint?)0, placements[0].KittyPlacementId);
+        Assert.Equal((uint?)0, placements[1].KittyPlacementId);
+        Assert.Equal(placements[0], placements[1]);
+        Assert.True(terminal.TryGetKittyGraphics(out var graphics));
+        using GhosttyKittyGraphicsPlacementIterator iterator = new();
+        graphics!.Populate(iterator);
+        HashSet<uint> requestedColumns = [];
+        while (iterator.MoveNext()) requestedColumns.Add(iterator.GetColumns());
+        Assert.Equal(new uint[] { 0, 1 }, requestedColumns.Order().ToArray());
+    }
+
+    [GhosttyNativeFact]
     public void FixedAndRelativeImagesUseUnifiedGeometryAndGeneration()
     {
         if (!GhosttyVtHelpers.GetBuildFeatures().KittyGraphics) return;

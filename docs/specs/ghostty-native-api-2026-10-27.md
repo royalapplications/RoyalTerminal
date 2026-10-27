@@ -31,6 +31,42 @@ points fail the update audit.
 Focused integration coverage lives in `GhosttyWriteBoundaryTests`,
 `GhosttyRenderImageTests`, `GhosttySnapshotImageProgressTests`, and the existing
 window resize/animation tests. The GhosttySharp and integration test projects
-compile without warnings. Runtime and regenerated manifest results must be
-recorded after the updated native build is available; an old library cannot
-validate the added API.
+compile without warnings. The freshly built macOS arm64 runtime validated
+187 ABI types, 31 callback signatures and all 205 native entry points. The
+initial focused API run passed 29 tests; the ABI/boundary/render run passed 171.
+
+## Rendering compatibility and refresh cost
+
+RoyalTerminal retains the existing storage iterator and shared placeholder
+projection for drawing. The new public render iterator omits requested `c`/`r`
+and maps every internally assigned placement ID to zero. Two anonymous
+placements of one image can therefore expose identical public render data while
+requiring different scaling when Skia's cell metrics are fractional: intrinsic
+image pixels keep their size, while explicit cell extents scale with the cells.
+There is no unambiguous metadata join for all such scenes. We do not guess from
+geometry, depend on native hash-table iteration order, or add an overlay API.
+
+`GhosttyRenderImageTests.AnonymousPlacementsWithDifferentScalingCanHaveIdenticalPublicRenderData`
+demonstrates the information loss directly. Both-engine Skia pixel tests in
+`NativeKittyRenderGenerationTests` preserve the distinct sizing behavior.
+The complete new iterator remains available and tested for embedding consumers.
+
+The native adapter does use the new placement generation to skip image scene
+extraction after text-only updates. Both storage generation and native cell
+metrics are checked as well; generations are committed only after successful
+publication. Scroll, image pixel changes, resize and placeholder updates still
+refresh their geometry. This also avoids allocating one placement object per
+visible image on every text update.
+
+Reproduce the local allocation/time measurement with:
+
+```sh
+dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --native-kitty-text-refresh
+```
+
+Seven samples of 1,000 warmed text frames, macOS arm64/.NET 10, showed allocated
+bytes fall from 144,000 to 64,000 with one image placement, and from 10,304,000
+to 64,000 with 128 placements. The zero-placement baseline remains 64,000 bytes.
+These are parser/mirror refresh measurements, not GPU frame times. A focused
+allocation regression also checks resize, scrolling and changed pixels; the
+renderer, animation, virtual-placement and overscan test group passed 76 tests.

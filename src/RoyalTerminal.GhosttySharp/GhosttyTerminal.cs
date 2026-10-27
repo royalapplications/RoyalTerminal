@@ -97,6 +97,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             GhosttyVtNative.TerminalVtWrite(_handle, dataPtr, (nuint)data.Length);
         }
         GC.KeepAlive(_royalNotificationCallback);
+        GC.KeepAlive(_windowResizeCallback);
     }
 
     /// <summary>
@@ -131,6 +132,7 @@ public sealed partial class GhosttyTerminal : IDisposable
                 &value);
             stop = value;
             GC.KeepAlive(_royalNotificationCallback);
+            GC.KeepAlive(_windowResizeCallback);
             if (result == GhosttyVtNative.GhosttyResult.NoValue)
             {
                 return false;

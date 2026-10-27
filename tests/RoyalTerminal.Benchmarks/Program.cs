@@ -77,6 +77,12 @@ if (args.Contains("--native-render-overscan", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--native-kitty-text-refresh", StringComparer.Ordinal))
+{
+    NativeKittyTextRefreshBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--render-row-identity", StringComparer.Ordinal))
 {
     RenderRowIdentityBenchmark.Run();

@@ -188,6 +188,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private readonly List<TerminalKittyPlaceholderTarget> _kittyPlaceholderTargets = [];
     private readonly List<TerminalKittyRelativePlacement> _kittyVirtualRelatives = [];
     private ulong _kittyGraphicsGeneration;
+    private ulong _kittyImagePlacementsGeneration;
+    private int _kittyPlacementCellWidthPx;
+    private int _kittyPlacementCellHeightPx;
     private bool _kittyGraphicsSynchronized;
     private GhosttySearch? _search;
     private ArrayBufferWriter<byte>? _pasteCapture;
@@ -2193,11 +2196,21 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         }
 
         ulong generation = graphics.GetGeneration();
+        ulong placementsGeneration = _renderState.GetImagePlacementsGeneration();
         bool contentUnchanged = _kittyGraphicsSynchronized && generation == _kittyGraphicsGeneration;
-        if (contentUnchanged && !geometryDirty)
+        bool placementsUnchanged = placementsGeneration == _kittyImagePlacementsGeneration &&
+            _nativeCellWidthPx == _kittyPlacementCellWidthPx && _nativeCellHeightPx == _kittyPlacementCellHeightPx;
+        if (contentUnchanged && (!geometryDirty || placementsUnchanged))
         {
             return;
         }
+
+        // The public render iterator does not preserve internal placement IDs or
+        // requested c/r. Keep the storage/projection path for fractional sizing:
+        // intrinsic pixels and explicit cell sizing can have identical integer
+        // geometry. Its generation still safely avoids rebuilding on text-only
+        // frames. Cell metrics are checked separately because ScaleMode metadata
+        // can change even when the rounded native image geometry does not.
 
         // A failed extraction/publication must retry even when only geometry
         // changed and the native generation is unchanged.
@@ -2333,6 +2346,9 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         (_kittyImageCache, _kittyNextImageCache) = (_kittyNextImageCache, _kittyImageCache);
         _kittyNextImageCache.Clear();
         _kittyGraphicsGeneration = generation;
+        _kittyImagePlacementsGeneration = placementsGeneration;
+        _kittyPlacementCellWidthPx = _nativeCellWidthPx;
+        _kittyPlacementCellHeightPx = _nativeCellHeightPx;
         _kittyGraphicsSynchronized = true;
     }
 
