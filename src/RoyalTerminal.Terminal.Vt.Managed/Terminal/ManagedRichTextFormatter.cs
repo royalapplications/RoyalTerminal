@@ -10,7 +10,8 @@ namespace RoyalTerminal.Terminal;
 /// <summary>
 /// Styled export with deferred blanks and row boundaries, following Ghostty's
 /// PageFormatter. HTML runs are properly nested even when style and link changes
-/// overlap. VT protection and OSC 8 replay extend the upstream formatter.
+/// overlap. VT retains erased backgrounds and blank layout without manufacturing
+/// text cells, and preserves per-cell protection when requested.
 /// </summary>
 internal sealed class ManagedRichTextFormatter
 {
@@ -41,7 +42,7 @@ internal sealed class ManagedRichTextFormatter
             ManagedSnapshotSelection range = options.Selection is TerminalSelectionRange selection
                 ? ManagedSnapshotSelection.Create(screen, selection, options.Unwrap)
                 : new(0, screen.TotalRows - 1, 0, screen.Columns - 1, false, options.Unwrap);
-            writer.AppendRows(range);
+            writer.AppendRows(range, options.TrimTrailingWhitespace);
         }
         writer.Close();
     }
@@ -80,7 +81,7 @@ internal sealed class ManagedRichTextFormatter
         else SetProtection(false);
     }
 
-    private void AppendRows(ManagedSnapshotSelection range)
+    private void AppendRows(ManagedSnapshotSelection range, bool trim)
     {
         int blankRows = 0;
         int blankCells = 0;
@@ -92,9 +93,10 @@ internal sealed class ManagedRichTextFormatter
             bool hasText = false;
             for (int column = start; column <= end; column++)
             {
-                if (cells[column].Width != 0 && cells[column].HasContent) { hasText = true; break; }
+                if (cells[column].Width != 0 && (cells[column].HasContent ||
+                    !_html && HasErasedBackground(cells[column]))) { hasText = true; break; }
             }
-            // Even background-colored textless rows are deferred upstream.
+            // HTML still trims textless rows. VT retains erased backgrounds.
             if (!hasText) { blankRows++; continue; }
             if (blankRows > 0)
             {
@@ -116,12 +118,51 @@ internal sealed class ManagedRichTextFormatter
                     blankCells++;
                     continue;
                 }
-                _output.Append(' ', blankCells);
+                if (!_html && blankCells > 0)
+                {
+                    if (blankCells <= column - start)
+                    {
+                        // Cursor movement preserves blank cells and cannot
+                        // accidentally give them the preceding pen or link.
+                        _output.Append("\u001b[").Append(blankCells).Append('C');
+                    }
+                    else
+                    {
+                        // Blanks crossing a soft wrap cannot be skipped with
+                        // CUF; materialize them in the default, unlinked pen.
+                        CloseRun();
+                        SetProtection(false);
+                        _output.Append(' ', blankCells);
+                    }
+                }
+                else _output.Append(' ', blankCells);
                 blankCells = 0;
+                if (!_html && HasErasedBackground(cell))
+                {
+                    int count = 1;
+                    while (column + count <= end && HasErasedBackground(cells[column + count]) &&
+                        cells[column + count].BackgroundIdentity == cell.BackgroundIdentity) count++;
+                    SetCellStyle(cell);
+                    _output.Append("\u001b[").Append(count).Append('X')
+                        .Append("\u001b[").Append(count).Append('C');
+                    column += count - 1;
+                    continue;
+                }
                 AppendCell(cell);
             }
         }
+        if (!_html && !trim && blankRows > 1)
+        {
+            CloseRun();
+            SetProtection(false);
+            // No newline follows the final row. These remaining boundaries
+            // are required to replay the same scrollback/viewport geometry.
+            for (int i = 1; i < blankRows; i++) _output.Append("\r\n");
+        }
     }
+
+    private static bool HasErasedBackground(in TerminalCell cell)
+        => !cell.HasContent && cell.BackgroundIdentity.Kind != TerminalColorKind.Default;
 
     private static bool HasStyle(in TerminalCell cell) =>
         cell.ForegroundIdentity.Kind != TerminalColorKind.Default ||
@@ -131,9 +172,23 @@ internal sealed class ManagedRichTextFormatter
 
     private void AppendCell(in TerminalCell cell)
     {
+        SetCellStyle(cell);
+        if (!string.IsNullOrEmpty(cell.Grapheme)) AppendText(cell.Grapheme.AsSpan());
+        else if (cell.Codepoint == 0) _output.Append(' ');
+        else
+        {
+            Span<char> scalar = stackalloc char[2];
+            Rune rune = Rune.TryCreate(cell.Codepoint, out Rune valid) ? valid : Rune.ReplacementChar;
+            AppendText(scalar[..rune.EncodeToUtf16(scalar)]);
+        }
+    }
+
+    private void SetCellStyle(in TerminalCell cell)
+    {
         StyleKey style = new(cell);
-        int link = _extras.IncludeHyperlinks &&
-            _screen.TryGetHyperlinkUrl(cell.HyperlinkId, out _) ? cell.HyperlinkId : 0;
+        // Cell hyperlinks are content. IncludeHyperlinks only controls restoring
+        // the active OSC 8 pen after the screen has been formatted.
+        int link = _screen.TryGetHyperlinkUrl(cell.HyperlinkId, out _) ? cell.HyperlinkId : 0;
         if (_style is null || _style.Value != style || _hyperlink != link)
         {
             CloseRun();
@@ -159,14 +214,6 @@ internal sealed class ManagedRichTextFormatter
             }
         }
         SetProtection(cell.IsProtected);
-        if (!string.IsNullOrEmpty(cell.Grapheme)) AppendText(cell.Grapheme.AsSpan());
-        else if (cell.Codepoint == 0) _output.Append(' ');
-        else
-        {
-            Span<char> scalar = stackalloc char[2];
-            Rune rune = Rune.TryCreate(cell.Codepoint, out Rune valid) ? valid : Rune.ReplacementChar;
-            AppendText(scalar[..rune.EncodeToUtf16(scalar)]);
-        }
     }
 
     private void CloseRun()

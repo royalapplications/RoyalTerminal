@@ -27,6 +27,10 @@ separated from behavior changes using each merge's first-parent diff.
   authority. The existing ancestor inheritance, bounded record store, and
   lifecycle cleanup remain compatible. OSC 9;4 / PowerShell progress handling
   is unchanged by this delta.
+- [xterm.js SerializeAddon](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-serialize/src/SerializeAddon.ts)
+  also uses ECH for erased backgrounds and CUF for blank gaps. Styled VT now
+  follows that semantic approach and Ghostty's trimming rules. `IncludeHyperlinks`
+  restores the active pen; cell hyperlinks are always included in styled output.
 
 ## Core implementation and tests
 
@@ -47,6 +51,10 @@ separated from behavior changes using each merge's first-parent diff.
 | #14814 / `08a951834` | Restart continuation at effective C1 introducers in CSI/ESC/DCS headers/APC, export canonical ESC form, reject noncanonical snapshot tails | ManagedContinuationTests, GhosttySnapshotContinuationTests |
 | #14812 / `802665102` | Discard recognized Kitty/glyph commands on CAN, SUB, or aborting C1 transitions; reset captured storage | ManagedApcParserParityTests, ManagedKittyGraphicsStreamingTests, ManagedGlyphProtocolTests |
 | #14552 / `2551d9323` | Capture grapheme suffix before wrap/row recycling, write spacer with current pen, restore suffix in one allocation with page-growth retry | ManagedGraphemeWrapTransferTests, including one-row screens, margins, COW, allocation pressure |
+| #14725 / `891a4dba5` | VT skips blank gaps with CUF, restores runs of erased backgrounds with ECH/CUF, resets style and links before materializing wrapped blank spaces | October27FormatterRegressionTests and existing formatter suites |
+| #14711 / `a2e440396` | Every cell's OSC 8 hyperlink, including explicit ID, is emitted independently of active-pen extras | October27FormatterRegressionTests |
+| #14766 / `c7cbc9bfd` | Untrimmed VT retains trailing blank rows to preserve replay's viewport and scrollback | October27FormatterRegressionTests |
+| #14670 / `58d23cc02` | Pending wrap over an erased edge cell survives replay without converting that cell into a space | October27FormatterRegressionTests |
 
 The grapheme change removes the obsolete move/per-scalar-copy helper. A 63-scalar
 suffix now fits the tested cross-page 1024-byte capacity without the former
@@ -58,8 +66,6 @@ The tests assert allocation accounting and retained-copy independence.
 These entries are explicitly tracked by the parent integration work, not declared
 complete merely because the native submodule contains them:
 
-- VT formatter blank/erased backgrounds, hyperlinks, trailing rows and pending
-  wrap over blank cells (#14711, #14725, #14766, #14670): managed formatter tranche.
 - Wide selection across page boundaries (#14632) is already handled by the
   managed formatter's global row selection; renderer highlighting (#14651) is
   part of rendering parity.
@@ -89,3 +95,8 @@ libraries. Coverage includes core, OSC 7501, continuation, grapheme wrapping,
 APC cancellation, glyph protocols, and Kitty streaming/failure behavior.
 The earlier managed-only gate was 245 passed with 25 explicit native skips;
 the fresh native gate supersedes that limited result.
+
+Formatter gate: **223 passed, 0 failed, 0 skipped** with required native enabled.
+Tests replay native and managed exports into both engines and check empty versus
+text cells, background identity, links/IDs, pending wrap, blank-row geometry,
+selection boundaries, styles, and HTML behavior.

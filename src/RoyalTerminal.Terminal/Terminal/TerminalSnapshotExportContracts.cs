@@ -24,7 +24,7 @@ public enum TerminalSnapshotExportFormat
 /// </summary>
 /// <param name="IncludeCursor">Include cursor position.</param>
 /// <param name="IncludeStyle">Include active SGR style.</param>
-/// <param name="IncludeHyperlinks">Include hyperlink state.</param>
+/// <param name="IncludeHyperlinks">Include the active hyperlink pen. Cell hyperlinks are always part of styled content.</param>
 /// <param name="IncludeProtection">Include the active protection state. Managed VT exports also preserve per-cell protection.</param>
 /// <param name="IncludeKittyKeyboard">Include Kitty keyboard protocol state.</param>
 /// <param name="IncludeCharsets">Include character set state.</param>
@@ -53,7 +53,8 @@ public readonly record struct TerminalSnapshotExportExtras(
 /// </summary>
 /// <param name="Unwrap">Whether soft-wrapped lines should be unwrapped. Rectangular selections retain row boundaries.</param>
 /// <param name="TrimTrailingWhitespace">Whether trailing ASCII spaces should be trimmed in plain text.
-/// Trailing erased cells and empty rows are always omitted from plain text; other formats may retain visual styling.</param>
+/// Trailing erased cells and empty rows are always omitted from plain text. Styled VT retains trailing empty rows
+/// when this is false so replay preserves viewport and scrollback layout.</param>
 /// <param name="Selection">Optional viewport-relative selection range to export.</param>
 /// <param name="Extras">Optional styled-export extras.</param>
 public readonly record struct TerminalSnapshotExportOptions(

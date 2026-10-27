@@ -12,9 +12,9 @@ namespace RoyalTerminal.Tests;
 
 public sealed class ManagedRichTextFormatterTests
 {
-    // Ghostty PageFormatter defers textless rows (even with background colors)
-    // and erased cells, retains explicit spaces in rich exports, and resets
-    // style at hard breaks. Windows Terminal/xterm.js also serialize style runs;
+    // Ghostty PageFormatter retains erased backgrounds in VT, defers textless
+    // HTML rows, retains explicit spaces, and resets style at hard breaks.
+    // Windows Terminal/xterm.js also serialize style runs;
     // their clipboard wrappers differ, so HTML bytes are not the contract.
     public static IEnumerable<object[]> BlankCases()
     {
@@ -113,7 +113,7 @@ public sealed class ManagedRichTextFormatterTests
         using BasicVtProcessor processor = new(new(8, 4));
         processor.Process("\u001b[1\"qA\u001b[0\"qB\u001b[1\"q"u8);
         Assert.True(processor.TryExportSnapshot(TerminalSnapshotExportFormat.StyledVt,
-            new(Extras: new(IncludeProtection: true)), out string snapshot));
+            new(TrimTrailingWhitespace: true, Extras: new(IncludeProtection: true)), out string snapshot));
         TerminalScreen screen = new(8, 4);
         using IVtProcessor replay = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
         replay.Process(Encoding.UTF8.GetBytes(snapshot));

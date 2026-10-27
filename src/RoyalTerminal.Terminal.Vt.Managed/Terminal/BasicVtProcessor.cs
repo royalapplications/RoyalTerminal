@@ -913,6 +913,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         // CUP clears pending wrap; printing the complete edge cell restores it,
         // including wide characters and graphemes, using normal parser behavior.
         builder.Append("\x1b(B\x0F");
+        if (!row.ReadOnlyCells[cursorColumn].HasContent)
+        {
+            // DECSC/DECRC retains pending wrap while ECH removes the temporary
+            // space. Reprinting alone would turn an erased cell into text.
+            ManagedSgrFormatter.Append(builder, row.ReadOnlyCells[cursorColumn]);
+            builder.Append(" \u001b7\u001b[X\u001b8\u001b[0m");
+            return;
+        }
         ManagedRichTextFormatter.AppendVtCell(_screen, builder, row.ReadOnlyCells[cursorColumn], options.Extras);
     }
 
