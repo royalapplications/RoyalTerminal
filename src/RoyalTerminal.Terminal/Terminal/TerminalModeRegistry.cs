@@ -6,8 +6,13 @@ namespace RoyalTerminal.Terminal;
 /// <summary>Ghostty's snapshot-v1 mode registry and safe embedder policy subset.</summary>
 internal static class TerminalModeRegistry
 {
-    internal static ReadOnlySpan<int> AnsiModes => [2, 4, 12, 20];
-    internal static ReadOnlySpan<int> DecModes =>
+    // Immutable tables, never exposed through a writable alias. Materialize
+    // once to avoid per-read RVA field-handle allocations in unoptimized JITs.
+    internal static ReadOnlySpan<int> AnsiModes => s_ansiModes;
+    internal static ReadOnlySpan<int> DecModes => s_decModes;
+
+    private static readonly int[] s_ansiModes = [2, 4, 12, 20];
+    private static readonly int[] s_decModes =
     [
         1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 67, 69,
         1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016, 1035,

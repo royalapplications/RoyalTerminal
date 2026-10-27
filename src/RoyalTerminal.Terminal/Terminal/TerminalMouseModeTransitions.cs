@@ -6,7 +6,10 @@ namespace RoyalTerminal.Terminal;
 /// <summary>Ghostty's last-command mouse behavior, independent of stored DEC mode bits.</summary>
 internal static class TerminalMouseModeTransitions
 {
-    internal static ReadOnlySpan<int> Modes => [9, 1000, 1002, 1003, 1005, 1006, 1015, 1016];
+    // Immutable registry data; avoid an RVA field-handle allocation each time
+    // an unoptimized runtime reads the span while saving/restoring mouse modes.
+    internal static ReadOnlySpan<int> Modes => s_modes;
+    private static readonly int[] s_modes = [9, 1000, 1002, 1003, 1005, 1006, 1015, 1016];
 
     internal static TerminalMouseModeState Apply(TerminalMouseModeState state, int mode, bool enabled) => mode switch
     {

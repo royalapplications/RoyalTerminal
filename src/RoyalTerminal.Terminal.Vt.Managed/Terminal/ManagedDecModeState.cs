@@ -50,7 +50,12 @@ internal struct ManagedDecModeState
 {
     private ManagedDecModeFlag _values;
 
-    internal static ReadOnlySpan<int> SupportedModes =>
+    // Keep immutable registry data directly rooted. A literal span invokes
+    // RuntimeHelpers.CreateSpan's allocating field-handle path in Debug on
+    // .NET 10 ARM64; returning a read-only array view avoids that per lookup.
+    internal static ReadOnlySpan<int> SupportedModes => s_supportedModes;
+
+    private static readonly int[] s_supportedModes =
     [
         3, 4, 5, 8, 9, 12, 40, 45, 69, 1000, 1002, 1003, 1004, 1005,
         1006, 1007, 1015, 1016, 1035, 1036, 1039, 1045, 2026, 2027,

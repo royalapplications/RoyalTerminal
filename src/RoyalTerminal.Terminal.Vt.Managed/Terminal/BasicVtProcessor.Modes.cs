@@ -27,10 +27,12 @@ public sealed partial class BasicVtProcessor
     internal void InstallSnapshotModes(Snapshots.GhosttySnapshotTerminalHeader header)
     {
         ulong values = header.CurrentModes;
-        for (int i = 0; i < TerminalModeRegistry.AnsiModes.Length; i++)
-            SetPolicyModeValue(TerminalModeRegistry.AnsiModes[i], (values & (1UL << i)) != 0, ansi: true);
-        for (int i = 0; i < SnapshotDecModes.Length; i++)
-            SetPolicyModeValue(SnapshotDecModes[i], (values & (1UL << (i + 4))) != 0, ansi: false);
+        ReadOnlySpan<int> ansiModes = TerminalModeRegistry.AnsiModes;
+        ReadOnlySpan<int> decModes = SnapshotDecModes;
+        for (int i = 0; i < ansiModes.Length; i++)
+            SetPolicyModeValue(ansiModes[i], (values & (1UL << i)) != 0, ansi: true);
+        for (int i = 0; i < decModes.Length; i++)
+            SetPolicyModeValue(decModes[i], (values & (1UL << (i + 4))) != 0, ansi: false);
         _savedModeValues = header.SavedModes;
         _defaultModeValues = header.DefaultModes;
         _defaultCursorBlink = header.CursorDefaultBlink;
