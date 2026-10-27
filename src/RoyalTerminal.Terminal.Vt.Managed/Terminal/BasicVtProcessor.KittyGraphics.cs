@@ -46,6 +46,15 @@ public sealed partial class BasicVtProcessor
                 case 't':
                 case 'T':
                 case 'f':
+                    // Only direct data can continue a chunked transmission.
+                    // A file/shm transfer starts afresh, including its quiet
+                    // policy, instead of appending the encoded filename.
+                    if (command.Get('t', 'd') != 'd')
+                    {
+                        _kittyStore.Loading = null;
+                        _kittyStore.LoadingImageId = 0;
+                        _kittyStore.LoadingTargetGeneration = 0;
+                    }
                     quiet = command.Quiet == 0 ? _kittyStore.Loading?.Quiet ?? 0 : command.Quiet;
                     changed = ProcessKittyTransmission(command, out responseCommand, out responseId,
                         out responseFrame, out error, out respond);
