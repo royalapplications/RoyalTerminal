@@ -21,6 +21,17 @@ pub fn build(b: *std.Build) !void {
     // Wuffs' nested imports; do not turn a cache miss into a build failure.
     if (b.graph.needed_lazy_dependencies.count() != 0) return;
 
+    // Kitty's POSIX shared-memory loader needs libc even when the portable
+    // packages disable upstream SIMD. Upstream only enables libc for SIMD.
+    // Keep librt explicit on Linux: shm_open/shm_unlink lived there before
+    // glibc 2.34, which is newer than our supported GNU target baseline.
+    if (target.result.os.tag.isDarwin() or
+        (target.result.os.tag == .linux and !target.result.abi.isAndroid()))
+    {
+        module.link_libc = true;
+        if (target.result.os.tag == .linux) module.linkSystemLibrary("rt", .{});
+    }
+
     // Wuffs uses per-function target attributes to emit AVX2 pixel routines
     // even for a baseline module with Ghostty's SIMD bundle disabled. Keep
     // the Windows no-AVX compatibility artifact genuinely instruction-clean;
