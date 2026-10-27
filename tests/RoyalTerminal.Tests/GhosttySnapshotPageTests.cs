@@ -30,7 +30,9 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
             terminal.Write(Encoding.UTF8.GetBytes($"\u001b[38;5;{row}mrow{row}:界a\u0301\r\n"));
         terminal.Write("\u001b]8;id=sample;https://example.com\u001b\\linked\u001b]8;;\u001b\\"u8);
         if (alternate) terminal.Write("\u001b[?1049h\u001b[44mALT"u8);
-        byte[] encoded = RewritePages(GhosttySnapshot.Encode(terminal), out int pages, liveCells);
+        byte[] nativeSnapshot = GhosttySnapshot.Encode(terminal);
+        using GhosttyTerminal nativeRestored = GhosttySnapshot.Decode(nativeSnapshot);
+        byte[] encoded = RewritePages(nativeSnapshot, out int pages, liveCells);
         Assert.True(pages > 0);
         using GhosttyTerminal restored = GhosttySnapshot.Decode(encoded);
         Assert.Equal(terminal.GetActiveScreen(), restored.GetActiveScreen());
@@ -38,7 +40,9 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
         Assert.Equal(terminal.GetCursorPendingWrap(), restored.GetCursorPendingWrap());
         AssertStyledEqual(terminal, restored);
         terminal.Write("\u001b[0m\r\nnext:界"u8);
+        nativeRestored.Write("\u001b[0m\r\nnext:界"u8);
         restored.Write("\u001b[0m\r\nnext:界"u8);
+        AssertStyledEqual(terminal, nativeRestored);
         AssertStyledEqual(terminal, restored);
         if (alternate)
         {
@@ -230,6 +234,18 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
             Extra: new(IncludeModes: true, IncludeScrollingRegion: true,
                 Screen: new(IncludeCursor: true, IncludeStyle: true, IncludeHyperlinks: true, IncludeProtection: true)));
         using GhosttyFormatter first = new(expected, options), second = new(actual, options);
-        Assert.Equal(first.FormatToString(), second.FormatToString());
+        string expectedVt = first.FormatToString(), actualVt = second.FormatToString();
+        if (expectedVt == actualVt) return;
+        // Native PageFormatter closes OSC 8 at allocation-page boundaries.
+        // Restoring even an untouched native snapshot can move that close from
+        // after CRLF to before it. Replaying both exports into fresh, equal page
+        // layouts compares their complete VT effects, including links and modes,
+        // without requiring a particular spelling of equivalent transitions.
+        using GhosttyTerminal expectedReplay = new(expected.GetColumns(), expected.GetRows(), 4 * 1024 * 1024);
+        using GhosttyTerminal actualReplay = new(actual.GetColumns(), actual.GetRows(), 4 * 1024 * 1024);
+        expectedReplay.Write(Encoding.UTF8.GetBytes(expectedVt));
+        actualReplay.Write(Encoding.UTF8.GetBytes(actualVt));
+        using GhosttyFormatter replayFirst = new(expectedReplay, options), replaySecond = new(actualReplay, options);
+        Assert.Equal(replayFirst.FormatToString(), replaySecond.FormatToString());
     }
 }

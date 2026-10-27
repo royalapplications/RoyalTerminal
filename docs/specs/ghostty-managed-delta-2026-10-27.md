@@ -132,3 +132,10 @@ selection boundaries, styles, and HTML behavior.
 Pending Kitty gate: **138 passed, 0 failed, 0 skipped** with required native
 enabled, covering pending pixel/ticket lifecycle, animation behavior and failures,
 immutable publication, pixel formats, and quota/allocation failure semantics.
+
+Snapshot-page and pending-image follow-up gate: **35 passed, 0 failed, 0 skipped**.
+The page differential now includes an untouched native encode/decode baseline.
+Ghostty's formatter closes hyperlinks at allocation-page boundaries, so restoring
+native pages can move an OSC 8 close across CRLF without changing cells. Differing
+exports are replayed into matching fresh native page layouts before comparing
+their full styled output; link/style/mode effects remain part of the assertion.
