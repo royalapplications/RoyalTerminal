@@ -5,17 +5,11 @@ its checkout. It retains Ghostty's build configuration, runtime module,
 allocator, generation counter, public C exports and platform linker handling.
 The build generates a copy of the upstream Zig root with the exports from
 `src/extensions.zig`, `src/drag_drop.zig`, `src/notifications.zig` and
-`src/window_resize.zig` appended.
-Both shared and static libraries include them.
+`src/history.zig` appended. Both shared and static libraries include them.
 
-The window-resize extension forwards the upstream parser's validated CSI 8 t
-action through a separately registered callback. It changes no upstream public
-options/enums and never resizes the terminal grid itself. Zero/omitted dimensions
-preserve the corresponding window dimension; host permission, minimum cell sizes
-and unsuitable-window/layout rejection belong to the shared embedding policy.
-Its generated handler/C-wrapper overlays retain the same full-source hash and
-exact-fragment-count checks as the other extensions. Rebuild before using this
-new callback export; final native validation and ABI regeneration are pending.
+The October 27 update uses Ghostty's public resize-window callback and Kitty
+animation clock APIs. The superseded RoyalTerminal exports and resize effect
+files were removed. OSC 7501 continues to use the public upstream callback.
 
 Windows x64 compatibility builds use the release CPU baseline and disable
 Ghostty's SIMD bundle. For Windows x64 targets without AVX, the wrapper also
@@ -27,15 +21,16 @@ CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 
 ## Reviewed correctness overlays
 
-The generated source copy also applies twelve corrections to pinned upstream
-`246f702876b924a1cb7cade1e99274d1470302fc`. The October refresh from `b40acce58`
-changes charset printing, reset/checksum behavior, reflow, memory accounting and
-stream effects. Six changed source hashes were reviewed; all existing exact
-fragments remain valid and the separate corrections are retained. Both native
-libraries rebuilt on macOS arm64; the ABI and new API suite passed (152 tests).
-OSC 7501 uses the upstream public callback directly and requires no overlay. Each overlay checks the original file's full
-SHA-256 and the exact expected source-fragment count; any upstream file change
-fails the build until reviewed. The submodule checkout is never changed.
+The generated source copy applies the corrections below to pinned upstream
+`4a4fc017940bec38c93b278c10c6a18c591f3e63` (1.4.1 development head, immediately
+after 1.4.0). The October 27 review removes the continuation-export correction:
+upstream now canonicalizes all C1 restarts and validates replay-safe suffixes.
+The scroll-clear correction now calls upstream's `cursorPageReplaced` helper,
+retaining repair on partial allocation failure and recycled-page serial checks.
+Other reviewed corrections remain separate from the unmodified submodule.
+Each overlay checks the original file's full SHA-256 and exact source-fragment
+count. Zig 0.17 configure dependencies also invalidate the generated overlay
+when a reviewed source file changes.
 
 - `Terminal.zig`: mark the cursor row dirty before the mode-2027-off width-zero
   grapheme append. With a clean render snapshot between `K` and U+0301, unpatched
@@ -64,16 +59,6 @@ fails the build until reviewed. The submodule checkout is never changed.
   the old assertion incorrectly made that path unreachable. The existing eviction
   loop handles it without algorithm changes. Native and cross-engine regressions
   cover the over-budget promotion followed by eviction.
-- `stream_continuation.zig`: canonicalize export after an APC-to-C1 DCS/CSI/OSC
-  transition commits the preceding APC. Unpatched export retained the entire
-  Kitty query, causing snapshot validation to reject the exported continuation
-  and allowing direct replay to repeat the query. The overlay scans for the last
-  committed transition before writing to a non-rewindable writer, emits the new
-  introducer as ESC plus its 7-bit final, and preserves omission of already
-  executed C0 controls. Ordinary C1 payload bytes in OSC/DCS remain untouched.
-  Only export changes; tracking limits and the input feed path remain unchanged.
-  Buffer/callback exports and snapshot round trips are tested at every split.
-
 - `Terminal.zig`: dirty semantic prompt rows after OSC 133 and implicit
   newline continuations. After publishing a clean frame, OSC `133;P` changed
   native row storage but left render-state row metadata stale. The same occurred
@@ -120,7 +105,7 @@ fails the build until reviewed. The submodule checkout is never changed.
   affect unrelated entries or lose links on later writes. Detect both node and
   generation changes, clear stale IDs, reload the pin and restore owned state.
   Repair also runs after partial growth failure, before fallback clearing. The
-  old heap-owned hyperlink remains alive until its replacement is copied.
+  upstream helper preserves hyperlink ownership while re-registering it.
   Native/managed regressions reproduce the original mismatch and compare
   repeated page recycling, implicit identities, styled writes, snapshot
   roundtrips and synchronized output after correction.
@@ -130,9 +115,8 @@ fails the build until reviewed. The submodule checkout is never changed.
   row order; retrying the identical empty page otherwise allocates indefinitely.
   Return allocation failure, dispose the unlinked empty page without asserting
   it is live, and restore this chunk's pins before deleting earlier replacement
-  pages or resetting its backfill prefix. This twelfth correction is authored
-  but unbuilt/unrun. Its adversarial native regressions require rebuilding the
-  extension first; an old native library does not terminate on their fixture.
+  pages or resetting its backfill prefix. Its adversarial native regressions require rebuilding the extension first;
+  an old native library does not terminate on their fixture.
   Managed processor resize rejects the same condition and retains its staged
   transaction's original state. This is not a new whole-terminal native rollback
   guarantee for failures after other source chunks have already committed.
@@ -147,10 +131,10 @@ Three additional hash-checked overlays route Ghostty's parsed OSC 99 slices from
 `stream.zig` through the optional `stream_terminal.zig` effect to the C terminal
 wrapper. They add no upstream Action enum/union member and do not change the
 upstream public C ABI. A RIS marker clears unfinished shared-host assemblies.
-These are host integration additions, separate from the twelve correctness fixes.
+These are host integration additions, separate from the correctness fixes.
 Native rebuild and callback/lifetime tests validate this boundary.
 
-The sixteen additional C exports are declared in
+The additional C exports are declared in
 `include/royalterminal_ghostty_vt.h`:
 
 - `ghostty_royal_notification_callback` registers a borrowed OSC 99 callback
@@ -201,14 +185,6 @@ The sixteen additional C exports are declared in
   buffer leaves both byte buffers untouched. The host resolves identities with
   borrowed spans and copies bytes only for a new registry entry. These two new
   exports have ABI/buffer/lifetime regression coverage.
-
-- `ghostty_royal_kitty_graphics_animation_tick` calls Ghostty's own
-  `ImageStorage.animationTick`. The public C API exposes the current animation
-  frame but not the tick normally performed by Ghostty's renderer. The caller
-  supplies monotonically increasing milliseconds and receives the relative
-  delay until the next frame, or `GHOSTTY_NO_VALUE` when no timer is needed.
-  Calls must be serialized with access to the owning terminal. Reacquire image
-  handles after ticking; image/storage generations identify updated pixels.
 
 - `ghostty_royal_kitty_graphics_placement_metadata` reads the current placement
   iterator entry, retaining internal/external placement namespaces and virtual

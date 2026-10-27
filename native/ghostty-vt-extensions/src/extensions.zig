@@ -89,10 +89,10 @@ export fn ghostty_royal_mouse_state(
     if (result.size < @sizeOf(RoyalMouseState)) return -2;
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
     result.* = .{
-        .tracking = @intCast(@intFromEnum(t.flags.mouse_event)),
-        .format = @intCast(@intFromEnum(t.flags.mouse_format)),
-        .shift_capture = @intCast(@intFromEnum(t.flags.mouse_shift_capture)),
-        .shape = @intCast(@intFromEnum(t.mouse_shape)),
+        .tracking = @intCast(@backingInt(t.flags.mouse_event)),
+        .format = @intCast(@backingInt(t.flags.mouse_format)),
+        .shift_capture = @intCast(@backingInt(t.flags.mouse_shift_capture)),
+        .shape = @intCast(@backingInt(t.mouse_shape)),
     };
     return 0;
 }
@@ -103,7 +103,7 @@ export fn ghostty_royal_mouse_shift_capture_set(
 ) callconv(.c) c_int {
     if (value > 2) return -2;
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
-    t.flags.mouse_shift_capture = @enumFromInt(value);
+    t.flags.mouse_shift_capture = @fromBackingInt(@as(u2, @intCast(value)));
     return 0;
 }
 
@@ -127,14 +127,14 @@ export fn ghostty_royal_prompt_state(
     const s = t.screens.active;
     result.* = .{
         .seen = @intFromBool(s.semantic_prompt.seen),
-        .content = @intFromEnum(s.cursor.semantic_content),
+        .content = @backingInt(s.cursor.semantic_content),
         .clear_eol = @intFromBool(s.cursor.semantic_content_clear_eol),
         .click = switch (s.semantic_prompt.click) {
             .none => 0,
-            .click_events => |v| 1 + @as(u32, @intCast(@intFromEnum(v))),
-            .cl => |v| 3 + @as(u32, @intCast(@intFromEnum(v))),
+            .click_events => |v| 1 + @as(u32, @intCast(@backingInt(v))),
+            .cl => |v| 3 + @as(u32, @intCast(@backingInt(v))),
         },
-        .redraw = @intFromEnum(t.flags.shell_redraws_prompt),
+        .redraw = @backingInt(t.flags.shell_redraws_prompt),
         .implicit_id = s.cursor.hyperlink_implicit_id,
     };
     return 0;
@@ -184,23 +184,6 @@ export fn ghostty_royal_grid_ref_hyperlink(
     if (uri.len > 0) @memcpy(uri_buffer.?[0..uri.len], uri);
     if (id.len > 0) @memcpy(id_buffer.?[0..id.len], id);
     return 0;
-}
-
-export fn ghostty_royal_kitty_graphics_animation_tick(
-    graphics: ?*anyopaque,
-    now_ms: u64,
-    out_delay_ms: ?*u64,
-) callconv(.c) c_int {
-    const output = out_delay_ms orelse return -2;
-    output.* = 0;
-    const handle = graphics orelse return -2;
-    if (comptime terminal.options.kitty_graphics) {
-        const storage: *kitty.graphics.ImageStorage = @ptrCast(@alignCast(handle));
-        const delay = storage.animationTick((TinyIo.init).io(), now_ms) orelse return -4;
-        output.* = delay;
-        return 0;
-    }
-    return -4;
 }
 
 const RoyalKittyPlacementMetadata = extern struct {
@@ -312,7 +295,7 @@ export fn ghostty_royal_glyph_metadata(
         .units_per_em = entry.design.units_per_em,
         .advance_width = entry.design.advance_width,
         .line_height = entry.design.line_height,
-        .width = @intFromEnum(entry.width),
+        .width = @backingInt(entry.width),
         // The glossary stores normalized renderer constraints, not the original
         // request names (height/advance and contain/cover are aliases upstream).
         .sizing = switch (entry.constraint.size) {

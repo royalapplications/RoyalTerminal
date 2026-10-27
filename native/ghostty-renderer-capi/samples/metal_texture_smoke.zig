@@ -60,7 +60,7 @@ const MTLRegion = extern struct {
 };
 
 pub fn main() !void {
-    if (builtin.os.tag != .macos) {
+    if (builtin.target.os.tag != .macos) {
         std.debug.print("Skipping Metal sample: current OS is not macOS.\n", .{});
         return;
     }
@@ -109,7 +109,7 @@ pub fn main() !void {
     const surface = renderer.ghostty_render_surface_new(context, .metal) orelse return error.CreateSurfaceFailed;
     defer renderer.ghostty_render_surface_free(surface);
 
-    const ok = @intFromEnum(renderer.GhosttyRenderResult.ok);
+    const ok = @backingInt(renderer.GhosttyRenderResult.ok);
     if (renderer.ghostty_render_surface_set_size(surface, @intCast(width), @intCast(height)) != ok) {
         return error.SetSizeFailed;
     }

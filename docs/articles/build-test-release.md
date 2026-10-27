@@ -11,7 +11,7 @@ RoyalTerminal combines managed .NET packages with native artifacts. A successful
 Minimum toolchain:
 
 - .NET 10 SDK
-- Zig 0.16.0
+- Zig 0.17.0
 - initialized git submodules for native builds
 
 Common optional requirements:
@@ -35,8 +35,8 @@ The October 2026 dependency review retains these compatibility constraints:
   xUnit 4 changes extensibility/parallelization APIs and defaults to Microsoft
   Testing Platform v2, which rejects the current VSTest invocation on .NET 10.
 - Ghostty remains at the explicit submodule commit tested with RoyalTerminal's
-  native overlays and generated ABI checks. Its build requires Zig 0.16.0 exactly;
-  updating to Zig 0.17 or a newer upstream development commit requires a coordinated
+  native overlays and generated ABI checks. Its build requires Zig 0.17.0 exactly;
+  updating the toolchain or upstream development commit requires a coordinated
   native/managed ABI and terminal behavior review.
 - VitePress remains on its latest stable 1.6.4 release. The npm overrides update
   Vite 7 and its Vue plugin together so their peer ranges match. Vite 8 uses

@@ -16,12 +16,12 @@ fi
 
 case "${1:-debug}" in
     release|Release|ReleaseFast)
-        echo "Building libghostty-renderer-capi (ReleaseFast)..."
-        "$ZIG_COMPAT" build -Doptimize=ReleaseFast
+        echo "Building libghostty-renderer-capi (fast)..."
+        "$ZIG_COMPAT" build -Doptimize=fast
         ;;
     release-safe|ReleaseSafe)
-        echo "Building libghostty-renderer-capi (ReleaseSafe)..."
-        "$ZIG_COMPAT" build -Doptimize=ReleaseSafe
+        echo "Building libghostty-renderer-capi (safe)..."
+        "$ZIG_COMPAT" build -Doptimize=safe
         ;;
     clean)
         rm -rf zig-out .zig-cache

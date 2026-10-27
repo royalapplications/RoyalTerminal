@@ -32,15 +32,6 @@ GHOSTTY_API GhosttyResult ghostty_royal_history_row_ref(
 GHOSTTY_API GhosttyResult ghostty_royal_history_grapheme_fits(
     const GhosttyGridRef* reference, size_t budget);
 
-/** CSI 8 t host request in cell counts. Zero preserves the current dimension.
- * This does not resize native terminal state. The host must explicitly permit
- * window changes. Never throw/re-enter from the callback; serialize registration
- * and terminal access and keep the callback alive until removal or disposal. */
-typedef void (*RoyalWindowResizeCallback)(GhosttyTerminal terminal, void* userdata,
-    uint16_t rows, uint16_t columns);
-GHOSTTY_API GhosttyResult ghostty_royal_window_resize_callback(
-    GhosttyTerminal terminal, void* userdata, RoyalWindowResizeCallback callback);
-
 /** Host-provided drop representation. Pointers are borrowed only for the call;
  * the upstream state copies data at drop time. MIME is a printable ASCII token
  * (1-1024 bytes, no spaces). At most 16 items and 64 MiB total data are accepted. */
@@ -137,18 +128,6 @@ GHOSTTY_API GhosttyResult ghostty_royal_grid_ref_hyperlink(
     const GhosttyGridRef* reference, RoyalHyperlinkMetadata* output,
     uint8_t* uri_buffer, size_t uri_capacity,
     uint8_t* id_buffer, size_t id_capacity);
-
-/**
- * Advances the active storage's Kitty animations on the caller's monotonic
- * millisecond clock. Serialize with all access to the owning terminal.
- * The storage handle must have been obtained since the last terminal mutation.
- * This call mutates image pixels/generations and invalidates borrowed images.
- *
- * Returns GHOSTTY_SUCCESS with the next relative delay, GHOSTTY_NO_VALUE when
- * no animation needs another tick, or GHOSTTY_INVALID_VALUE for NULL arguments.
- */
-GHOSTTY_API GhosttyResult ghostty_royal_kitty_graphics_animation_tick(
-    GhosttyKittyGraphics graphics, uint64_t now_ms, uint64_t* out_delay_ms);
 
 /** Immutable metadata copied from a placement iterator. Set size before calling.
  * Flags: 1 = internal ID namespace, 2 = virtual, 4 = relative with virtual root.

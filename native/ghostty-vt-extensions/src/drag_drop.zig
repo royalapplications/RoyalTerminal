@@ -15,7 +15,7 @@ export fn ghostty_royal_dnd_state(
     const a = accepted orelse return -2;
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
     r.* = @intFromBool(t.kitty_dnd != null);
-    a.* = if (t.kitty_dnd) |d| if (d.clientAccepted()) |op| @intFromEnum(op) else -1 else -1;
+    a.* = if (t.kitty_dnd) |d| if (d.clientAccepted()) |op| @backingInt(op) else -1 else -1;
     return 0;
 }
 
