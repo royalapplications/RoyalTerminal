@@ -70,3 +70,33 @@ to 64,000 with 128 placements. The zero-placement baseline remains 64,000 bytes.
 These are parser/mirror refresh measurements, not GPU frame times. A focused
 allocation regression also checks resize, scrolling and changed pixels; the
 renderer, animation, virtual-placement and overscan test group passed 76 tests.
+
+## Review follow-up: wide selection and hierarchical context
+
+Ghostty `4af7e19c7` fixes selection highlighting at wide-character boundaries.
+RoyalTerminal's shared Skia overlays now select both cells when either half of a
+wide glyph is selected. A linear selection ending on the right-edge spacer also
+highlights the wrapped glyph on the next row; rectangular selections stay on
+their original rows. Overwriting the spacer invalidates that following row even
+when its text did not change. This applies to both native and managed engines,
+endpoint selections and projected row spans, without allocating per row.
+
+This follows Ghostty's rendering/copy agreement. Windows Terminal's
+[`TerminalSelection.cpp`](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalCore/TerminalSelection.cpp)
+adjusts DBCS endpoints, and xterm.js
+[`SelectionService.ts`](https://github.com/xtermjs/xterm.js/blob/master/src/browser/services/SelectionService.ts)
+also extends selections around zero-width wide-character tails.
+`WideSelectionRenderingTests` checks fill, glyph foreground, reversed endpoints,
+row spans, rectangle behavior and incremental repaint for both engines.
+`GhosttySelectionTests` exercises copying across an actual native page boundary
+for `8d8b1ce00`; managed selection formatting already walks global rows and has
+no page-local boundary limitation.
+
+The OSC 3008 rename (`2fa57fc45`) and metadata unescaping (`554ea6586`) were also
+reviewed. The public C API only exposes the `HierarchicalContext` command type:
+`osc.h` has no HC payload data keys, and `stream.zig` ignores HC at terminal-stream
+level. Its lazy metadata-unescaping iterator is internal Zig API and arrives in
+the native pin. No public payload fields are missing from the C# binding and no
+private-memory access or extra parser is introduced. `OscParserTests` checks
+the renamed enum on ordinary and escaped-metadata input and retains the old
+`ContextSignal` alias for source compatibility.

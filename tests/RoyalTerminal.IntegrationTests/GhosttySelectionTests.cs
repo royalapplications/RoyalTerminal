@@ -13,6 +13,41 @@ namespace RoyalTerminal.IntegrationTests;
 public class GhosttySelectionTests
 {
     [GhosttyNativeFact]
+    public void SpacerHeadSelectionIncludesWideGlyphAcrossNativePages()
+    {
+        // Ghostty formatter.zig 8d8b1ce00 moves the selection end at page-list
+        // level. Discover a real page boundary through public grid references;
+        // do not encode a private native page capacity in the fixture.
+        using GhosttyTerminal terminal = new(3, 3, 4 * 1024 * 1024);
+        terminal.Write(Encoding.UTF8.GetBytes(new string('界', 32768)));
+        uint boundaryRow = 0;
+        bool crossedPage = false;
+        for (uint row = 0; row + 1 < terminal.GetTotalRows(); row++)
+        {
+            Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Screen(2, row), out var left));
+            Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Screen(0, row + 1), out var right));
+            if (left.Node != right.Node) { boundaryRow = row; crossedPage = true; break; }
+        }
+        Assert.True(crossedPage, $"Fixture must span multiple native history pages. Rows={terminal.GetTotalRows()}, history={terminal.GetScrollbackRows()}, columns={terminal.GetColumns()}");
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Screen(0, boundaryRow), out var start));
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Screen(2, boundaryRow), out var spacer));
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Screen(0, boundaryRow + 1), out var glyph));
+        Assert.NotEqual(spacer.Node, glyph.Node);
+        foreach (bool onlyGlyph in new[] { false, true })
+        {
+            Assert.True(terminal.TryFormatSelection(GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                new(onlyGlyph ? spacer : start, spacer), unwrap: true, trim: false, out byte[] text));
+            Assert.Equal(onlyGlyph ? "界" : "界界", Encoding.UTF8.GetString(text));
+        }
+        foreach ((bool unwrap, bool rectangle) in new[] { (false, false), (true, true) })
+        {
+            Assert.True(terminal.TryFormatSelection(GhosttyVtNative.GhosttyFormatterFormat.Plain,
+                new(start, spacer, rectangle), unwrap, trim: false, out byte[] text));
+            Assert.Equal("界", Encoding.UTF8.GetString(text));
+        }
+    }
+
+    [GhosttyNativeFact]
     public void SelectionHelpers_DeriveStoreFormatAndCompareSnapshots()
     {
         using GhosttyTerminal terminal = new(80, 24);
