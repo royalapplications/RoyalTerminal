@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 namespace RoyalTerminal.Terminal;
 
 /// <summary>Chunk accumulation, bounded decompression and decoded-pixel validation.</summary>
-internal sealed class ManagedKittyImageLoader
+internal sealed partial class ManagedKittyImageLoader
 {
     private ManagedKittyImageBuffer _buffer;
     private readonly IKittyGraphicsPngDecoder? _pngDecoder;
@@ -160,7 +160,7 @@ internal sealed class ManagedKittyImageLoader
         if (width == 0 || height == 0) return false;
         error = "EINVAL: dimensions too large";
         if (width > 10000 || height > 10000) return false;
-        int channels = format == 24 ? 3 : 4;
+        int channels = format switch { 24 => 3, 16 => 2, 8 => 1, _ => 4 };
         int expected = checked((int)(width * height * (uint)channels));
         int actual = _buffer.Data.Length;
         bool frame = InitialCommand.Action == 'f';
@@ -173,9 +173,13 @@ internal sealed class ManagedKittyImageLoader
         // The per-image safety limit above still bounds the largest view.
         byte[] pixels = _buffer.Take(expected, _allocationCheckpoint);
         _allocationCheckpoint?.Invoke(ManagedKittyImageAllocation.Pixels);
-        image = channels == 3
-            ? ManagedKittyImagePixels.FromRgb((int)width, (int)height, pixels)
-            : new(new KittyGraphicsDecodedImage((int)width, (int)height, pixels));
+        image = channels switch
+        {
+            3 => ManagedKittyImagePixels.FromRgb((int)width, (int)height, pixels),
+            4 => new(new KittyGraphicsDecodedImage((int)width, (int)height, pixels)),
+            _ => ManagedKittyImagePixels.Pending((int)width, (int)height,
+                channels == 2 ? (byte)3 : (byte)4, expected).Complete(pixels)!,
+        };
         error = "OK";
         return true;
     }

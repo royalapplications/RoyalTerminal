@@ -137,6 +137,12 @@ internal sealed class GhosttySnapshotPage
         int rows = BinaryPrimitives.ReadUInt16LittleEndian(payload[2..]);
         if (columns == 0 || rows == 0 || (long)columns * rows > maximumCells)
             throw new InvalidDataException("Snapshot PAGE dimensions exceed the configured limit.");
+        // These are native allocation hints, even when the managed decoder
+        // does not allocate their full capacity. Reject architecturally invalid
+        // layouts before restoring any metadata, matching Ghostty page.zig.
+        GhosttySnapshotPageCapacity capacity = GhosttySnapshotPageCapacity.Read(payload);
+        if (new GhosttySnapshotAllocation(4096).LayoutBytes(capacity) > uint.MaxValue)
+            throw new InvalidDataException("Snapshot PAGE capacity exceeds the native page size limit.");
         int styleCount = BinaryPrimitives.ReadUInt16LittleEndian(payload[4..]);
         int hyperlinkCount = BinaryPrimitives.ReadUInt16LittleEndian(payload[6..]);
         ReadOnlySpan<byte> remaining = payload[20..];

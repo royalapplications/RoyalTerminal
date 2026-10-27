@@ -151,16 +151,11 @@ public sealed class GhosttySnapshotPageTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void CapacityHintsDoNotControlManagedAllocations()
+    public void CapacityHintsMustFitNativePageAddressSpaceBeforeAllocation()
     {
         byte[] bytes = Page([], [], [0]);
         bytes.AsSpan(8, 12).Fill(0xFF);
-        GhosttySnapshotPage.Read(bytes, 1, 0, 0);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        GhosttySnapshotPage page = GhosttySnapshotPage.Read(bytes, 1, 0, 0);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.InRange(allocated, 0, 4096);
-        Assert.Equal(1, page.Grid.Cells.Length);
+        Assert.Throws<InvalidDataException>(() => GhosttySnapshotPage.Read(bytes, 1, 0, 0));
     }
 
     [Fact]

@@ -18,6 +18,9 @@ internal enum GhosttySnapshotRecordTag : ushort
     Ready = 5,
     Finish = 6,
     Continuation = 7,
+    KittyImageStorage = 8,
+    KittyImagePayload = 9,
+    KittyImagePagePlacements = 10,
 }
 
 /// <summary>Version1 envelope and record framing, independent of engine storage.</summary>
@@ -41,13 +44,14 @@ internal static class GhosttySnapshotFraming
 
     internal static void ValidateHeader(GhosttySnapshotRecordTag tag, uint length, int maximumPayloadBytes)
     {
-        if (tag < GhosttySnapshotRecordTag.Terminal || tag > GhosttySnapshotRecordTag.Continuation)
-            throw new InvalidDataException("Unknown Ghostty snapshot record tag.");
         if (length > (uint)maximumPayloadBytes)
             throw new InvalidDataException("Ghostty snapshot record exceeds the configured byte limit.");
         if (tag is GhosttySnapshotRecordTag.Ready or GhosttySnapshotRecordTag.Finish && length != 0)
             throw new InvalidDataException("Ghostty snapshot checkpoint records must be empty.");
     }
+
+    internal static bool IsKnown(GhosttySnapshotRecordTag tag)
+        => tag is >= GhosttySnapshotRecordTag.Terminal and <= GhosttySnapshotRecordTag.KittyImagePagePlacements;
 
     internal static uint ComputeChecksum(ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> payload)
         => ~AppendCrc32C(AppendCrc32C(uint.MaxValue, prefix), payload);

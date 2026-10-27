@@ -17,7 +17,12 @@ internal sealed class GhosttySnapshotScreen(GhosttySnapshotScreenState state, Gh
 {
     internal GhosttySnapshotScreenState State { get; } = state;
     internal ReadOnlySpan<GhosttySnapshotPage> Pages => pages;
+    internal GhosttySnapshotKittyStorage? Kitty { get; init; }
 }
 
 /// <summary>One newest-to-oldest history page; installation/reconciliation is the adapter's responsibility.</summary>
-internal readonly record struct GhosttySnapshotHistoryPage(int Key, GhosttySnapshotPage Page, uint Remaining);
+internal readonly record struct GhosttySnapshotHistoryPage(int Key, GhosttySnapshotPage Page, uint Remaining,
+    GhosttySnapshotKittyPlacement[]? KittyPlacements = null);
+
+internal readonly record struct GhosttySnapshotNextRecord(GhosttySnapshotHistoryPage? History,
+    GhosttySnapshotKittyPayload? KittyPayload);

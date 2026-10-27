@@ -75,8 +75,9 @@ public sealed class ManagedTerminalSnapshotDecoder : IDisposable
     }
 
     /// <summary>
-    /// Consumes and validates one history page, returning its application result, or null after
-    /// FINISH (idempotent). Dropped pages cannot later fill gaps. On failure no more calls are valid.
+    /// Consumes and validates one history page or Kitty image/frame payload, returning its
+    /// application result, or null after FINISH (idempotent). Dropped pages cannot later fill
+    /// gaps. On failure no more calls are valid, but the restored terminal remains usable.
     /// </summary>
     public ManagedTerminalSnapshotProgress? Next()
     {
@@ -85,8 +86,17 @@ public sealed class ManagedTerminalSnapshotDecoder : IDisposable
         ObjectDisposedException.ThrowIf(_terminal.IsDisposed, _terminal);
         try
         {
-            if (_reader.ReadNextHistoryPage() is not { } page) return null;
+            if (_reader.ReadNext() is not { } next) return null;
+            if (next.KittyPayload is { } payload)
+            {
+                int applied = _terminal.Processor.ApplySnapshotKittyPixels(payload);
+                return new(payload.Key, 0, 0) { Kind = ManagedTerminalSnapshotProgressKind.KittyImage,
+                    ImageId = payload.ImageId, ImageFrame = payload.Frame, ImageBytesApplied = applied };
+            }
+            GhosttySnapshotHistoryPage page = next.History!.Value;
             GhosttySnapshotHistoryProgress progress = _terminal.Processor.ApplySnapshotHistory(_history!, page);
+            if (progress.Rows > 0 && page.KittyPlacements is { } placements)
+                _terminal.Processor.ApplySnapshotKittyHistory(page.Key, page.Page, placements);
             if (_options.CompressHistory && progress.Rows > 0)
                 _terminal.Processor.CompressSnapshotHistory(progress.Key, progress.Rows);
             return new(progress.Key, progress.Rows, progress.Remaining);
@@ -109,8 +119,27 @@ public sealed class ManagedTerminalSnapshotDecoder : IDisposable
     }
 }
 
-/// <summary>Result of consuming one history page, including pages dropped after live changes or quota exhaustion.</summary>
+/// <summary>Result of consuming a history page or Kitty payload, including records discarded after live changes or quota exhaustion.</summary>
 /// <param name="ScreenKey">Zero for primary, one for alternate.</param>
-/// <param name="RowsApplied">Actual rows prepended; zero when the complete page was discarded.</param>
-/// <param name="PagesRemaining">Remaining pages in this screen's history sequence.</param>
-public readonly record struct ManagedTerminalSnapshotProgress(int ScreenKey, int RowsApplied, uint PagesRemaining);
+/// <param name="RowsApplied">Actual rows prepended; zero for image progress or when the page was discarded.</param>
+/// <param name="PagesRemaining">Remaining pages in this screen's history sequence; zero for image progress.</param>
+public readonly record struct ManagedTerminalSnapshotProgress(int ScreenKey, int RowsApplied, uint PagesRemaining)
+{
+    /// <summary>The kind of record consumed by this progress step.</summary>
+    public ManagedTerminalSnapshotProgressKind Kind { get; init; }
+    /// <summary>Image identity for image progress; zero for history progress.</summary>
+    public uint ImageId { get; init; }
+    /// <summary>One-based frame number for image progress; zero for history.</summary>
+    public uint ImageFrame { get; init; }
+    /// <summary>Pixel bytes installed; zero when live input or a quota retired the image.</summary>
+    public int ImageBytesApplied { get; init; }
+}
+
+/// <summary>Incremental snapshot restoration work returned after READY.</summary>
+public enum ManagedTerminalSnapshotProgressKind
+{
+    /// <summary>A complete history page was applied or discarded.</summary>
+    History,
+    /// <summary>A Kitty image or animation frame payload was applied or discarded.</summary>
+    KittyImage,
+}

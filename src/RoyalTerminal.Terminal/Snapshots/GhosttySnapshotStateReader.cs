@@ -5,7 +5,7 @@ namespace RoyalTerminal.Terminal.Snapshots;
 
 /// <summary>
 /// Validates ordered snapshot records transactionally through READY, then yields
-/// history one page at a time. Never executes continuation or mutates a terminal.
+/// history pages and image/frame payloads one record at a time. Never executes continuation or mutates a terminal.
 /// Caller streams stay open; bytes after FINISH remain unread.
 /// </summary>
 internal sealed class GhosttySnapshotStateReader : IDisposable
@@ -21,6 +21,7 @@ internal sealed class GhosttySnapshotStateReader : IDisposable
     private int _historyKeys;
     private int _currentHistoryKey;
     private uint _currentHistoryPages;
+    private GhosttySnapshotRecordTag? _lookahead;
 
     internal GhosttySnapshotStateReader(ReadOnlyMemory<byte> source, GhosttySnapshotDecodeLimits limits)
         : this(CreateReader(source, limits), limits) { }
@@ -68,7 +69,13 @@ internal sealed class GhosttySnapshotStateReader : IDisposable
                     rows += page.Grid.Rows;
                 }
                 if (rows < terminal.Header.Rows) throw new InvalidDataException("Snapshot screen pages do not cover the active area.");
-                screens[state.Key] = new(state, pages);
+                GhosttySnapshotKittyStorage? kitty = null;
+                if (PeekTag() == GhosttySnapshotRecordTag.KittyImageStorage)
+                {
+                    kitty = GhosttySnapshotKittyCodec.ReadStorage(ReadPayload(GhosttySnapshotRecordTag.KittyImageStorage));
+                    if (kitty.Key != state.Key) throw new InvalidDataException("Kitty storage names another screen.");
+                }
+                screens[state.Key] = new(state, pages) { Kitty = kitty };
             }
             ReadOnlySpan<byte> continuation = ReadPayload(GhosttySnapshotRecordTag.Continuation);
             if (continuation.Length > _limits.MaximumContinuationBytes)
@@ -85,6 +92,13 @@ internal sealed class GhosttySnapshotStateReader : IDisposable
 
     internal GhosttySnapshotHistoryPage? ReadNextHistoryPage()
     {
+        while (ReadNext() is { } next)
+            if (next.History is { } history) return history;
+        return null;
+    }
+
+    internal GhosttySnapshotNextRecord? ReadNext()
+    {
         EnsureUsable();
         if (_phase == Phase.Start) throw new InvalidOperationException("Read snapshot READY before history.");
         if (_phase == Phase.Finished) return null;
@@ -92,10 +106,25 @@ internal sealed class GhosttySnapshotStateReader : IDisposable
         {
             while (true)
             {
+                if (PeekTag() == GhosttySnapshotRecordTag.KittyImagePayload)
+                {
+                    ReadPayload(GhosttySnapshotRecordTag.KittyImagePayload);
+                    GhosttySnapshotKittyPayload payload = GhosttySnapshotKittyCodec.ReadPayload(_reader.LastPayloadMemory);
+                    if (payload.Key >= _screenCount) throw new InvalidDataException("Kitty pixels name an undeclared screen.");
+                    return new(null, payload);
+                }
                 if (_currentHistoryPages > 0)
                 {
                     GhosttySnapshotPage page = ReadPage();
-                    return new(_currentHistoryKey, page, --_currentHistoryPages);
+                    GhosttySnapshotKittyPlacement[]? placements = null;
+                    if (PeekTag() == GhosttySnapshotRecordTag.KittyImagePagePlacements)
+                    {
+                        GhosttySnapshotKittyPagePlacements decoded = GhosttySnapshotKittyCodec.ReadPagePlacements(
+                            ReadPayload(GhosttySnapshotRecordTag.KittyImagePagePlacements));
+                        if (decoded.Key != _currentHistoryKey) throw new InvalidDataException("Kitty placements name another history screen.");
+                        placements = decoded.Placements;
+                    }
+                    return new(new(_currentHistoryKey, page, --_currentHistoryPages, placements), null);
                 }
                 if (_pendingHistories == 0)
                 {
@@ -132,11 +161,37 @@ internal sealed class GhosttySnapshotStateReader : IDisposable
 
     private ReadOnlySpan<byte> ReadPayload(GhosttySnapshotRecordTag expected)
     {
-        GhosttySnapshotRecordTag actual = _reader.ReadRecord(out ReadOnlySpan<byte> payload);
+        GhosttySnapshotRecordTag actual = PeekTag();
         if (actual != expected) throw new InvalidDataException($"Expected snapshot {expected}, got {actual}.");
-        if (payload.Length > _remainingPayloadBytes) throw new InvalidDataException("Snapshot exceeds the total payload byte limit.");
-        _remainingPayloadBytes -= payload.Length;
+        _lookahead = null;
+        _reader.ReadRecord(out ReadOnlySpan<byte> payload);
+        ChargePayload(payload.Length);
         return payload;
+    }
+
+    private GhosttySnapshotRecordTag PeekTag()
+    {
+        if (_lookahead is { } pending) return pending;
+        while (true)
+        {
+            GhosttySnapshotRecordTag actual = _reader.PeekRecordTag();
+            // Unknown extension records are optional, but still consume the
+            // byte budget and pass framing/CRC validation before being skipped.
+            if (!GhosttySnapshotFraming.IsKnown(actual))
+            {
+                _reader.ReadRecord(out ReadOnlySpan<byte> payload);
+                ChargePayload(payload.Length);
+                continue;
+            }
+            _lookahead = actual;
+            return actual;
+        }
+    }
+
+    private void ChargePayload(int length)
+    {
+        if (length > _remainingPayloadBytes) throw new InvalidDataException("Snapshot exceeds the total payload byte limit.");
+        _remainingPayloadBytes -= length;
     }
 
     private void ValidateKey(int key, ref int keys)
