@@ -39,6 +39,10 @@ Both default x64 and ARM64 outputs match their explicit glibc 2.28 builds
 byte-for-byte; the ARM64 output also requires at most 2.27. An explicit
 glibc 2.34 build retains `shm_open`/`shm_unlink` at version 2.34, verifying
 that caller overrides are honored.
+Inferred native GNU targets also retain the resolved ABI when setting the
+version, so Zig can serialize the dependency target. The exact CI command
+`zig build test-history -Doptimize=fast -Dsimd=false` passed on Ubuntu ARM64
+with 43 tests, including native-target serialization and override regressions.
 
 Linux pkg-config descriptions retain upstream fields, then receive a build-time
 correction after upstream installation: the static package names the installed

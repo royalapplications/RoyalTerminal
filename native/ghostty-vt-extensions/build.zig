@@ -1,19 +1,12 @@
 //! Build upstream libghostty-vt with RoyalTerminal's narrowly scoped extensions.
 //! All code shares one Zig module, allocator and process-wide generation source.
 const std = @import("std");
+const package_target = @import("src/package_target.zig");
 
 pub fn build(b: *std.Build) !void {
     var target = b.standardTargetOptions(.{});
-    // Keep default GNU packages compatible with glibc 2.28 distributions.
-    // Zig's current GNU default can select newer versioned libm symbols once
-    // libc is linked. Explicit caller-selected versions remain authoritative.
-    if (target.result.os.tag == .linux and target.result.abi.isGnu() and
-        target.query.glibc_version == null)
-    {
-        var query = target.query;
-        query.glibc_version = .{ .major = 2, .minor = 28, .patch = 0 };
+    if (package_target.normalize(target.query, target.result.os.tag, target.result.abi)) |query|
         target = b.resolveTargetQuery(query);
-    }
     const optimize = b.standardOptimizeOption(.{});
     const simd = b.option(bool, "simd", "Enable upstream SIMD implementation") orelse true;
     const ghostty = b.dependency("ghostty", .{
@@ -296,6 +289,14 @@ pub fn build(b: *std.Build) !void {
     const metadata_run = b.addRunArtifact(metadata_tests);
     b.step("test-pkg-config", "Test Linux package metadata correction").dependOn(&metadata_run.step);
     history_step.dependOn(&metadata_run.step);
+
+    const target_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/package_target.zig"),
+        .target = b.graph.host,
+    }) });
+    const target_run = b.addRunArtifact(target_tests);
+    b.step("test-package-target", "Test native and explicit GNU package targets").dependOn(&target_run.step);
+    history_step.dependOn(&target_run.step);
 }
 
 fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void {
