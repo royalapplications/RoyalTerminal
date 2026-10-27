@@ -139,3 +139,28 @@ Ghostty's formatter closes hyperlinks at allocation-page boundaries, so restorin
 native pages can move an OSC 8 close across CRLF without changing cells. Differing
 exports are replayed into matching fresh native page layouts before comparing
 their full styled output; link/style/mode effects remain part of the assertion.
+
+Review follow-up: **63 passed, 0 failed, 0 skipped** across logical-line selection
+and the October terminal regressions. The bounded-history cursor tests exercise
+one-row and multi-row screens with both zero and retained history, and verify the
+cursor's style and OSC 8 hyperlink after page pruning and continued scrolling.
+They also check native grid references directly; this exposed the native adapter's
+zero-history coordinate projection issue, fixed in its companion change.
+
+The existing long-line allocation test initially measured **72 bytes per query**
+in the managed path. Default whitespace no longer materializes a constant span
+through `RuntimeHelpers.CreateSpan`; a direct scalar predicate preserves NUL,
+space, and tab handling. The unchanged 20-query measurement now reports **0 bytes**.
+
+Metadata failure and grapheme-pressure follow-up: **70 passed, 0 failed, 0 skipped**.
+The previous scalar-by-scalar transfer test now verifies successful whole-suffix
+installation without scratch fragmentation. When a full destination page refuses
+the whole suffix, the source has already been cleared, while the destination tail
+and cursor advance remain untouched. Retained COW owners keep their original
+graphemes and metadata usage through both success and refusal checkpoints.
+
+Independent snapshot review confirmed page-relative placement ancestry, pending
+payload tickets, bounded malformed-record handling, and current-frame/viewport
+payload priority against the new upstream encoder. The payload writer emits visible
+frames after READY, history image pixels beside their page, and inactive/unplaced
+pixels after history; companion snapshot tests verify the exact ordering.
