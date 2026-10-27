@@ -24,6 +24,22 @@ shared-memory image loader remains available in portable builds. Linux also
 links librt explicitly for the older glibc shared-memory symbols. This uses
 the upstream loader and does not add a source overlay.
 
+Linux GNU builds default to glibc 2.28 when the caller has not supplied a
+version, including builds through the scripts, CI, and release workflow.
+An explicit version such as `-Dtarget=x86_64-linux-gnu.2.34` remains unchanged;
+other ABIs and operating systems retain their upstream target selection.
+The October 27 ELF comparison used the exact `d54e3a46` Linux x64 CI artifact:
+its VT library had no dynamic libc dependency, but shared-memory input was
+unsupported. Linking libc with Zig's unconstrained GNU default introduced
+`log`/`exp` imports requiring glibc 2.29. The normalized build instead imports
+those functions and `shm_open`/`shm_unlink` at glibc 2.2.5, with a maximum
+required symbol version of 2.27, so it runs on glibc 2.28 distributions.
+The explicit librt dependency supplies shared memory on glibc before 2.34.
+Both default x64 and ARM64 outputs match their explicit glibc 2.28 builds
+byte-for-byte; the ARM64 output also requires at most 2.27. An explicit
+glibc 2.34 build retains `shm_open`/`shm_unlink` at version 2.34, verifying
+that caller overrides are honored.
+
 ## Reviewed correctness overlays
 
 The generated source copy applies the corrections below to pinned upstream

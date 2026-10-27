@@ -3,7 +3,17 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+    // Keep default GNU packages compatible with glibc 2.28 distributions.
+    // Zig's current GNU default can select newer versioned libm symbols once
+    // libc is linked. Explicit caller-selected versions remain authoritative.
+    if (target.result.os.tag == .linux and target.result.abi.isGnu() and
+        target.query.glibc_version == null)
+    {
+        var query = target.query;
+        query.glibc_version = .{ .major = 2, .minor = 28, .patch = 0 };
+        target = b.resolveTargetQuery(query);
+    }
     const optimize = b.standardOptimizeOption(.{});
     const simd = b.option(bool, "simd", "Enable upstream SIMD implementation") orelse true;
     const ghostty = b.dependency("ghostty", .{
