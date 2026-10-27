@@ -38,9 +38,10 @@ The October 2026 dependency review retains these compatibility constraints:
   native overlays and generated ABI checks. Its build requires Zig 0.17.0 exactly;
   updating the toolchain or upstream development commit requires a coordinated
   native/managed ABI and terminal behavior review.
-- VitePress remains on its latest stable 1.6.4 release. The npm overrides update
-  Vite 7 and its Vue plugin together so their peer ranges match. Vite 8 uses
-  Rolldown, which rejects VitePress 1.6.4's bundle mutation during generation.
+- The documentation dependencies merged from `main` use VitePress
+  2.0.0-alpha.20 with the Vite 8.3.3 override. Keep the lockfile and overrides
+  together and validate the generated API documentation and site build when
+  updating either dependency.
 
 ReactiveUI 26 uses `Interaction.Handle` for task-based handling. Observable command
 pipelines use `WhenHandled` to keep interaction dispatch tied to subscription.
