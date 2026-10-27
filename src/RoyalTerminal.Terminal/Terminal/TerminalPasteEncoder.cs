@@ -19,7 +19,7 @@ public static class TerminalPasteEncoder
     public static bool IsSafe(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        return text.IndexOf('\n') < 0 && !text.Contains("\x1b[201~", StringComparison.Ordinal);
+        return text.AsSpan().IndexOfAny('\r', '\n') < 0 && !text.Contains("\x1b[201~", StringComparison.Ordinal);
     }
 
     /// <summary>
