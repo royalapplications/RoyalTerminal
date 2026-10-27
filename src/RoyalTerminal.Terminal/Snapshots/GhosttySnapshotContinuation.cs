@@ -39,8 +39,9 @@ internal static class GhosttySnapshotContinuation
                     0x9D => State.Osc,
                     _ => State.Invalid,
                 };
-                // Leaving an APC commits apc_end even if a new builder begins.
-                if (next == State.Invalid || (state == State.Apc && next != State.Apc)) return false;
+                // A C1 introduction that changes state starts a new operation.
+                // Export must discard its prefix and use the canonical ESC form.
+                if (next == State.Invalid || next != state) return false;
                 state = next;
                 continue;
             }

@@ -136,34 +136,17 @@ internal sealed partial class GhosttySnapshotPageTracker
                 state.Storage.Graphemes.Append(checked(Offset + column)) == GhosttySnapshotGraphemeAddResult.Success;
         }
 
-        // Terminal.print's widening wrap is not a row clone: within one page
-        // it moves the slice, while across pages it appends each old suffix
-        // before releasing the source. Replacement scratch and any growth must
-        // therefore occur with the source still live. The destination is the
-        // newly printed base (no suffix); callers commit both payloads next.
-        internal bool TryTransferGraphemeFrom(RowEdit source, int sourceColumn, int destinationColumn,
-            int suffixLength, out int copied)
+        // Screen.setGraphemes restores a captured suffix after a widening wrap.
+        // Unlike repeated append, it allocates the entire slice once and retries
+        // after growing the cursor page. The replaced source is already erased.
+        internal bool TrySetGraphemes(int column, int suffixLength)
         {
-            copied = suffixLength;
-            if (owner is not null && row.SnapshotAllocation is { MetadataOverflow: false } page)
-            {
-                if (source.Owner is null)
-                    owner.Overflow(ref page, state, Group(rows, page));
-                else if (ReferenceEquals(state, source.AllocatorState))
-                    state.Storage.Graphemes.Swap(checked(source.Offset + sourceColumn), checked(Offset + destinationColumn));
-                else
-                {
-                    int length = source.AllocatorState.Storage.Graphemes.SuffixLength(checked(source.Offset + sourceColumn));
-                    for (copied = 0; copied < length; copied++)
-                        if (!TryAppendGrapheme(destinationColumn)) return false;
-                }
-            }
-            // Even unrepresentable destinations keep rendering; the source's
-            // visible suffix is removed, so its independently tracked slice
-            // must be released too. Same-page moves have already removed it.
-            if (source.Owner is not null)
-                source.AllocatorState.Storage.Graphemes.Clear(checked(source.Offset + sourceColumn));
-            return true;
+            if (owner is null || row.SnapshotAllocation is not { MetadataOverflow: false } page) return true;
+            if (state.Storage.Graphemes.Set(checked(Offset + column), suffixLength) == GhosttySnapshotGraphemeAddResult.Success) return true;
+            List<TerminalRow> group = Group(rows, page);
+            return owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.GraphemeBytes,
+                layout, preserveOnFailure: true) &&
+                state.Storage.Graphemes.Set(checked(Offset + column), suffixLength) == GhosttySnapshotGraphemeAddResult.Success;
         }
 
         internal void Swap(int left, int right)

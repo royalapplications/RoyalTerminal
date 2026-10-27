@@ -26,6 +26,12 @@ internal static class ProgramStatusParser
             ReadOnlySpan<byte> key = Trim(pair[..equals]);
             if (key.Length > 16) return false;
             ReadOnlySpan<byte> value = Trim(pair[(equals + 1)..]);
+            // Validate every raw occurrence before alphabet filtering. A bad
+            // identifier must never turn a targeted clear into a root clear.
+            if (key.SequenceEqual("id"u8) && !IsId(value)) return false;
+            if (key.SequenceEqual("app"u8) && value.Length > 32 ||
+                key.SequenceEqual("title"u8) && value.Length > 256 ||
+                key.SequenceEqual("msg"u8) && value.Length > 2732) return false;
             if (key.IsEmpty || !IsValue(value)) continue;
             if (key.SequenceEqual("state"u8)) state = value;
             else if (key.SequenceEqual("id"u8))

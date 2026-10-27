@@ -8,7 +8,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-// Ghostty #14560 and OSC 7501 revision 0.3. WT/xterm.js have no matching
+// Ghostty #14560 and OSC 7501 revision 0.4. WT/xterm.js have no matching
 // status dispatcher; their cancellation/reset rules were compared separately.
 public sealed class TerminalProgramStatusTests
 {
@@ -28,7 +28,7 @@ public sealed class TerminalProgramStatusTests
             processor.Process(input.AsSpan(split));
             Assert.Equal(new(TerminalProgramStatusState.Blocked, "deploy/eu", TerminalProgramStatusKind.Permission,
                 42, "terraform", "EU", "Apply?"), Assert.Single(status.ProgramStatuses));
-            Assert.Equal(["\u001b]7501;?\a", "\u001b]7501;?\u001b\\"], replies.Select(Encoding.UTF8.GetString));
+            Assert.Equal(["\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\a", "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\u001b\\"], replies.Select(Encoding.UTF8.GetString));
         }
     }
 
@@ -92,6 +92,8 @@ public sealed class TerminalProgramStatusTests
         string[] invalid =
         [
             "msg=SGk=", "state=future", "state=clear:id=", "state=clear:id=a//b", "state=clear:id=/a",
+            "state=clear:id=a@b", "state=clear:id=a b", "state=clear:id=a%20b",
+            "state=clear:id=a@b:id=good", "state=done:app=@" + new string('a', 32),
             "state=clear:id=a/", "state=clear:id=a,b", "state=clear:id=a/b/c/d/e/f/g/h/i",
             "state=clear:id=" + new string('a', 33), "state=clear:id=bad//id:id=good",
             "state=done:msg=AA==", "state=done:msg=fw==", "state=done:msg=wp8=", "state=done:msg=/w==",

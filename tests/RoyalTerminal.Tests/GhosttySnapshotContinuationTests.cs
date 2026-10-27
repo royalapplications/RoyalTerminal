@@ -12,6 +12,14 @@ namespace RoyalTerminal.Tests;
 public sealed class GhosttySnapshotContinuationTests(ITestOutputHelper output)
 {
     [Theory]
+    [InlineData("\u001b_G\u009b1")]
+    [InlineData("\u001b[1\u009b2")]
+    [InlineData("\u001b[12\u009d2;title")]
+    [InlineData("\u001b\u0098")]
+    public void C1RestartsMustBeExportedAsMinimalEscapeSequences(string input)
+        => Assert.False(GhosttySnapshotContinuation.IsValid(Encoding.Latin1.GetBytes(input)));
+
+    [Theory]
     [InlineData("ground")]
     [InlineData("utf8")]
     [InlineData("esc")]

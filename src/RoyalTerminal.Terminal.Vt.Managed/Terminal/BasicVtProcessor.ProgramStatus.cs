@@ -31,7 +31,9 @@ public sealed partial class BasicVtProcessor : ITerminalProgramStatusSource
     {
         if (body.SequenceEqual("?"u8))
         {
-            ResponseCallback?.Invoke(bellTerminator ? "\u001b]7501;?\a"u8.ToArray() : "\u001b]7501;?\u001b\\"u8.ToArray());
+            ResponseCallback?.Invoke(bellTerminator
+                ? "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\a"u8.ToArray()
+                : "\u001b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\u001b\\"u8.ToArray());
             return;
         }
         if (ProgramStatusParser.TryParse(body, out TerminalProgramStatus? report) &&

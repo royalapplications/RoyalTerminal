@@ -15,20 +15,12 @@ public sealed partial class BasicVtProcessor
         ClearPreservedCellsForMutation(source);
         ClearRasterGraphicsForTextMutation(sourceRow, sourceColumn, 1);
         bool atScreenEdge = sourceColumn == _screen.Columns - 1;
-        bool hasSuffix = !string.IsNullOrEmpty(original.Grapheme);
-        TerminalCell spacer = original;
-        if (!hasSuffix) WriteCellFromPen(ref spacer, 0, 0);
-        spacer.Codepoint = 0;
-        spacer.Width = atScreenEdge ? (byte)0 : (byte)1;
-        spacer.IsWideSpacerHead = atScreenEdge;
-        if (hasSuffix)
-        {
-            // Keep the old suffix, style and allocation on this temporary
-            // spacer through scrolling. Native print does not erase/reclone it.
-            using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(source);
-            source[sourceColumn] = spacer;
-        }
-        else WriteStyledCell(source, sourceColumn, in spacer);
+        // Capture the immutable suffix before replacing the source. Scrolling
+        // can recycle its row, including the only row of an alternate screen.
+        string? suffixBeforeWrap = original.Grapheme;
+        WriteCellFromPen(source, sourceColumn, 0, atScreenEdge ? (byte)0 : (byte)1);
+        using (GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(source))
+            source[sourceColumn].IsWideSpacerHead = atScreenEdge;
         source.IsDirty = true;
 
         _delayedWrap = false;
@@ -39,32 +31,12 @@ public sealed partial class BasicVtProcessor
         ClearRasterGraphicsForTextMutation(_cursorRow, _scrollLeft, 2);
         WriteWidenedGraphemeCell(destination, _scrollLeft, original.Codepoint, 2);
 
-        // Like Ghostty's new_pin.up(1), resolve the source AFTER scrolling:
-        // row objects may have exchanged payloads, entered history or recycled.
-        // Do not resurrect the captured string if the source no longer exists.
-        int previous = _screen.GetAbsoluteRowForViewportRow(_cursorRow) - 1;
-        if (hasSuffix)
+        if (!string.IsNullOrEmpty(suffixBeforeWrap))
         {
-            // Index can be clamped at the physical bottom outside the
-            // scrolling region. Preserve the host's same-row wrap behavior
-            // rather than adopting unrelated metadata from the row above.
-            // A recycled row fails this payload identity check.
-            TerminalRow? surviving = ReferenceEquals(source, destination) && HasTransferredSpacer(source, sourceColumn, original.Grapheme!)
-                ? source : previous >= 0 ? _screen.GetRow(previous) : null;
-            if (surviving is not null && HasTransferredSpacer(surviving, sourceColumn, original.Grapheme!))
-            {
-                using GhosttySnapshotPageTracker.RowEdit sourceMetadata = _screen.EditSnapshotRowMetadata(surviving);
-                using GhosttySnapshotPageTracker.RowEdit destinationMetadata = _screen.EditSnapshotRowMetadata(destination);
-                bool transferred = destinationMetadata.TryTransferGraphemeFrom(sourceMetadata, sourceColumn, _scrollLeft,
-                    TerminalGraphemeStorage.SuffixLength(in original), out int copied);
-                destination[_scrollLeft].Grapheme = CopyGraphemeSuffix(destination.ReadOnlyCells[_scrollLeft].Codepoint,
-                    original.Grapheme!, copied);
-                // Native's try exits print immediately: retain the source and
-                // copied prefix, and do not write the tail or widening scalar.
-                if (!transferred) return;
-                surviving[sourceColumn].Grapheme = null;
-                surviving.IsDirty = true;
-            }
+            using GhosttySnapshotPageTracker.RowEdit metadata = _screen.EditSnapshotRowMetadata(destination);
+            if (!metadata.TrySetGraphemes(_scrollLeft, TerminalGraphemeStorage.SuffixLength(in original))) return;
+            destination[_scrollLeft].Grapheme = CopyGraphemeSuffix(
+                destination.ReadOnlyCells[_scrollLeft].Codepoint, suffixBeforeWrap);
         }
 
         // The tail uses the current pen and can replace the page. Complete it
@@ -92,19 +64,13 @@ public sealed partial class BasicVtProcessor
         destination.IsDirty = true;
     }
 
-    private static bool HasTransferredSpacer(TerminalRow? row, int column, string grapheme)
-        => row is not null && row.ReadOnlyCells[column].Codepoint == 0 && ReferenceEquals(row.ReadOnlyCells[column].Grapheme, grapheme);
-
-    private static string? CopyGraphemeSuffix(int codepoint, string original, int suffixLength)
+    private static string CopyGraphemeSuffix(int codepoint, string original)
     {
-        if (suffixLength == 0) return null;
+        if (Rune.GetRuneAt(original, 0).Value == codepoint) return original;
         int start = char.IsHighSurrogate(original[0]) ? 2 : 1;
-        int end = start;
-        for (int i = 0; i < suffixLength; i++) end += char.IsHighSurrogate(original[end]) ? 2 : 1;
-        if (end == original.Length && Rune.GetRuneAt(original, 0).Value == codepoint) return original;
         Span<char> scalar = stackalloc char[2];
         int length = new Rune(codepoint).EncodeToUtf16(scalar);
-        return string.Concat(scalar[..length], original.AsSpan(start, end - start));
+        return string.Concat(scalar[..length], original.AsSpan(start));
     }
 
     private void WriteWidenedGraphemeCell(TerminalRow row, int column, int codepoint, byte width)

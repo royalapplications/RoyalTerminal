@@ -218,7 +218,7 @@ public sealed class ManagedKittyGraphicsStreamingTests
     [InlineData(0x9C)]
     [InlineData(0x9B)]
     [InlineData(0x85)]
-    public void StreamingCommandCommitsOnceOnNativeApcExit(int exit)
+    public void StreamingCommandCommitsOnlyOnTerminatedNativeApcExit(int exit)
     {
         RequireNative();
         byte[] prefix = "\u001b_Ga=q,i=73,s=1,v=1;/wAA/w=="u8.ToArray();
@@ -234,7 +234,8 @@ public sealed class ManagedKittyGraphicsStreamingTests
             session.Processor.Process(suffix);
             native.Process(prefix);
             native.Process(suffix);
-            Assert.Equal("\u001b_Gi=73;OK\u001b\\", Assert.Single(expected));
+            if (exit is 0x1B or 0x9C) Assert.Equal("\u001b_Gi=73;OK\u001b\\", Assert.Single(expected));
+            else Assert.Empty(expected);
             Assert.Equal(expected.ToArray(), session.Replies.ToArray());
             Assert.Empty(session.Unknown);
             Assert.True(session.Processor.IsParserGround);

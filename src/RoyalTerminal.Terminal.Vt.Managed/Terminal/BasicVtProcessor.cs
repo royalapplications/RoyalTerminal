@@ -557,16 +557,22 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 continue;
             }
 
-            if (_state == ParserState.ApcString && b is 0x90 or 0x9B or 0x9D)
+            if (_state is not (ParserState.Ground or ParserState.OscString or ParserState.DcsString or ParserState.DcsIgnore) &&
+                b is 0x90 or 0x98 or 0x9B or 0x9D or 0x9E or 0x9F &&
+                _state != C1IntroducedState(b))
             {
-                ProcessApcString(b);
-                // Exiting APC can commit a Kitty command. Do not replay it;
-                // canonicalize the new C1 introduction into a ground-safe ESC.
+                if (_state == ParserState.ApcString) CompleteApc(terminated: false);
+                ProcessC1(b);
+                // A new C1 sequence replaces the old unfinished operation.
+                // Ground decodes raw C1 bytes as UTF-8, so export its ESC form.
                 ReadOnlySpan<byte> prefix = b switch
                 {
                     0x90 => "\u001bP"u8,
+                    0x98 => "\u001bX"u8,
                     0x9B => "\u001b["u8,
-                    _ => "\u001b]"u8,
+                    0x9D => "\u001b]"u8,
+                    0x9E => "\u001b^"u8,
+                    _ => "\u001b_"u8,
                 };
                 _continuation.Track(prefix, 0, ground: false);
                 continuationSegmentStart = i + 1;
@@ -1099,6 +1105,14 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             default: ProcessEscape((byte)(value - 0x40)); break;
         }
     }
+
+    private static ParserState C1IntroducedState(byte value) => value switch
+    {
+        0x90 => ParserState.DcsEntry,
+        0x9B => ParserState.CsiEntry,
+        0x9D => ParserState.OscString,
+        _ => ParserState.ApcString,
+    };
 
     #region Ground State
 
@@ -2719,6 +2733,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         try
         {
+            // ECMA-48 cancellation applies to every APC command, including
+            // recognized Kitty and glyph commands, before any side effects.
+            if (!terminated) return;
             if (_apcKittyRecognized)
             {
                 if (_apcKittyParser.TryComplete(out ManagedKittyGraphicsCommand? command))
@@ -3055,8 +3072,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         }
 
         // CAN/SUB discard OSC completely, matching Ghostty #14453 and xterm.
-        // Unknown APCs are suppressed on abort, but parsed Kitty commands still
-        // finalize, matching stream_terminal.apcEnd's protocol-specific policy.
+        // APC commands are likewise discarded before any protocol side effect.
         if (_state == ParserState.ApcString) CompleteApc(terminated: false);
         if (_state == ParserState.DcsString) HandleDcsString(aborted: true);
         AbortActiveControlString();
@@ -3261,6 +3277,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'G': // CHA — Cursor Horizontal Absolute
+            case '`': // HPA — Horizontal Position Absolute
                 _cursorCol = Math.Clamp(Math.Max(1, p0) - 1 + (_originMode ? _scrollLeft : 0), 0, _originMode ? RightMargin : _screen.Columns - 1);
                 break;
 
@@ -3313,11 +3330,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'e': // VPR — Vertical Position Relative
-                _cursorRow = Math.Min(_cursorRow <= _scrollBottom ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
+                _cursorRow = Math.Min(_originMode ? _scrollBottom : _screen.ViewportRows - 1, _cursorRow + Math.Max(1, p0));
                 break;
 
             case 'a': // HPR — Horizontal Position Relative
-                _cursorCol = Math.Min(CursorRightLimit, _cursorCol + Math.Max(1, p0));
+                _cursorCol = Math.Min(_originMode ? RightMargin : _screen.Columns - 1, _cursorCol + Math.Max(1, p0));
                 break;
 
             case 'm': // SGR — Select Graphic Rendition
@@ -3382,6 +3399,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 'n': // DSR — Device Status Report
+                if (_params.Count != 1) break;
                 if (p0 == 5)
                 {
                     // Operating status report — terminal OK
@@ -3472,7 +3490,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                         WindowResizeCallback?.Invoke(new(
                             (ushort)(_params.Count > 2 ? _params[2] : 0), (ushort)p1));
                 }
-                else HandleWindowReport(Math.Max(0, p0));
+                else if (_params.Count == 1) HandleWindowReport(Math.Max(0, p0));
                 break;
         }
     }
@@ -3487,6 +3505,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             case 'E': // CNL
             case 'F': // CPL
             case 'G': // CHA
+            case '`': // HPA
             case 'H': // CUP
             case 'f': // HVP
             case 'X': // ECH
@@ -3519,8 +3538,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             }
 
             case 18: // CSI 18 t — text area size in characters
+            case 19: // CSI 19 t — screen size; embedders report their text area.
             {
-                string response = $"\x1b[8;{_screen.ViewportRows};{_screen.Columns}t";
+                string response = $"\x1b[{(reportCode == 18 ? 8 : 9)};{_screen.ViewportRows};{_screen.Columns}t";
                 ResponseCallback?.Invoke(Encoding.ASCII.GetBytes(response));
                 break;
             }
@@ -3533,13 +3553,18 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
     private void HandleDecDeviceStatusQuery()
     {
-        if (_params.Count == 0)
+        if (_params.Count != 1)
         {
             return;
         }
 
         switch (_params[0])
         {
+            case 6: // DECXCPR — origin-relative cursor position, page 1.
+                int row = Math.Max(0, _cursorRow - (_originMode ? _scrollTop : 0));
+                int column = Math.Max(0, _cursorCol - (_originMode ? _scrollLeft : 0));
+                ResponseCallback?.Invoke(Encoding.ASCII.GetBytes($"\x1b[?{row + 1};{column + 1};1R"));
+                break;
             case 996: // Report current color scheme.
                 EmitColorSchemeReport();
                 break;
@@ -3606,6 +3631,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     {
         return mode switch
         {
+            1 or 5 or 7 or 10 or 11 or 13 or 14 or 15 or 16 or 17 or 18 or 19 => 4,
             2 => _keyboardLocked ? 1 : 2,
             4 => _insertMode ? 1 : 2,
             12 => _sendReceiveMode ? 1 : 2,
@@ -4233,8 +4259,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         _screen.InvalidateAll();
     }
 
-    private bool ShouldScrollOnEraseDisplay() => !_inAltScreen && (ScrollOnEraseInDisplay ||
-        GetActiveRow(_screen.ViewportRows - 1).SemanticPrompt != TerminalSemanticPrompt.None);
+    private bool ShouldScrollOnEraseDisplay()
+    {
+        if (_inAltScreen) return false;
+        if (ScrollOnEraseInDisplay) return true;
+        // Blank rows below the prompt provide no evidence of command output.
+        // Follow Ghostty's reverse search for the last prompt or text row.
+        for (int index = _screen.ViewportRows - 1; index >= 0; index--)
+        {
+            TerminalRow row = GetActiveRow(index);
+            if (row.SemanticPrompt != TerminalSemanticPrompt.None) return true;
+            foreach (ref readonly TerminalCell cell in row.ReadOnlyCells)
+                if (cell.Codepoint != 0) return false;
+        }
+        return false;
+    }
 
     private void ScrollClearDisplay()
     {
@@ -4547,6 +4586,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         ResetHorizontalMargins();
         _charsets = new();
         _currentProtected = false;
+        ProtectionMode = CharacterProtectionMode.Off;
         SavedCursor = null;
         _statusDisplay = 0;
         ModifyOtherKeys2 = false;

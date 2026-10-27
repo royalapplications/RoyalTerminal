@@ -11,17 +11,14 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-// Reference decision: Ghostty Terminal.print's .wide branch / Page.moveGrapheme
-// define transfer order and native allocation pressure. xterm.js InputHandler.print
-// likewise moves the old cluster before adding the widening scalar, but copies
-// cells/attributes; WT TextBuffer/ROW store row text and pad overflowing wide cells.
-// Neither supplies Ghostty's same-page ownership or scalar cross-page allocator.
-// Follow Ghostty: preserve the departure spacer's pen, print with the current pen,
-// resolve the surviving previous row after scrolling, transfer, write tail, append.
+// Reference decision: Ghostty #14552 captures suffixes before erasing the
+// departure spacer and restores them in one allocation after wrapping. xterm.js
+// similarly retains cluster text across wrapping; WT stores complete row text.
+// Follow Ghostty's current pen and one-shot allocation/growth order for parity.
 public sealed class ManagedGraphemeWrapTransferTests
 {
     [Fact]
-    public void SamePageMoveKeepsTheOldSliceChargedUntilTheFinalAppend()
+    public void SamePageCaptureReallocatesTheSuffixBeforeTheFinalAppend()
     {
         TerminalScreen screen = Screen();
         TerminalRow source = screen.GetViewportRow(0);
@@ -50,7 +47,7 @@ public sealed class ManagedGraphemeWrapTransferTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void CrossPageTransferAppendsScalarsBeforeClearingTheTail(bool occupiedTail)
+    public void CrossPageCaptureSetsTheWholeSuffixBeforeClearingTheTail(bool occupiedTail)
     {
         TerminalScreen screen = Screen(separatePages: true);
         TerminalRow source = screen.GetViewportRow(0), destination = screen.GetViewportRow(1);
@@ -64,9 +61,9 @@ public sealed class ManagedGraphemeWrapTransferTests
 
         Process(processor, "\u2764");
 
-        // Scalar transfer's 61st suffix needs the 240-byte old slice AND a
-        // 256-byte replacement. It must grow even if the tail is erased later.
-        Assert.True(destination.SnapshotAllocation!.Capacity.GraphemeBytes > 1024);
+        // One-shot set needs only the final 256-byte slice, avoiding the old
+        // repeated-append scratch peak even before the tail is erased.
+        Assert.Equal(1024U, destination.SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal(1024U, source.SnapshotAllocation!.Capacity.GraphemeBytes);
         Assert.Equal((0UL, 0UL), Usage(screen, source));
         Assert.Equal(occupiedTail ? (3UL, 544UL) : (4UL, 800UL), Usage(screen, destination));
@@ -82,7 +79,7 @@ public sealed class ManagedGraphemeWrapTransferTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public void ScrollResolvesTheSurvivingPayloadRatherThanTheOldRowObject(bool tracked, bool margins)
+    public void ScrollRestoresTheCapturedSuffixAfterRowsMove(bool tracked, bool margins)
     {
         TerminalScreen screen = tracked ? Screen(rows: 3) : new(8, 3, 10);
         using BasicVtProcessor processor = new(screen);
@@ -122,7 +119,7 @@ public sealed class ManagedGraphemeWrapTransferTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ARecycledOnlyRowDoesNotResurrectItsOldSuffix(bool tracked)
+    public void ARecycledOnlyRowRetainsTheCapturedSuffix(bool tracked)
     {
         TerminalScreen screen = tracked ? Screen(rows: 1) : new(8, 1, 0);
         screen.ScrollbackLimit = 0;
@@ -131,7 +128,7 @@ public sealed class ManagedGraphemeWrapTransferTests
         TerminalScreen retained = screen.CreateStateCopy();
         Process(processor, "\u2764");
         Assert.Equal(1, screen.TotalRows);
-        Assert.Equal("\u263a\u2764", screen.GetViewportRow(0).ReadOnlyCells[0].Grapheme);
+        Assert.Equal(Prefix(1) + "\u2764", screen.GetViewportRow(0).ReadOnlyCells[0].Grapheme);
         Assert.Equal(Prefix(1), retained.GetViewportRow(0).ReadOnlyCells[7].Grapheme);
         if (tracked) Assert.Equal((1UL, 16UL), Usage(screen, screen.GetViewportRow(0)));
     }
@@ -139,9 +136,8 @@ public sealed class ManagedGraphemeWrapTransferTests
     [Fact]
     public void ClampedIndexKeepsSameRowTransferWithoutStealingThePrecedingRow()
     {
-        // The host already supports wrapping at the physical bottom below the
-        // scroll region. Ghostty's unconditional up(1) is not a valid source in
-        // that case; preserve this host behavior with a surviving-spacer guard.
+        // A wrap below the scroll region can remain on the same physical row.
+        // Capturing before the write avoids reading an unrelated row above it.
         TerminalScreen screen = Screen(rows: 3);
         using BasicVtProcessor processor = new(screen);
         Process(processor, "\u001b[?2027h\u001b[2;8HA\u0301\u001b[1;2r\u001b[3;8H" + Prefix(1));
@@ -166,7 +162,7 @@ public sealed class ManagedGraphemeWrapTransferTests
     }
 
     [Fact]
-    public void DepartureSpacerRetainsItsPenWhileTheNewBaseAndTailUseTheCurrentPen()
+    public void DepartureSpacerAndNewBaseAndTailUseTheCurrentPen()
     {
         TerminalScreen screen = Screen();
         using BasicVtProcessor processor = new(screen);
@@ -174,9 +170,9 @@ public sealed class ManagedGraphemeWrapTransferTests
         TerminalCell original = screen.GetViewportRow(0).ReadOnlyCells[7];
         Process(processor, "\u001b[0;3m\u001b[0\"q\u001b]8;;https://new.example\u001b\\\u2764");
         TerminalCell spacer = screen.GetViewportRow(0).ReadOnlyCells[7];
-        Assert.Equal(original.Attributes, spacer.Attributes);
-        Assert.Equal(original.HyperlinkId, spacer.HyperlinkId);
-        Assert.True(spacer.IsProtected);
+        Assert.Equal(CellAttributes.Italic, spacer.Attributes);
+        Assert.NotEqual(original.HyperlinkId, spacer.HyperlinkId);
+        Assert.False(spacer.IsProtected);
         for (int col = 0; col < 2; col++)
         {
             TerminalCell cell = screen.GetViewportRow(1).ReadOnlyCells[col];
