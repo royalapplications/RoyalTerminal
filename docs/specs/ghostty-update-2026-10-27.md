@@ -25,6 +25,10 @@ not test results. This report records the actual implementation and validation.
   overlays were removed. Retained overlays remain hash- and fragment-checked.
   POSIX builds explicitly link libc independently of SIMD; Linux also links
   librt so the upstream shared-memory loader is available in portable packages.
+  Linux GNU targets default to glibc 2.28 when the caller leaves the version
+  unspecified; explicit caller-selected versions remain authoritative.
+  Generated static pkg-config metadata names the installed archive and includes
+  its POSIX system-library dependencies while preserving upstream fields.
 - History erasure removes Kitty placements anchored in deleted rows and their
   relative descendants before moving surviving anchors. Pixel data remains
   reusable. The former history-pin restore scratch is no longer needed.
@@ -105,6 +109,13 @@ buttons, so no additional OS event mapping is inferred from that fix.
   probe through the official C API returned `OK` and verified unlinking for
   both leading-slash and non-leading-slash names. The temporary read-only VM
   share was removed and the VM restored to its original suspended state.
+  The exact normalized ARM64 library passed the same live probe. Default x64
+  and ARM64 GNU builds match explicit glibc 2.28 outputs byte-for-byte, with
+  maximum required GLIBC symbol version 2.27; an explicit 2.34 build retains
+  its requested symbol versions.
+  Both Linux architectures also link a C consumer using only the emitted static
+  pkg-config flags. Three metadata transformation tests and the native history
+  suite pass; the corrected metadata installs after upstream's files.
 - Native integration: 302 passed; bounded history contracts: 45 passed, both
   requiring native libraries with zero skips. Generated ABI audit covers 187 types,
   31 callbacks and 205 entry points.
