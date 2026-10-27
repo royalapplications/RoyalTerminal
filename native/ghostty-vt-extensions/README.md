@@ -40,6 +40,14 @@ byte-for-byte; the ARM64 output also requires at most 2.27. An explicit
 glibc 2.34 build retains `shm_open`/`shm_unlink` at version 2.34, verifying
 that caller overrides are honored.
 
+Linux pkg-config descriptions retain upstream fields, then receive a build-time
+correction after upstream installation: the static package names the installed
+`libghostty-vt-static.a`, and both packages list `-lrt -lm -lc` as private link
+dependencies. Existing private dependencies are retained without duplicates.
+`zig build test-pkg-config` tests this transformation; `test-history` includes
+those checks. Linux x64 and ARM64 C consumers also link successfully using only
+the flags emitted by the corrected static package description.
+
 ## Reviewed correctness overlays
 
 The generated source copy applies the corrections below to pinned upstream

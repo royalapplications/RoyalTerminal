@@ -277,6 +277,8 @@ pub fn build(b: *std.Build) !void {
     // bundling, deployment targets and libSystem compatibility workarounds.
     // Every already-created upstream artifact references this same module.
     b.getInstallStep().dependOn(ghostty.builder.getInstallStep());
+    if (target.result.os.tag == .linux and !target.result.abi.isAndroid())
+        try installLinuxPkgConfig(b, ghostty.builder.getInstallStep());
     b.installFile("include/royalterminal_ghostty_vt.h", "include/royalterminal_ghostty_vt.h");
 
     const static_step = b.step("static", "Build the static library including extensions");
@@ -284,7 +286,42 @@ pub fn build(b: *std.Build) !void {
 
     const history_tests = b.addTest(.{ .root_module = module, .filters = &.{"Royal history"} });
     const history_run = b.addRunArtifact(history_tests);
-    b.step("test-history", "Test bounded-history metadata and row references").dependOn(&history_run.step);
+    const history_step = b.step("test-history", "Test bounded-history metadata and row references");
+    history_step.dependOn(&history_run.step);
+
+    const metadata_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/pkg_config.zig"),
+        .target = b.graph.host,
+    }) });
+    const metadata_run = b.addRunArtifact(metadata_tests);
+    b.step("test-pkg-config", "Test Linux package metadata correction").dependOn(&metadata_run.step);
+    history_step.dependOn(&metadata_run.step);
+}
+
+fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void {
+    const generator = b.addExecutable(.{
+        .name = "royal-pkg-config",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/pkg_config.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    var found: usize = 0;
+    for (upstream_install.dependencies.items) |step| {
+        const original = step.cast(std.Build.Step.InstallFile) orelse continue;
+        const is_static = std.mem.eql(u8, original.dest_rel_path, "share/pkgconfig/libghostty-vt-static.pc");
+        if (!is_static and !std.mem.eql(u8, original.dest_rel_path, "share/pkgconfig/libghostty-vt.pc")) continue;
+        const run = b.addRunArtifact(generator);
+        run.addFileArg(original.source);
+        run.addArg(if (is_static) "static" else "shared");
+        const install = b.addInstallFileWithDir(run.captureStdOut(.{}), .prefix, original.dest_rel_path);
+        // Retain every upstream field and finish its installation first, then
+        // replace only the two package descriptions with corrected link flags.
+        install.step.dependOn(upstream_install);
+        b.getInstallStep().dependOn(&install.step);
+        found += 1;
+    }
+    if (found != 2) return error.MissingUpstreamPkgConfigFiles;
 }
 
 const Overlay = struct {
