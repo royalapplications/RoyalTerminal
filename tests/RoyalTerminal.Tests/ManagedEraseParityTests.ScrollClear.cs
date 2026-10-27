@@ -100,19 +100,32 @@ public sealed partial class ManagedEraseParityTests
         for (int iteration = 0; iteration < pageRows + 3; iteration++)
         {
             if (held) managed.Processor.Process("\u001b[?2026h"u8);
-            native.Write("\u001b[3;1HQ\u001b[1;4H\u001b[22J"u8);
-            managed.Processor.Process("\u001b[3;1HQ\u001b[1;4H\u001b[22J"u8);
+            native.Write("\u001b[3;1HQ\u001b[1;4H"u8);
+            managed.Processor.Process("\u001b[3;1HQ\u001b[1;4H"u8);
+            using GhosttySnapshotStateReader beforeReader = new(managed.Processor.GetBinarySnapshot(), new());
+            GhosttySnapshotScreenState before = beforeReader.ReadReady().Screens[1].State;
+            native.Write("\u001b[22J"u8);
+            managed.Processor.Process("\u001b[22J"u8);
             if (held) managed.Processor.Process("\u001b[?2026l"u8);
             int count = managed.Screen.TotalRows;
             prunedCursorPage = previousRows > pageRows && count < 10;
-            if (prunedCursorPage) break;
+            if (prunedCursorPage)
+            {
+                using GhosttySnapshotStateReader afterReader = new(managed.Processor.GetBinarySnapshot(), new());
+                GhosttySnapshotScreenState after = afterReader.ReadReady().Screens[1].State;
+                Assert.Equal(before.HyperlinkImplicitCounter, after.HyperlinkImplicitCounter);
+                Assert.True(before.TryGetHyperlink(out GhosttySnapshotHyperlink oldLink));
+                Assert.True(after.TryGetHyperlink(out GhosttySnapshotHyperlink newLink));
+                Assert.Equal(oldLink.ImplicitId, newLink.ImplicitId);
+                break;
+            }
             previousRows = count;
         }
         Assert.True(prunedCursorPage);
 
         // The hash-checked native scroll-clear overlay repairs page-local IDs
         // after PageList remaps a pruned cursor pin. Both engines must retain
-        // owned style/link references and restart the same implicit identity.
+        // owned style/link references and preserve the same implicit identity.
         native.Write("Z"u8);
         managed.Processor.Process("Z"u8);
         AssertNative(native, managed, "write after cursor-page pruning");

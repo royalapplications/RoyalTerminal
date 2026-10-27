@@ -23,6 +23,43 @@ internal sealed partial class GhosttySnapshotPageTracker
         if (key == 0) _primaryLinkToken = 0; else _alternateLinkToken = 0;
     }
 
+    internal void RestorePrunedCursor(TerminalScreen screen, TerminalRowBuffer rows, int key,
+        GhosttySnapshotStyle pen, GhosttySnapshotAllocation layout)
+    {
+        GhosttySnapshotPageAllocation? previous = key == 0 ? _primaryCursor : _alternateCursor;
+        if (previous is null || rows.Count == 0) return;
+        // Usually the cursor is near the tail. Only a removed page requires
+        // walking all remaining rows, which are already bounded by pruning.
+        for (int index = rows.Count - 1; index >= 0; index--)
+            if (ReferenceEquals(rows[index].SnapshotAllocation, previous)) return;
+        if (rows[0].SnapshotAllocation is not { MetadataOverflow: false } page) return;
+
+        // PageList moves a pruned pin onto the first survivor. Ghostty's
+        // cursorPageReplaced restores its existing ID there without growing
+        // metadata or consuming an implicit ID. cursorReload may subsequently
+        // make a genuine page transition to the active area.
+        int token = CursorHyperlinkToken(key, 0);
+        using PageRowsLease lease = RentGroup(rows, page);
+        State state = Writable(page, lease.Rows);
+        if (!Synchronize(ref page, state, lease.Rows, layout, screen)) return;
+        if (state.Storage.Styles.ChangeCursor(pen) != GhosttySnapshotSetAddResult.Success)
+            _cursorStyleDrops |= (byte)(1 << key);
+        byte[]? encoded = screen.SnapshotHyperlinkEncoding(token);
+        if (encoded is null || state.Storage.Hyperlinks.StartCursor(encoded, encoded) != GhosttySnapshotHyperlinkAddResult.Success)
+            token = 0;
+        _pages.Remove(previous);
+        if (key == 0)
+        {
+            _primaryCursor = _primaryLinkPage = page;
+            _primaryLinkToken = token;
+        }
+        else
+        {
+            _alternateCursor = _alternateLinkPage = page;
+            _alternateLinkToken = token;
+        }
+    }
+
     internal int ChangeHyperlink(TerminalScreen screen, TerminalRowBuffer rows, int key, TerminalRow row,
         int token, ref uint counter, bool restart, GhosttySnapshotAllocation layout)
     {

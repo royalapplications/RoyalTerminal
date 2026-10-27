@@ -4285,6 +4285,7 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ScrollClearDisplay()
     {
         int movedRows = _screen.MoveViewportToScrollbackAndClearCore(clearActiveRows: false);
+        _screen.RestorePrunedSnapshotCursor(_inAltScreen ? 1 : 0, CaptureSnapshotPen());
         // Screen.cursorReload retains a pin still in the active area. Only a
         // pin that moved into history is relocated to the active top-left.
         if (_cursorRow < movedRows)

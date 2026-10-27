@@ -164,3 +164,12 @@ payload tickets, bounded malformed-record handling, and current-frame/viewport
 payload priority against the new upstream encoder. The payload writer emits visible
 frames after READY, history image pixels beside their page, and inactive/unplaced
 pixels after history; companion snapshot tests verify the exact ordering.
+
+The full unit gate exposed another cursor-page lifetime difference in alternate
+ED22 after snapshot restore. Ghostty's `cursorPageReplaced` restores the existing
+implicit hyperlink identity on the first surviving page without consuming a new
+ID or growing metadata. A later `cursorReload` can still make an ordinary page
+transition, which does consume an ID. Managed scroll-clear now performs those
+steps separately, with the same style/link degradation and COW ownership rules.
+The focused regression explicitly checks unchanged ID and counter when pruning
+lands directly on the active page, including synchronized output publication.
