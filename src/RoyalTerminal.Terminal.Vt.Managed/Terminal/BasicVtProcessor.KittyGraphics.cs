@@ -168,6 +168,11 @@ public sealed partial class BasicVtProcessor
             error = "ENOENT: image not found";
             if (animationImage is null || animationImage.Generation != _kittyStore.LoadingTargetGeneration)
                 return false;
+            if (animationImage.Animation.RootPixels.IsPending)
+            {
+                error = "EINVAL: image data incomplete";
+                return false;
+            }
         }
         if (!loader.TryComplete(out ManagedKittyImagePixels? decoded, out error)) return false;
         if (animationImage is not null)
@@ -210,6 +215,7 @@ public sealed partial class BasicVtProcessor
         if (responseCommand.ImageId == 0 && responseCommand.ImageNumber == 0) respond = false;
         if (!_kittyStore.TryAddImage(_screen, imageId, responseCommand.ImageNumber,
                 decoded, transient: (responseCommand.Get('N') & 1) != 0, out error, KittyStoreAllocationCheckpoint)) return false;
+        _kittyStore.Find(imageId)!.ImplicitId = responseCommand.ImageId == 0 && responseCommand.ImageNumber == 0;
         responseId = imageId;
         if (responseCommand.Action == 'T')
             return TryDisplayKittyImage(responseCommand, out responseId, out error, imageId);

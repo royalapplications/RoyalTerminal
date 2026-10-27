@@ -63,6 +63,34 @@ The tests assert allocation accounting and retained-copy independence.
 
 ## Remaining delta ownership
 
+### Pending Kitty pixels and stable transmissions
+
+`eea7beaf7` adds pending animation canvases and an image transmission stamp that
+survives displayed-frame changes. Managed images now reserve their full decoded
+storage before pixel records arrive, retain RGB/RGBA/gray-alpha/gray wire formats,
+and accept late bytes only through a ticket for the exact resident transmission.
+Root completion preserves eviction age; completing a displayed animation frame
+updates its content generation. Replacements and eviction invalidate old tickets.
+
+Incomplete displayed frames are omitted from publication, and playback waits
+until every frame is complete. Deleting a pending frame releases its reservation;
+deleting the root can promote another pending frame. Composition and frame edits
+reject missing pixels without changing gaps or reserved bytes. Snapshot copies
+share immutable pixel owners while keeping completion and playback state separate.
+The playback check uses a maintained pending count, adding no per-tick scan or
+allocation. The wire codec and processor snapshot import/export are the companion
+snapshot tranche.
+
+The closest references reviewed are
+[xterm.js ImageStorage](https://github.com/xtermjs/xterm.js/blob/master/addons/addon-image/src/ImageStorage.ts)
+for image ownership/eviction and
+[Windows Terminal ImageSlice](https://github.com/microsoft/terminal/blob/main/src/buffer/out/ImageSlice.hpp)
+for pixel/revision ownership. Neither provides Ghostty's pending animation snapshot
+contract; RoyalTerminal follows Ghostty here. Ordinary chunked Kitty `a=f` loads
+still use the native executor's generation check, distinct from snapshot tickets.
+
+### Integration work
+
 These entries are explicitly tracked by the parent integration work, not declared
 complete merely because the native submodule contains them:
 
@@ -100,3 +128,7 @@ Formatter gate: **223 passed, 0 failed, 0 skipped** with required native enabled
 Tests replay native and managed exports into both engines and check empty versus
 text cells, background identity, links/IDs, pending wrap, blank-row geometry,
 selection boundaries, styles, and HTML behavior.
+
+Pending Kitty gate: **138 passed, 0 failed, 0 skipped** with required native
+enabled, covering pending pixel/ticket lifecycle, animation behavior and failures,
+immutable publication, pixel formats, and quota/allocation failure semantics.

@@ -104,11 +104,47 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         catch (OutOfMemoryException) { return false; }
         if (!TryReserve(screen, storageBytes - oldBytes, id)) return false;
         if (existing is not null) RemoveImage(screen, id);
-        prepared.Generation = ++_generation;
+        prepared.Transmission = prepared.Generation = ++_generation;
         _images[id] = prepared;
         _storedBytes += storageBytes;
         error = "OK";
         return true;
+    }
+
+    internal bool TryAddPendingImage(TerminalScreen screen, uint id, uint number, ManagedKittyImagePixels pending,
+        bool transient, out PendingImage ticket, out string error)
+    {
+        ticket = default;
+        if (!pending.IsPending) throw new ArgumentException("Pixels must be pending.", nameof(pending));
+        if (!TryAddImage(screen, id, number, pending, transient, out error)) return false;
+        ticket = new(id, _images[id].Transmission);
+        return true;
+    }
+
+    /// <summary>Attaches late snapshot pixels only to the exact transmission that reserved their storage.</summary>
+    internal readonly record struct PendingImage(uint Id, ulong Transmission)
+    {
+        internal bool Complete(ManagedKittyGraphicsStore store, byte[] pixels)
+        {
+            Image? image = store.Find(Id);
+            if (image is null || image.Transmission != Transmission ||
+                !image.Animation.TryCompletePendingFrame(1, pixels)) return false;
+            // Root completion preserves native eviction age. Publication uses
+            // the store revision, independently of the displayed-frame stamp.
+            store._generation++;
+            return true;
+        }
+
+        internal bool CompleteFrame(ManagedKittyGraphicsStore store, uint number, byte[] pixels)
+        {
+            if (number < 2) return false;
+            Image? image = store.Find(Id);
+            if (image is null || image.Transmission != Transmission ||
+                !image.Animation.TryCompletePendingFrame(number, pixels)) return false;
+            if (number == image.Animation.CurrentFrameNumber) store.MarkContentChanged(image);
+            else store._generation++;
+            return true;
+        }
     }
 
     internal bool TryReserveAnimation(TerminalScreen screen, Image image, long additionalBytes)
@@ -344,13 +380,18 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
         internal uint Id { get; } = id;
         internal uint Number { get; } = number;
         internal ulong Generation { get; set; } = generation;
-        internal ManagedKittyAnimation Animation { get; } = animation ?? new(decoded);
+        internal ulong Transmission { get; set; } = generation;
+        internal bool Transient { get; } = transient;
+        internal bool ImplicitId { get; set; }
+        internal ManagedKittyAnimation Animation { get; set; } = animation ?? new(decoded);
         internal long QuotaBytes { get; set; } = quotaBytes;
         internal int PlacementCount { get; set; }
-        internal int EvictionPriority => (transient ? 0 : 1) + (PlacementCount > 0 ? 2 : 0);
-        internal Image CreateStateCopy() => new(Id, Number, Animation.CurrentPixels, QuotaBytes, transient, Generation, Animation.CreateStateCopy())
+        internal int EvictionPriority => (Transient ? 0 : 1) + (PlacementCount > 0 ? 2 : 0);
+        internal Image CreateStateCopy() => new(Id, Number, Animation.CurrentPixels, QuotaBytes, Transient, Generation, Animation.CreateStateCopy())
         {
             PlacementCount = PlacementCount,
+            Transmission = Transmission,
+            ImplicitId = ImplicitId,
         };
         internal TerminalKittyImageSource Source => Animation.CurrentPixels.GetSource(unchecked((int)Id));
     }
