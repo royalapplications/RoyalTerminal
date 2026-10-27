@@ -47,6 +47,11 @@ not test results. This report records the actual implementation and validation.
   Native coordinate mapping now accounts for hidden allocation rows when
   scrollback is disabled, preserving hyperlinks, selections, search and snapshots
   without exposing those rows as user scrollback.
+- Managed page pruning restores the cursor's existing implicit hyperlink ID
+  before any subsequent page movement. Zero-byte primary scrollback uses the
+  same non-growing LF/SU dispatch as the alternate screen; explicit scroll-clear
+  remains a separate operation. Both direct and synchronized-output paths are
+  checked against native behavior.
 - Native text-only refreshes reuse unchanged image scenes. At 128 placements,
   allocation falls from 10,304,000 to 64,000 bytes per 1,000 updates. Existing
   geometry projection is retained because the public unified iterator omits
@@ -107,6 +112,12 @@ buttons, so no additional OS event mapping is inferred from that fix.
   Release. The full Release solution builds with zero warnings and errors.
 - Final Kitty snapshot and page-codec checks: 58 passed with zero skips,
   including placement indexing and native/managed interoperability.
+- All 220 local unit batches completed. Four pruning failures were corrected;
+  their two batches then passed all 65 tests. Aggregated unique results are
+  8,239 passed, zero failed and 16 pre-existing quarantined macOS/headless tests.
+  New zero-history/pruning coverage and related grapheme, graphics and allocation
+  checks passed a separate 439-test gate. The final solution build again had
+  zero warnings and errors.
 - All six native CI jobs passed at `847e6699` with the final native pin/toolchain.
   The documentation site builds with the merged VitePress 2/Vite 8 dependencies;
   the existing source-index fallback handles local XML documentation tool loading.
