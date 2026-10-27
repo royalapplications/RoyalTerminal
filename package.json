@@ -8,12 +8,11 @@
     "docs:preview": "vitepress preview docs"
   },
   "devDependencies": {
-    "vitepress": "1.6.4"
+    "vitepress": "2.0.0-alpha.20"
   },
   "overrides": {
-    "@vitejs/plugin-vue": "6.0.9",
-    "esbuild": "0.28.2",
-    "postcss": "8.5.28",
-    "vite": "7.3.6"
+    "postcss": "8.5.23",
+    "source-map-js": "1.2.2",
+    "vite": "8.3.3"
   }
 }
