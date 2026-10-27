@@ -4247,10 +4247,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 break;
 
             case 3: // Scrollback only
-                bool restoreImagePins = _kittyStore.PlacementCount > 0 &&
-                    _kittyStore.BeginHistoryErase(_screen, KittyStoreAllocationCheckpoint);
-                try { _screen.EraseActiveHistory(); }
-                finally { if (restoreImagePins) _kittyStore.EndMarginScroll(_screen); }
+                _kittyStore.EraseHistory(_screen);
+                _screen.EraseActiveHistory();
+                PublishKittyGraphics();
                 break;
 
             case 22: // Kitty extension: move viewport into scrollback and clear display

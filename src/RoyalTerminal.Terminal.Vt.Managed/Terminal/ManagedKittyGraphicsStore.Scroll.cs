@@ -30,22 +30,21 @@ internal sealed partial class ManagedKittyGraphicsStore
         }
     }
 
-    // ED3 uses PageList.eraseHistory, whose removed pins migrate to the
-    // first surviving page without becoming garbage (including whole-page
-    // erasure). Preserve this independently of generic host text anchors.
-    internal bool BeginHistoryErase(TerminalScreen screen,
-        Action<ManagedKittyStoreAllocation>? allocationCheckpoint = null)
+    // Remove anchors in erased rows before generic text-anchor tracking moves
+    // the remaining rows. Relative descendants are removed with their parent;
+    // image pixels remain available for a later placement (Ghostty #14831).
+    internal bool EraseHistory(TerminalScreen screen)
     {
-        _marginScrollRestores.Clear();
         int activeTop = Math.Max(0, screen.TotalRows - screen.ViewportRows);
         if (activeTop == 0) return false;
-        foreach (Placement placement in _placements.Values)
+        bool removed = false;
+        foreach ((PlacementKey key, Placement placement) in _placements)
         {
-            if (placement.Anchor is not { } anchor || !screen.TryResolveAnchor(anchor, out var origin)) continue;
-            int row = origin.Row - activeTop;
-            QueueScrollRestore(new(anchor, row < 0 ? 0 : origin.Column, Math.Max(0, row)), allocationCheckpoint);
+            if (placement.Anchor is { } anchor && screen.TryResolveAnchor(anchor, out var origin) && origin.Row < activeTop)
+                removed |= RemovePlacement(screen, key);
         }
-        return _marginScrollRestores.Count > 0;
+        if (removed) RemoveOrphans(screen);
+        return removed;
     }
 
     // Mirrors ImageStorage.scrollMarginsBegin/end. Record final positions before

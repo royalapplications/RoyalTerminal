@@ -185,7 +185,7 @@ public sealed class KittyPlacementLifecycleParityTests
     [InlineData(true, 1)]
     [InlineData(false, 600)]
     [InlineData(true, 600)]
-    public void ErasingHistoryMigratesRemovedPinsToOriginAndRetainsActivePins(bool native, int lines)
+    public void ErasingHistoryRemovesAnchoredParentsAndOrphansButRetainsActivePins(bool native, int lines)
     {
         using Session session = new(native, 2000);
         session.Write("\x1b[1;3H");
@@ -196,11 +196,15 @@ public sealed class KittyPlacementLifecycleParityTests
         session.Send("a=T,i=3,p=1,s=1,v=1,C=1;CQoLDA==");
         session.Write("\x1b[3J");
         TerminalKittyImagePlacement[] placements = session.Screen.GetKittyPlacements().ToArray();
-        Assert.Equal(3, placements.Length);
-        Assert.Equal((0, 0), (placements[0].ViewportColumn, placements[0].ViewportRow));
-        Assert.Equal((1, 1), (placements[1].ViewportColumn, placements[1].ViewportRow));
-        Assert.Equal((3, 3), (placements[2].ViewportColumn, placements[2].ViewportRow));
+        TerminalKittyImagePlacement active = Assert.Single(placements);
+        Assert.Equal(3, active.ImageId);
+        Assert.Equal((3, 3), (active.ViewportColumn, active.ViewportRow));
         Assert.Equal(5, session.TotalRows);
+        // Erasure removes placements, not reusable pixel payloads.
+        session.Send("a=p,i=1,p=2,C=1");
+        Assert.Equal("\x1b_Gi=1,p=2;OK\x1b\\", session.Replies[^1]);
+        session.Send("a=p,i=2,p=2,C=1");
+        Assert.Equal("\x1b_Gi=2,p=2;OK\x1b\\", session.Replies[^1]);
     }
 
     public static IEnumerable<object[]> MarginlessPinScrolls()
