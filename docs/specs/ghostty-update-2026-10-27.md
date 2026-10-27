@@ -23,6 +23,8 @@ not test results. This report records the actual implementation and validation.
   budgets, prompt scrolling, resize requests and animation ticks. The native
   build now uses Zig 0.17. Superseded resize/animation exports and continuation
   overlays were removed. Retained overlays remain hash- and fragment-checked.
+  POSIX builds explicitly link libc independently of SIMD; Linux also links
+  librt so the upstream shared-memory loader is available in portable packages.
 - History erasure removes Kitty placements anchored in deleted rows and their
   relative descendants before moving surviving anchors. Pixel data remains
   reusable. The former history-pin restore scratch is no longer needed.
@@ -97,6 +99,12 @@ buttons, so no additional OS event mapping is inferred from that fix.
 - macOS arm64 native build, native history tests and renderer unit tests passed
   with Zig 0.17. Linux x64 and Windows x64 GNU cross-builds passed; the Windows
   DLL passed AVX/VEX disassembly checks. MSVC builds use the Windows CI SDK.
+- Linux CI exposed missing libc linkage in the SIMD-disabled package: its
+  shared-memory query returned `unsupported medium`. The build configuration
+  repair passed x64/ARM64 cross-builds and export checks. A live Ubuntu ARM64
+  probe through the official C API returned `OK` and verified unlinking for
+  both leading-slash and non-leading-slash names. The temporary read-only VM
+  share was removed and the VM restored to its original suspended state.
 - Native integration: 302 passed; bounded history contracts: 45 passed, both
   requiring native libraries with zero skips. Generated ABI audit covers 187 types,
   31 callbacks and 205 entry points.

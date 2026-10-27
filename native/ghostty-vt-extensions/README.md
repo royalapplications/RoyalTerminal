@@ -19,6 +19,11 @@ baseline. This does not modify upstream files or change pixel formats; other
 platforms and explicitly AVX-enabled builds retain upstream acceleration.
 CI and release disassemble both Windows DLLs and reject AVX/VEX instructions.
 
+Darwin and Linux link libc independently of SIMD so Ghostty's POSIX
+shared-memory image loader remains available in portable builds. Linux also
+links librt explicitly for the older glibc shared-memory symbols. This uses
+the upstream loader and does not add a source overlay.
+
 ## Reviewed correctness overlays
 
 The generated source copy applies the corrections below to pinned upstream
