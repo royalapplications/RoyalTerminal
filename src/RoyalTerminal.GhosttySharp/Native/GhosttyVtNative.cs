@@ -499,7 +499,10 @@ public static partial class GhosttyVtNative
         /// <summary>Kitty drag-and-drop protocol command.</summary>
         KittyDragAndDropProtocol = 24,
         /// <summary>OSC 3008 context signal.</summary>
-        ContextSignal = 25,
+        /// <summary>OSC 3008 hierarchical context.</summary>
+        HierarchicalContext = 25,
+        /// <summary>Compatibility name for <see cref="HierarchicalContext"/>.</summary>
+        ContextSignal = HierarchicalContext,
         /// <summary>Kitty desktop-notification command.</summary>
         KittyDesktopNotification = 26,
         /// <summary>Unsupported OSC with retained bytes.</summary>

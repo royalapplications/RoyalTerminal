@@ -49,6 +49,10 @@ public static partial class GhosttyVtNative
         Overscan = 20,
         /// <summary>Requested overscan for the next update (GhosttyRenderStateOverscan).</summary>
         OverscanRequest = 21,
+        /// <summary>Populates a reusable image placement iterator.</summary>
+        ImageIterator = 22,
+        /// <summary>Equality-only generation of the entire image placement list.</summary>
+        ImagePlacementsGeneration = 23,
     }
 
     public enum GhosttyRenderStateOption : int

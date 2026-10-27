@@ -14,6 +14,8 @@ public static partial class GhosttyVtNative
         Bottom = 1,
         Delta = 2,
         Row = 3,
+        /// <summary>Move by semantic prompt boundaries.</summary>
+        DeltaPrompt = 4,
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 16)]
@@ -24,6 +26,10 @@ public static partial class GhosttyVtNative
 
         [FieldOffset(0)]
         public nuint Row;
+
+        /// <summary>Signed prompt count; positive moves toward newer prompts.</summary>
+        [FieldOffset(0)]
+        public nint DeltaPrompt;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -71,6 +77,13 @@ public static partial class GhosttyVtNative
                 },
             };
         }
+
+        /// <summary>Moves by prompt boundaries, clamping to the terminal ends.</summary>
+        public static GhosttyTerminalScrollViewport DeltaPrompts(nint delta) => new()
+        {
+            Tag = GhosttyTerminalScrollViewportTag.DeltaPrompt,
+            Value = new GhosttyTerminalScrollViewportValue { DeltaPrompt = delta },
+        };
     }
 
     public enum GhosttyTerminalCompressionMode : int
@@ -420,6 +433,8 @@ public static partial class GhosttyVtNative
         XtChecksumExtension = 45,
         /// <summary>OSC 7501 report callback; enables feature detection.</summary>
         ProgramStatus = 46,
+        /// <summary>Host callback for terminal-requested window resizing.</summary>
+        ResizeWindow = 47,
     }
 
     public enum GhosttyTerminalData : int
@@ -506,14 +521,6 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_vt_write")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial void TerminalVtWrite(nint terminal, byte* data, nuint len);
-
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_vt_write_until_ground")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe partial GhosttyResult TerminalVtWriteUntilGround(
-        nint terminal,
-        byte* data,
-        nuint length,
-        out nuint consumed);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_continuation_write")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

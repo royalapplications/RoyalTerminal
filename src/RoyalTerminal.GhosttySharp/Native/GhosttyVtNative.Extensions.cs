@@ -57,13 +57,13 @@ public static partial class GhosttyVtNative
         nint graphics, nint iterator, RoyalKittyPlacementMetadata* metadata);
 
     /// <summary>
-    /// Advances Kitty animation playback using a monotonic millisecond clock.
-    /// RoyalTerminal extension, compiled into the same library as upstream VT.
+    /// Advances Kitty animation playback using a monotonic millisecond clock
+    /// and returns the absolute time of the next frame in that same clock.
     /// </summary>
-    [LibraryImport(LibName, EntryPoint = "ghostty_royal_kitty_graphics_animation_tick")]
+    [LibraryImport(LibName, EntryPoint = "ghostty_kitty_graphics_animation_tick")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KittyGraphicsAnimationTick(
         nint graphics,
         ulong nowMilliseconds,
-        out ulong nextDelayMilliseconds);
+        out ulong nextMilliseconds);
 }

@@ -168,6 +168,14 @@ public sealed class GhosttySnapshotDecoder : IDisposable
     public bool GetCompressHistory()
         => GetValue<bool>(GhosttyVtNative.GhosttySnapshotDecoderData.CompressHistory);
 
+    /// <summary>Sets the restored image budget per screen; zero disables Kitty images.</summary>
+    public unsafe void SetKittyImageStorageLimit(ulong bytes)
+        => SetOption(GhosttyVtNative.GhosttySnapshotDecoderOption.KittyImageStorageLimit, &bytes);
+
+    /// <summary>Gets the restored image budget per screen in bytes.</summary>
+    public ulong GetKittyImageStorageLimit()
+        => GetValue<ulong>(GhosttyVtNative.GhosttySnapshotDecoderData.KittyImageStorageLimit);
+
     /// <summary>Decodes the renderable prefix and returns its caller-owned terminal.</summary>
     public GhosttyTerminal Ready()
     {
@@ -181,7 +189,8 @@ public sealed class GhosttySnapshotDecoder : IDisposable
         return result;
     }
 
-    /// <summary>Decodes one additional history page; returns false after FINISH.</summary>
+    /// <summary>Decodes one history page or image/frame payload; returns false after FINISH.
+    /// Read GetProgressKind before querying the corresponding page or image progress.</summary>
     public bool Next()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -230,7 +239,7 @@ public sealed class GhosttySnapshotDecoder : IDisposable
             ? value
             : null;
 
-    /// <summary>Gets the screen updated by the most recently decoded history page.</summary>
+    /// <summary>Gets the screen updated by the most recently decoded page or image payload.</summary>
     public GhosttyVtNative.GhosttyTerminalScreen? GetProgressScreen()
         => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressScreen,
             out GhosttyVtNative.GhosttyTerminalScreen value) ? value : null;
@@ -242,6 +251,39 @@ public sealed class GhosttySnapshotDecoder : IDisposable
     /// <summary>Gets the pages remaining in the current screen history sequence.</summary>
     public uint GetProgressRemaining()
         => GetValue<uint>(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressRemaining);
+
+    /// <summary>Gets the most recently decoded record kind, or null before a successful step/after FINISH.</summary>
+    public GhosttyVtNative.GhosttySnapshotDecoderProgressKind? GetProgressKind()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressKind,
+            out GhosttyVtNative.GhosttySnapshotDecoderProgressKind value) ? value : null;
+
+    /// <summary>Gets the image ID for an image step, otherwise null.</summary>
+    public uint? GetProgressImageId()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressImageId, out uint value) ? value : null;
+
+    /// <summary>Gets the one-based frame number for an image step, otherwise null.</summary>
+    public uint? GetProgressImageFrame()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressImageFrame, out uint value) ? value : null;
+
+    /// <summary>Gets pixel bytes applied by an image step, zero for a dropped image, or null for a page.</summary>
+    public nuint? GetProgressImageBytes()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.ProgressImageBytes, out nuint value) ? value : null;
+
+    /// <summary>Gets the primary image count declared at READY; pixels may still be pending.</summary>
+    public uint GetPrimaryKittyImages()
+        => GetValue<uint>(GhosttyVtNative.GhosttySnapshotDecoderData.KittyImagesPrimary);
+
+    /// <summary>Gets the alternate image count declared at READY, or null if that screen is absent.</summary>
+    public uint? GetAlternateKittyImages()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.KittyImagesAlternate, out uint value) ? value : null;
+
+    /// <summary>Gets the primary pixel bytes pending at READY, including payloads later dropped.</summary>
+    public ulong GetPrimaryKittyPendingBytes()
+        => GetValue<ulong>(GhosttyVtNative.GhosttySnapshotDecoderData.KittyPendingBytesPrimary);
+
+    /// <summary>Gets the alternate pixel bytes pending at READY, or null if that screen is absent.</summary>
+    public ulong? GetAlternateKittyPendingBytes()
+        => TryGetValue(GhosttyVtNative.GhosttySnapshotDecoderData.KittyPendingBytesAlternate, out ulong value) ? value : null;
 
     /// <inheritdoc />
     public void Dispose()

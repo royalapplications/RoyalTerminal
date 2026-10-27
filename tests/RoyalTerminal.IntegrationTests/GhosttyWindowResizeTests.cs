@@ -54,7 +54,6 @@ public sealed class GhosttyWindowResizeTests
         terminal.SetWindowResizeCallback(null);
         terminal.Write("\u001b[8;40;120t"u8);
         Assert.Equal(1, replacement); Assert.Equal(4, requests.Count);
-        Assert.Equal(GhosttyVtNative.GhosttyResult.InvalidValue, GhosttyVtNative.SetRoyalWindowResizeCallback(0, 0, 0));
         terminal.Dispose();
         Assert.Throws<ObjectDisposedException>(() => terminal.SetWindowResizeCallback(null));
     }
