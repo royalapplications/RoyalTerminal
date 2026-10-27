@@ -1715,17 +1715,21 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         count = Math.Clamp(count, 1, _scrollBottom - _scrollTop + 1);
         int oldColumn = _cursorCol, oldRow = _cursorRow;
         bool oldWrap = _delayedWrap;
-        bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !_inAltScreen;
+        // Ghostty disables ordinary scrollback for an explicit zero byte
+        // budget, including a restored primary screen. Its ED22 page growth
+        // remains a separate operation with incidental retained history.
+        bool noScrollback = _inAltScreen || _screen.SnapshotScrollbackQuota is { MaximumBytes: 0 };
+        bool history = !down && !HasHorizontalMargins && _scrollTop == 0 && !noScrollback;
         if (!history) _screen.InvalidateHistoryLayout();
         bool rotate = !down && !HasHorizontalMargins &&
-            (index || _inAltScreen && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
+            (index || noScrollback && _scrollTop == 0 && _scrollBottom == _screen.ViewportRows - 1);
         bool imageMargins = _scrollTop != 0 || _scrollBottom != _screen.ViewportRows - 1 || HasHorizontalMargins;
         bool adjustImages = _kittyStore.PlacementCount > 0 && (imageMargins || down || rotate && !history);
         ulong revision = _kittyStore.Revision;
         if (adjustImages && imageMargins)
             _kittyStore.BeginMarginScroll(_screen, _scrollTop, _scrollBottom, down ? count : -count,
                 (uint)(_widthPx / _screen.Columns), (uint)(_heightPx / _screen.ViewportRows),
-                windowShift: !down && _scrollTop == 0 && !_inAltScreen && !HasHorizontalMargins,
+                windowShift: history,
                 left: _scrollLeft, right: RightMargin, allocationCheckpoint: KittyStoreAllocationCheckpoint);
         else if (adjustImages)
             _kittyStore.BeginPinScroll(_screen, down ? 0 : -count, index && _screen.ViewportRows > 1,
