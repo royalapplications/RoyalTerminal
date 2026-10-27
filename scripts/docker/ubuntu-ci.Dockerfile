@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libspirv-cross-c-shared-dev \
     pkg-config \
+    python3 \
     xz-utils \
     zlib1g-dev \
     && multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
