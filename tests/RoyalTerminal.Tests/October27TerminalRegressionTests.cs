@@ -3,6 +3,8 @@
 
 using System.Text;
 using RoyalTerminal.Avalonia.Rendering;
+using RoyalTerminal.GhosttySharp;
+using RoyalTerminal.GhosttySharp.Native;
 using RoyalTerminal.Terminal;
 using Xunit;
 
@@ -111,6 +113,61 @@ public sealed class October27TerminalRegressionTests
         Assert.True(((ITerminalSnapshotExportSource)processor).TryExportSnapshot(
             TerminalSnapshotExportFormat.PlainText, new(), out string history));
         Assert.StartsWith("output\n$", history);
+    }
+
+    [Theory]
+    [InlineData(false, 1, 0)]
+    [InlineData(true, 1, 0)]
+    [InlineData(false, 3, 0)]
+    [InlineData(true, 3, 0)]
+    [InlineData(false, 1, 8)]
+    [InlineData(true, 1, 8)]
+    [InlineData(false, 3, 8)]
+    [InlineData(true, 3, 8)]
+    public void BoundedScrollClearPreservesCurrentStyleAndHyperlink(bool native, int rows, int history)
+    {
+        Assert.SkipWhen(native && !GhosttyVtProcessor.IsAvailable(), "Native Ghostty is unavailable.");
+        TerminalScreen screen = new(160, rows, history);
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(screen) : new BasicVtProcessor(screen);
+        // #14857 and #14686: enough lines to cross native allocation pages
+        // with bounded history, plus the zero-history row-recycling path.
+        // A one-row screen can prune while LF advances the current cursor.
+        // The managed pen owns values rather than allocation-page pointers.
+        for (int i = 0; i < 600; i++) Write(processor, "x\r\n");
+        Write(processor, "x\u001b[H\u001b[1;38;5;123m\u001b]8;id=stable;https://example.com/live\u001b\\\u001b[22Jy");
+        Assert.Equal((0, 1), (processor.CursorRow, processor.CursorCol));
+        AssertPen(screen, 0, 'y');
+        for (int i = 0; i < 600; i++) Write(processor, "\r\nz");
+        AssertPen(screen, rows - 1, 'z');
+
+        static void AssertPen(TerminalScreen screen, int row, char expected)
+        {
+            TerminalCell cell = screen.GetViewportRow(row).ReadOnlyCells[0];
+            Assert.Equal(expected, cell.Codepoint);
+            Assert.True((cell.Attributes & CellAttributes.Bold) != 0);
+            Assert.Equal(TerminalColorIdentity.Palette(123), cell.ForegroundIdentity);
+            Assert.True(screen.TryGetHyperlink(cell.HyperlinkId, out TerminalHyperlink? link));
+            Assert.NotNull(link);
+            Assert.Equal("https://example.com/live", link.Uri);
+            Assert.Equal("stable", Encoding.UTF8.GetString(link.ExplicitId));
+        }
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(3, 0)]
+    [InlineData(1, 8)]
+    [InlineData(3, 8)]
+    public void NativeGridRetainsHyperlinkAcrossBoundedCursorPagePruning(int rows, int history)
+    {
+        Assert.SkipWhen(!GhosttyVtProcessor.IsAvailable(), "Native Ghostty is unavailable.");
+        using GhosttyTerminal terminal = new(160, (ushort)rows, GhosttyScrollbackBudget.FromRows(160, rows, history));
+        terminal.SetScrollbackMaxLines(GhosttyScrollbackBudget.LineLimitFromRows(160, history));
+        for (int i = 0; i < 600; i++) terminal.Write("x\r\n"u8);
+        terminal.Write("x\u001b[H\u001b[1;38;5;123m\u001b]8;id=stable;https://example.com/live\u001b\\\u001b[22Jy"u8);
+        for (int i = 0; i < 600; i++) terminal.Write("\r\nz"u8);
+        Assert.True(terminal.TryGetGridReference(GhosttyVtNative.GhosttyPoint.Active(0, (uint)rows - 1), out var cell));
+        Assert.Equal("https://example.com/live", terminal.GetHyperlinkUri(in cell));
     }
 
     private static IVtProcessor Create(bool native, out TerminalScreen screen)
