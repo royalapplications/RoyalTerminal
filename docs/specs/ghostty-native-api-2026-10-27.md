@@ -100,3 +100,15 @@ the native pin. No public payload fields are missing from the C# binding and no
 private-memory access or extra parser is introduced. `OscParserTests` checks
 the renamed enum on ordinary and escaped-metadata input and retains the old
 `ContextSignal` alias for source compatibility.
+
+The bounded-scroll review also found an adapter coordinate bug when history is
+disabled. Ghostty's `PageList.scrollbar()` intentionally reports only the active
+rows and offset zero, while `Screen` grid coordinates still include unused
+allocation-page rows. The adapter now derives that hidden prefix from the
+official total-row API and keeps it separate from the visible scrollbar range.
+This preserves links after repeated scrolling and fixes the same mapping for
+word/line selection, copying, search and screen snapshots, including the
+alternate screen. No native overlay is needed. The four
+`GhosttyZeroHistoryCoordinateTests` cover these paths and ensure that hidden
+rows never become visible history or overscan; the bounded pruning regression
+also checks one- and three-row terminals with zero and finite history.

@@ -179,6 +179,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     private int _terminalHeightPx;
     private byte _pressedMouseButtons;
     private GhosttyVtNative.GhosttyTerminalScrollbar _scrollbar;
+    private ulong _nativeScreenBaseOffset;
     private readonly bool _kittyGraphicsSupported;
     private readonly GhosttyKittyGraphicsPlacementIterator? _kittyPlacementIterator;
     private Dictionary<int, CachedKittyImage> _kittyImageCache = [];
@@ -1069,7 +1070,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         bool phaseChanged = fraction != _requestedRenderScrollFraction;
         _requestedRenderScrollFraction = fraction;
         ulong targetNativeOffsetRows = mapping.EffectiveBaseOffsetRows + clampedOffsetRows;
-        if (targetNativeOffsetRows == _scrollbar.Offset && !phaseChanged)
+        if (targetNativeOffsetRows == _nativeScreenBaseOffset + _scrollbar.Offset && !phaseChanged)
         {
             if (!_renderHeld) _screen.RenderScrollFraction = fraction;
             return;
@@ -1078,7 +1079,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         // Subrow motion inside an already captured row changes only the render
         // transform. Do not recopy native cells or rebuild the image scene.
         if (phaseChanged && !_renderHeld && _renderMirrorRows is not null &&
-            targetNativeOffsetRows == _scrollbar.Offset && targetNativeOffsetRows == _renderViewportTop &&
+            targetNativeOffsetRows == _nativeScreenBaseOffset + _scrollbar.Offset && targetNativeOffsetRows == _renderViewportTop &&
             priorOverscan == EffectiveRenderOverscan)
         {
             _screen.RenderScrollFraction = fraction;
@@ -1102,11 +1103,11 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             : 0;
         ulong configuredMaxOffsetRows = (ulong)Math.Max(0, _screen.ScrollbackLimit);
         ulong effectiveMaxOffsetRows = Math.Min(nativeMaxOffsetRows, configuredMaxOffsetRows);
-        ulong effectiveBaseOffsetRows = nativeMaxOffsetRows - effectiveMaxOffsetRows;
+        ulong effectiveBaseOffsetRows = _nativeScreenBaseOffset + nativeMaxOffsetRows - effectiveMaxOffsetRows;
         ulong clampedNativeOffsetRows = Clamp(
-            _scrollbar.Offset,
+            _nativeScreenBaseOffset + _scrollbar.Offset,
             effectiveBaseOffsetRows,
-            nativeMaxOffsetRows);
+            _nativeScreenBaseOffset + nativeMaxOffsetRows);
         ulong effectiveOffsetRows = clampedNativeOffsetRows - effectiveBaseOffsetRows;
 
         return new ViewportScrollMapping(
@@ -1693,6 +1694,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _focusEventMode = _terminal.GetMode(GhosttyVtNative.ModeFocusEvent);
         _kittyKeyboardFlags = (int)_terminal.GetKittyKeyboardFlags();
         _scrollbar = _terminal.GetScrollbar();
+        // PageList.scrollbar hides allocation-page growth when history is
+        // disabled (including the alternate screen). Screen coordinates still
+        // include those rows. Preserve the zero UI scroll range while mapping
+        // captures, hyperlinks and selections to the actual native grid.
+        _nativeScreenBaseOffset = _scrollbar.Total == _scrollbar.Length
+            ? Math.Max((ulong)_terminal.GetTotalRows(), _scrollbar.Total) - _scrollbar.Total
+            : 0;
     }
 
     private void ResetManagedState()
@@ -1727,6 +1735,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         _terminalHeightPx = 0;
         _pressedMouseButtons = 0;
         _scrollbar = default;
+        _nativeScreenBaseOffset = 0;
     }
 
     private void ResetSessionInputState()
@@ -1743,7 +1752,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
 
     private unsafe void SyncScreenFromNative()
     {
-        _renderViewportTop = _scrollbar.Offset;
+        _renderViewportTop = _nativeScreenBaseOffset + _scrollbar.Offset;
         _renderViewportBase = GetViewportScrollMapping().EffectiveBaseOffsetRows;
         int nativeColumns = _renderState.GetColumns();
         int nativeRows = _renderState.GetRows();
