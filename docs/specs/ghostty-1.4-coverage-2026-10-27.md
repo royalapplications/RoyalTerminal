@@ -34,6 +34,10 @@ Validation on the rebuilt macOS arm64 native runtime: **46 tests passed, none sk
 
 The wire contract is Ghostty `snapshot/kitty.zig` and `snapshot/snapshot.zig` at the new pin. Windows Terminal's SIXEL implementation and xterm.js's VT serializer do not define equivalent Kitty binary snapshot records. Managed host per-image/total-record limits remain explicit resource policies; they are not copied from untrusted source capacity hints. Snapshot v1 itself still omits glyph registrations and host selection, matching upstream's format rather than silently inventing additional records.
 
+Follow-up history planning review replaced the per-page placement scan with a single topology-sorted plan indexed by history page. Root-page lookup uses binary search; each emitted page retrieves its placements directly. The multi-page parent-order regression and all snapshot/Kitty golden checks passed in an isolated Release output: **58 tests passed, none skipped** (`ManagedKittySnapshot*` and `GhosttySnapshotPageTests`).
+
+Reproduce the component benchmark with `dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --kitty-snapshot-history`. It retains the preceding linear planner as a benchmark-only reference and compares both planners in the same process, excluding terminal setup. On this macOS arm64 host, 40 captures of 20,000 history rows / 40 pages / 1,024 placements (four-deep relative chains) measured **22.227 ms / 8,146,240 allocated bytes** for the reference and **15.038 ms / 5,851,200 bytes** for the index: approximately **32% less component time and 28% fewer managed allocations**, with the same 1,024-placement result. Concurrent repository test load produced timing outliers (reference 21.200–144.756 ms, indexed 14.721–15.672 ms), so these are local component measurements, not an end-to-end terminal speedup claim.
+
 ## Evidence index
 
 Paths below are relative to the repository root. Test references identify evidence to run/review, not results of this audit.

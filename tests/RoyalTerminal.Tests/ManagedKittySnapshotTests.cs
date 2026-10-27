@@ -311,6 +311,36 @@ public sealed class ManagedKittySnapshotTests(ITestOutputHelper output)
         Assert.Equal(new byte[] { 9, 10, 11, 12 }, visible!.RgbaPixels);
     }
 
+    [Fact]
+    public void HistoryPlacementPlanIndexesRootsOnceAndOrdersParentsBeforeChildren()
+    {
+        TerminalScreen screen = new(80, 24, 2000);
+        for (int row = 0; row < 1500; row++) screen.AddRow();
+        ManagedKittyGraphicsStore store = new(4096);
+        for (uint id = 1; id <= 3; id++)
+        {
+            Assert.True(store.TryAddImage(screen, id, 0, new(new(1, 1, [1, 2, 3, 4])), false, out _));
+            for (uint placement = 1; placement <= 4; placement++)
+            {
+                ManagedKittyGraphicsCommand command = new(); command.SetValue('p', placement);
+                if (placement > 1) { command.SetValue('P', id); command.SetValue('Q', placement - 1); }
+                Assert.True(store.TryAddPlacement(screen, store.Find(id)!, command, (int)(id - 1) * 600 + 100,
+                    0, 8, 16, out _, out _));
+            }
+        }
+        long cells = 0; int pageCount = 0;
+        GhosttySnapshotPagePlan plan = new(screen, 0, new(), ref cells, ref pageCount);
+        Dictionary<int, GhosttySnapshotKittyPagePlacements> indexed = store.CaptureHistoryPlacements(screen, 0, plan);
+        Assert.Equal(3, indexed.Count);
+        foreach ((int page, GhosttySnapshotKittyPagePlacements value) in indexed)
+        {
+            Assert.Equal(4, value.Placements.Length);
+            Assert.Equal((uint)page + 1, value.Placements[0].Key.ImageId);
+            Assert.Equal(0, value.Placements[0].Location);
+            for (int i = 1; i < 4; i++) Assert.Equal(value.Placements[i - 1].Key, value.Placements[i].Parent);
+        }
+    }
+
     [Theory]
     [InlineData(12)]
     [InlineData(16)]

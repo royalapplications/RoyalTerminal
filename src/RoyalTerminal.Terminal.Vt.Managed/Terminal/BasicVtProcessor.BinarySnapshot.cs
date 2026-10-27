@@ -54,6 +54,10 @@ public sealed partial class BasicVtProcessor
         ManagedKittyGraphicsStore.SnapshotPayloadPlan primaryPixels = _primaryKittyStore.PlanSnapshotPayloads(_screen, 0, primary, primaryKitty);
         ManagedKittyGraphicsStore.SnapshotPayloadPlan? alternatePixels = alternate is null ? null
             : _alternateKittyStore?.PlanSnapshotPayloads(_screen, 1, alternate, alternateKitty);
+        Dictionary<int, GhosttySnapshotKittyPagePlacements>? primaryPlacements = primaryKitty is null ? null
+            : _primaryKittyStore.CaptureHistoryPlacements(_screen, 0, primary);
+        Dictionary<int, GhosttySnapshotKittyPagePlacements>? alternatePlacements = alternateKitty is null ? null
+            : _alternateKittyStore?.CaptureHistoryPlacements(_screen, 1, alternate!);
         long totalPayloadBytes = 0;
         GhosttySnapshotRecordBuffer payload = new(stackalloc byte[512], RecordLimit());
         try
@@ -98,8 +102,8 @@ public sealed partial class BasicVtProcessor
             {
                 GhosttySnapshotPagePlan.Range range = plan.History[i];
                 WritePage(ref payload, plan, range);
-                ManagedKittyGraphicsStore? store = key == 0 ? _primaryKittyStore : _alternateKittyStore;
-                if (store?.CaptureHistoryPlacements(_screen, key, range) is { } placements)
+                Dictionary<int, GhosttySnapshotKittyPagePlacements>? historyPlacements = key == 0 ? primaryPlacements : alternatePlacements;
+                if (historyPlacements is not null && historyPlacements.TryGetValue(i, out GhosttySnapshotKittyPagePlacements? placements))
                 {
                     GhosttySnapshotKittyCodec.WritePagePlacements(ref payload, placements);
                     Emit(ref payload, GhosttySnapshotRecordTag.KittyImagePagePlacements);

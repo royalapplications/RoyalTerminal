@@ -3,6 +3,7 @@
 
 using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Terminal.Snapshots;
+using System.Runtime.InteropServices;
 
 namespace RoyalTerminal.Terminal;
 
@@ -125,7 +126,7 @@ internal sealed partial class ManagedKittyGraphicsStore
             {
                 if (included.Contains(identity) || !_images.ContainsKey(identity.ImageId)) continue;
                 if (placement.Parent is { } parent && !included.Contains(parent)) continue;
-                if (CapturePlacement(screen, key, identity, placement, plan.Resident, out GhosttySnapshotKittyPlacement? encoded))
+                if (CapturePlacement(screen, key, identity, placement, CollectionsMarshal.AsSpan(plan.Resident), out GhosttySnapshotKittyPlacement? encoded))
                 { placements.Add(encoded!); included.Add(identity); changed = true; }
             }
             if (!changed) break;
@@ -133,35 +134,66 @@ internal sealed partial class ManagedKittyGraphicsStore
         return new(key, _nextImageId, _nextInternalPlacementId, images, [.. placements], Loading?.CaptureSnapshot(LoadingImageId) ?? []);
     }
 
-    internal GhosttySnapshotKittyPagePlacements? CaptureHistoryPlacements(TerminalScreen screen, int key, GhosttySnapshotPagePlan.Range range)
+    internal Dictionary<int, GhosttySnapshotKittyPagePlacements> CaptureHistoryPlacements(TerminalScreen screen, int key,
+        GhosttySnapshotPagePlan plan)
     {
-        List<GhosttySnapshotKittyPlacement> placements = [];
-        List<GhosttySnapshotPagePlan.Range> ranges = [range];
-        HashSet<PlacementKey> included = [];
-        for (int pass = 0; pass <= _placements.Count; pass++)
+        List<(int Page, int Depth, GhosttySnapshotKittyPlacement Placement)> ordered = [];
+        Span<GhosttySnapshotPagePlan.Range> range = stackalloc GhosttySnapshotPagePlan.Range[1];
+        foreach ((PlacementKey identity, Placement placement) in _placements)
         {
-            bool changed = false;
-            foreach ((PlacementKey identity, Placement placement) in _placements)
+            Placement root = placement;
+            int depth = 0;
+            bool valid = true;
+            while (root.Parent is { } parent)
+                if (++depth > _placements.Count || !_placements.TryGetValue(parent, out root!)) { valid = false; break; }
+            if (!valid || root.Virtual || root.Anchor is not { } anchor ||
+                !screen.TryResolveSnapshotAnchor(anchor, key, out TerminalGridPosition cell)) continue;
+            int low = 0, high = plan.History.Count - 1;
+            while (low <= high)
             {
-                if (included.Contains(identity) || placement.Virtual ||
-                    placement.Parent is { } parent && !included.Contains(parent)) continue;
-                if (!CapturePlacement(screen, key, identity, placement, ranges, out GhosttySnapshotKittyPlacement? encoded)) continue;
-                placements.Add(encoded!); included.Add(identity); changed = true;
+                int middle = low + (high - low) / 2;
+                GhosttySnapshotPagePlan.Range candidate = plan.History[middle];
+                if (cell.Row < candidate.Start) high = middle - 1;
+                else if (cell.Row >= candidate.Start + candidate.Count) low = middle + 1;
+                else
+                {
+                    range[0] = candidate;
+                    if (CapturePlacement(screen, key, identity, placement, range, out GhosttySnapshotKittyPlacement? encoded))
+                        ordered.Add((middle, depth, encoded!));
+                    break;
+                }
             }
-            if (!changed) break;
         }
-        return placements.Count == 0 ? null : new(key, [.. placements]);
+        ordered.Sort(static (a, b) =>
+        {
+            int value = a.Page.CompareTo(b.Page);
+            if (value == 0) value = a.Depth.CompareTo(b.Depth);
+            if (value == 0) value = a.Placement.Key.ImageId.CompareTo(b.Placement.Key.ImageId);
+            if (value == 0) value = a.Placement.Key.Tag.CompareTo(b.Placement.Key.Tag);
+            return value == 0 ? a.Placement.Key.Id.CompareTo(b.Placement.Key.Id) : value;
+        });
+        Dictionary<int, GhosttySnapshotKittyPagePlacements> pages = [];
+        for (int start = 0; start < ordered.Count;)
+        {
+            int end = start + 1;
+            while (end < ordered.Count && ordered[end].Page == ordered[start].Page) end++;
+            GhosttySnapshotKittyPlacement[] entries = new GhosttySnapshotKittyPlacement[end - start];
+            for (int i = start; i < end; i++) entries[i - start] = ordered[i].Placement;
+            pages.Add(ordered[start].Page, new(key, entries));
+            start = end;
+        }
+        return pages;
     }
 
     private static bool CapturePlacement(TerminalScreen screen, int key, PlacementKey identity, Placement p,
-        List<GhosttySnapshotPagePlan.Range> ranges, out GhosttySnapshotKittyPlacement? encoded)
+        ReadOnlySpan<GhosttySnapshotPagePlan.Range> ranges, out GhosttySnapshotKittyPlacement? encoded)
     {
         encoded = null; ushort page = 0, row = 0, column = 0;
         if (p.Anchor is { } anchor)
         {
             if (!screen.TryResolveSnapshotAnchor(anchor, key, out TerminalGridPosition cell)) return false;
             int index = -1;
-            for (int i = 0; i < ranges.Count; i++)
+            for (int i = 0; i < ranges.Length; i++)
                 if (cell.Row >= ranges[i].Start && cell.Row < ranges[i].Start + ranges[i].Count) { index = i; break; }
             if (index < 0) return false;
             page = checked((ushort)index); row = checked((ushort)(cell.Row - ranges[index].Start)); column = checked((ushort)cell.Column);

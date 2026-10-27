@@ -11,6 +11,12 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--kitty-snapshot-history", StringComparer.Ordinal))
+{
+    KittySnapshotHistoryBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--program-status", StringComparer.Ordinal))
 {
     ProgramStatusBenchmark.Run();
