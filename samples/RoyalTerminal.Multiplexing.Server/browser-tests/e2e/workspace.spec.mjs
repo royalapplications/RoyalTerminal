@@ -23,6 +23,10 @@ test('real shell, split, rename, detach, and fresh browser reattachment', async 
   await page.locator('.pane-title').first().dblclick();
   await page.getByLabel('Terminal name').fill('Persistent shell');await page.locator('#dialog-submit').click();
   await expect(page.locator('.pane-title').first()).toHaveText('Persistent shell');
+  await page.keyboard.press('Control+k');await page.locator('#palette-query').fill('Zoom focused terminal');await page.keyboard.press('Enter');
+  await expect(page.locator('.terminal-pane')).toHaveCount(1);
+  await page.keyboard.press('Control+k');await page.locator('#palette-query').fill('Zoom focused terminal');await page.keyboard.press('Enter');
+  await expect(page.locator('.terminal-pane')).toHaveCount(2);
   await page.screenshot({path:testInfo.outputPath('workspace-desktop.png')});
   await page.locator('.terminal-pane').first().getByRole('button',{name:'Detach or reconnect this view'}).click();
   await expect(page.locator('.pane-state').first()).toHaveText('detached');
@@ -35,6 +39,29 @@ test('real shell, split, rename, detach, and fresh browser reattachment', async 
   await resumed.locator('.xterm-helper-textarea').first().focus();await resumed.keyboard.type("printf 'R_%s_DONE\\n' 9021");await resumed.keyboard.press('Enter');
   await expect.poll(async()=>(await (await request.get(`/api/sessions/${session.id}/blocks/${blockId}/capture`,{headers})).json()).content).toContain('R_9021_DONE');
   await resumed.close();await request.delete(`/api/sessions/${session.id}`,{headers});
+});
+
+test('pinned xterm preserves deferred composition and suppresses client parser replies', async ({page}) => {
+  await page.goto('/');
+  const observed=await page.evaluate(async()=>{
+    const {bindUserInput}=await import('/terminal-input.js');
+    const host=document.createElement('div');host.style.cssText='width:600px;height:300px';document.body.append(host);
+    const terminal=new window.Terminal({cols:80,rows:24});terminal.open(host);
+    const raw=[],forwarded=[];terminal.onData(data=>raw.push(data));
+    const input=bindUserInput(terminal,data=>forwarded.push(data),data=>forwarded.push(data));
+    const textarea=terminal.textarea;
+    textarea.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:''}));
+    textarea.value='漢';
+    textarea.dispatchEvent(new CompositionEvent('compositionupdate',{bubbles:true,data:'漢'}));
+    textarea.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'漢'}));
+    await new Promise(resolve=>setTimeout(resolve,25));
+    await new Promise(resolve=>terminal.write('\u001b[6n\u001b[c',resolve));
+    input.dispose();terminal.dispose();host.remove();
+    return {raw,forwarded};
+  });
+  expect(observed.raw).toContain('漢');
+  expect(observed.raw.some(value=>value.startsWith('\u001b['))).toBe(true);
+  expect(observed.forwarded).toEqual(['漢']);
 });
 
 test('scoped read-only share strips fragment, disables mutation, and adapts to mobile', async ({page,request}) => {

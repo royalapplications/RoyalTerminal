@@ -14,7 +14,7 @@ export default defineConfig({
     launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {},
   },
   webServer: process.env.ROYALTERMINAL_MUX_EXTERNAL_SERVER ? undefined : {
-    command: 'dotnet run --project RoyalTerminal.Multiplexing.Server.csproj -c Release --no-build',
+    command: `${process.env.ROYALTERMINAL_DOTNET || 'dotnet'} run --project RoyalTerminal.Multiplexing.Server.csproj -c Release --no-build`,
     url: 'http://127.0.0.1:7331/healthz',
     timeout: 30_000,
     reuseExistingServer: false,
