@@ -3,8 +3,10 @@
 
 using System.Buffers;
 using System.Text.Json;
+using System.Text.Json.Schema;
 using System.Text.Json.Serialization.Metadata;
 using RoyalTerminal.Multiplexing;
+using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Multiplexing.Server;
@@ -12,7 +14,7 @@ namespace RoyalTerminal.Multiplexing.Server;
 /// <summary>One explicit method registry drives discovery, HTTP, CLI, and custom actions.</summary>
 internal sealed class ApiCatalog
 {
-    private sealed record Entry(MethodDescription Description, string[] Properties,
+    private sealed record Entry(MethodDescription Description, string[] Properties, JsonElement ActionSchema,
         Func<ApiArguments, AccessGrant, CancellationToken, ValueTask<JsonElement>> Invoke);
     private readonly Dictionary<string, Entry> _methods = new(StringComparer.Ordinal);
     private readonly WorkspaceOperations _workspaces;
@@ -28,6 +30,8 @@ internal sealed class ApiCatalog
     }
 
     public MethodList Describe() => new(_methods.Values.Select(x => x.Description).ToArray());
+    public IReadOnlyList<MultiplexerActionMethod> DescribeActionMethods() => _methods.Values
+        .Select(x => new MultiplexerActionMethod(x.Description.Name, x.ActionSchema)).ToArray();
     public MethodDescription Describe(string name) => _methods.TryGetValue(name, out Entry? entry)
         ? entry.Description : throw new ApiException(404, "method_not_found", "Unknown API method.");
 
@@ -102,7 +106,7 @@ internal sealed class ApiCatalog
             ServerHttp.RequireAdministrator(grant);
             return Done(_workspaces.Broker.RenameBlock(args.Id("sessionId"), args.Id("blockId"), args.String("label"), args.Revision()), ServerJsonContext.Default.MultiplexerBlockDescriptor);
         });
-        Add("session.set_layout", "Replace a validated binary split tree; omission detaches blocks from presentation only.",
+        Add("session.set_layout", "Replace a binary split tree containing each block assigned to the window exactly once.",
             ["sessionId:string!", "windowId:string!", "layout:object!", "expectedRevision:integer"], (args, grant, _) =>
         {
             ServerHttp.RequireAdministrator(grant);
@@ -137,6 +141,10 @@ internal sealed class ApiCatalog
             Done(Capture(Session(args, grant), args.Id("blockId"), args.String("format", "text")), ServerJsonContext.Default.ScreenCapture));
         Add("terminal.status", "Read bounded OSC 7501 program-status records.", ["sessionId:string!", "blockId:string!"], (args, grant, _) =>
             Done(_workspaces.Inspection(Session(args, grant), args.Id("blockId")).ProgramStatuses.ToArray(), ServerJsonContext.Default.TerminalProgramStatusArray));
+        Add("terminal.title", "Read the terminal-reported title as untrusted plain text.", ["sessionId:string!", "blockId:string!"], (args, grant, _) =>
+            Done(new TerminalTextValue(_workspaces.Inspection(Session(args, grant), args.Id("blockId")).Title), ServerJsonContext.Default.TerminalTextValue));
+        Add("terminal.pwd", "Read the terminal-reported working-directory URI without accessing that path.", ["sessionId:string!", "blockId:string!"], (args, grant, _) =>
+            Done(new TerminalTextValue(_workspaces.Inspection(Session(args, grant), args.Id("blockId")).WorkingDirectory), ServerJsonContext.Default.TerminalTextValue));
         Add("client.list", "List currently attached clients visible to this capability.", [], (_, grant, _) => Done(_clients.List(grant), ServerJsonContext.Default.ClientList));
         Add("client.disconnect", "Detach a client without terminating its process.", ["clientId:string!"], (args, grant, _) =>
         {
@@ -148,7 +156,7 @@ internal sealed class ApiCatalog
         {
             ServerHttp.RequireAdministrator(grant);
             Guid id = args.Id("sessionId");
-            _ = _workspaces.Broker.GetSession(id);
+            _workspaces.Broker.GetSession(id);
             return Done(_tokens.Create(id, new(args.String("role", "observer"), args.Integer("lifetimeMinutes", 60))), ServerJsonContext.Default.ShareCreated);
         });
         Add("share.list", "List capability metadata without disclosing tokens.", ["sessionId:string!"], (args, grant, _) =>
@@ -177,11 +185,38 @@ internal sealed class ApiCatalog
         Func<ApiArguments, AccessGrant, CancellationToken, ValueTask<JsonElement>> handler)
     {
         string[] names = fields.Select(x => x[..x.IndexOf(':')]).ToArray();
-        _methods.Add(name, new(new(name, description, Schema(fields), JsonDocument.Parse("{\"type\":[\"object\",\"array\"]}").RootElement.Clone(),
-            ValidationNotes: "Unknown and duplicate arguments are rejected. Session IDs are UUIDs. Mutations require an administrator except block.input."), names, handler));
+        JsonElement input = Schema(name, fields);
+        _methods.Add(name, new(new(name, description, input, OutputSchema(name),
+            ValidationNotes: "Unknown and duplicate top-level arguments are rejected. Nested contracts reject unknown fields. Session IDs are UUIDs. Layout tree invariants and process options are validated by the server. Action preflight uses a bounded schema projection; recursive descendants are validated during invocation. Mutations require an administrator except block.input."),
+            names, ApiInputSchemas.ForActions(input), handler));
     }
 
-    private static JsonElement Schema(string[] fields)
+    private static JsonElement OutputSchema(string method)
+    {
+        // Export the actual source-generated contract, so discovery cannot drift
+        // from response property names, enum values, or recursive layout shapes.
+        JsonTypeInfo type = method switch
+        {
+            "server.version" => ServerJsonContext.Default.ServerVersion,
+            "session.list" => ServerJsonContext.Default.SessionList,
+            "session.create" or "session.view" or "session.set_label" => ServerJsonContext.Default.MultiplexerSessionDescriptor,
+            "session.new_window" or "session.set_window_label" or "session.set_layout" => ServerJsonContext.Default.MultiplexerWindowDescriptor,
+            "session.set_block_label" or "block.create" => ServerJsonContext.Default.MultiplexerBlockDescriptor,
+            "terminal.format" => ServerJsonContext.Default.ScreenCapture,
+            "terminal.status" => ServerJsonContext.Default.TerminalProgramStatusArray,
+            "terminal.title" or "terminal.pwd" => ServerJsonContext.Default.TerminalTextValue,
+            "client.list" => ServerJsonContext.Default.ClientList,
+            "share.create" => ServerJsonContext.Default.ShareCreated,
+            "share.list" => ServerJsonContext.Default.ShareList,
+            _ => ServerJsonContext.Default.ApiSuccess,
+        };
+        ArrayBufferWriter<byte> buffer = new();
+        using (Utf8JsonWriter writer = new(buffer)) type.GetJsonSchemaAsNode().WriteTo(writer);
+        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory);
+        return document.RootElement.Clone();
+    }
+
+    private static JsonElement Schema(string method, string[] fields)
     {
         ArrayBufferWriter<byte> buffer = new();
         using (Utf8JsonWriter writer = new(buffer))
@@ -191,7 +226,22 @@ internal sealed class ApiCatalog
             foreach (string field in fields)
             {
                 int colon = field.IndexOf(':');
-                writer.WriteStartObject(field[..colon]); writer.WriteString("type", field[(colon + 1)..].TrimEnd('!')); writer.WriteEndObject();
+                string property = field[..colon];
+                if (ApiInputSchemas.Nested(method, property) is { } nested)
+                {
+                    writer.WritePropertyName(property); nested.WriteTo(writer);
+                }
+                else
+                {
+                    writer.WriteStartObject(property);
+                    if (property == "expectedRevision")
+                    {
+                        writer.WriteStartArray("type"); writer.WriteStringValue("integer"); writer.WriteStringValue("null"); writer.WriteEndArray();
+                        writer.WriteNumber("minimum", 0);
+                    }
+                    else writer.WriteString("type", field[(colon + 1)..].TrimEnd('!'));
+                    writer.WriteEndObject();
+                }
             }
             writer.WriteEndObject(); writer.WriteStartArray("required");
             foreach (string field in fields) if (field.EndsWith('!')) writer.WriteStringValue(field[..field.IndexOf(':')]);
