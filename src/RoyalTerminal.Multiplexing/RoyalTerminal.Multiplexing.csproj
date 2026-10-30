@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Multiplexing</PackageId>
+    <Description>Experimental durable terminal session and block multiplexer.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../RoyalTerminal.Terminal/RoyalTerminal.Terminal.csproj" />
+  </ItemGroup>
+</Project>
