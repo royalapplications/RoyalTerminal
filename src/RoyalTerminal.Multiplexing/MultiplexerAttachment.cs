@@ -16,10 +16,12 @@ public sealed class MultiplexerAttachment : IDisposable
     private long _pendingBytes;
     private int _completed;
 
-    internal MultiplexerAttachment(MultiplexerBlock block, MultiplexerRole role, MultiplexerOptions options)
+    internal MultiplexerAttachment(MultiplexerBlock block, MultiplexerRole role, long replayThroughSequence,
+        MultiplexerOptions options)
     {
         _block = block;
         Role = role;
+        ReplayThroughSequence = replayThroughSequence;
         _maxPendingBytes = options.MaxPendingBytesPerAttachment;
         _channel = Channel.CreateBounded<MultiplexerEvent>(new BoundedChannelOptions(options.MaxPendingEventsPerAttachment)
         {
@@ -39,6 +41,8 @@ public sealed class MultiplexerAttachment : IDisposable
     public Guid BlockId => _block.Id;
     /// <summary>Host-authorized role; role assignment is not an authentication mechanism.</summary>
     public MultiplexerRole Role { get; }
+    /// <summary>Last event included in the atomic attach snapshot. Events after this cursor are live.</summary>
+    public long ReplayThroughSequence { get; }
     /// <summary>Whether this attachment currently owns input and resize authority.</summary>
     public bool HasControl => Role == MultiplexerRole.Controller && IsConnected;
     /// <summary>Whether new operations may be submitted.</summary>

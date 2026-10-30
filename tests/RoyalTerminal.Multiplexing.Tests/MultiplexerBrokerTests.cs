@@ -262,11 +262,33 @@ public sealed class MultiplexerBrokerTests
         MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "shell", Options());
         Task producer = Task.Run(() => { for (int i = 0; i < 500; i++) factory.Last.Emit(i + "\n"); });
         using MultiplexerAttachment attachment = broker.Attach(session.Id, block.Id);
+        long replayFence = attachment.ReplayThroughSequence;
         await producer;
         MultiplexerEvent[] events = Drain(attachment);
         Assert.Equal(501, events.Length);
         Assert.Equal(Enumerable.Range(1, 501).Select(value => (long)value), events.Select(item => item.Sequence));
         Assert.Equal(string.Concat(Enumerable.Range(0, 500).Select(value => value + "\n")), Output(events));
+        Assert.InRange(replayFence, 1, 501);
+        Assert.Equal(replayFence, attachment.ReplayThroughSequence);
+        Assert.Equal(replayFence, events.LongCount(item => item.Sequence <= replayFence));
+    }
+
+    [Fact]
+    public async Task ReplayFenceDoesNotMoveWhenOutputArrivesAfterAttach()
+    {
+        FakeFactory factory = new();
+        await using MultiplexerBroker broker = new(factory);
+        MultiplexerSessionDescriptor session = broker.CreateSession("fence");
+        MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "shell", Options());
+        factory.Last.Emit("before");
+        using MultiplexerAttachment attachment = broker.Attach(session.Id, block.Id);
+        Assert.Equal(2, attachment.ReplayThroughSequence);
+        factory.Last.Emit("after");
+        Assert.Equal(3, broker.GetSession(session.Id).Blocks[0].LastSequence);
+        Assert.Equal(2, attachment.ReplayThroughSequence);
+        MultiplexerEvent[] events = Drain(attachment);
+        Assert.Equal("before", Output(events.Where(item => item.Sequence <= attachment.ReplayThroughSequence)));
+        Assert.Equal("after", Output(events.Where(item => item.Sequence > attachment.ReplayThroughSequence)));
     }
 
     [Fact]

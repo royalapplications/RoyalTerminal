@@ -93,7 +93,7 @@ internal sealed class MultiplexerBlock
             if (role == MultiplexerRole.Controller && _controllerId is not null)
                 throw new MultiplexerException(MultiplexerErrorCode.Conflict, "Another attachment controls this block.");
 
-            MultiplexerAttachment attachment = new(this, role, _options);
+            MultiplexerAttachment attachment = new(this, role, _sequence, _options);
             // Replay and subscription share this gate with every publication; no event can fall between them.
             foreach (MultiplexerEvent item in _journal)
             {
