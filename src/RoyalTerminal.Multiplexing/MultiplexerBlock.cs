@@ -9,6 +9,7 @@ internal sealed class MultiplexerBlock
 {
     private readonly object _gate = new();
     private readonly ITerminalTransport _transport;
+    private readonly IMultiplexerResizeSource? _resizeSource;
     private readonly MultiplexerOptions _options;
     private readonly Queue<MultiplexerEvent> _journal = new();
     private readonly Dictionary<Guid, MultiplexerAttachment> _attachments = new();
@@ -32,10 +33,12 @@ internal sealed class MultiplexerBlock
         WindowId = windowId;
         _label = label;
         _transport = transport;
+        _resizeSource = transport as IMultiplexerResizeSource;
         _dimensions = dimensions;
         _options = options;
         _transport.DataReceived += OnData;
         _transport.ProcessExited += OnExit;
+        if (_resizeSource is not null) _resizeSource.DimensionsChanged += OnDimensionsChanged;
         Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
     }
 
@@ -152,13 +155,16 @@ internal sealed class MultiplexerBlock
                 if (_dimensions == dimensions) return;
                 // Publish geometry before calling into a transport: synchronous redraw output then follows it.
                 previous = _dimensions;
-                _dimensions = dimensions;
-                Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
+                if (_resizeSource is null)
+                {
+                    _dimensions = dimensions;
+                    Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
+                }
             }
             try { _transport.Resize(dimensions); }
             catch
             {
-                lock (_gate)
+                if (_resizeSource is null) lock (_gate)
                 {
                     _dimensions = previous;
                     Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: previous,
@@ -216,6 +222,7 @@ internal sealed class MultiplexerBlock
             {
                 _transport.DataReceived -= OnData;
                 _transport.ProcessExited -= OnExit;
+                if (_resizeSource is not null) _resizeSource.DimensionsChanged -= OnDimensionsChanged;
                 try { _transport.Dispose(); }
                 finally
                 {
@@ -267,6 +274,17 @@ internal sealed class MultiplexerBlock
                 Publish(new(++_sequence, MultiplexerEventKind.Output, Data: owned));
                 offset += length;
             }
+        }
+    }
+
+    private void OnDimensionsChanged(TerminalSessionDimensions dimensions)
+    {
+        ValidateDimensions(dimensions, _options);
+        lock (_gate)
+        {
+            if (_state is MultiplexerBlockState.Closed or MultiplexerBlockState.Exited || _dimensions == dimensions) return;
+            _dimensions = dimensions;
+            Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
         }
     }
 
