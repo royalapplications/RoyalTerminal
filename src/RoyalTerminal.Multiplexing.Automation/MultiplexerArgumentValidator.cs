@@ -204,33 +204,13 @@ public static class MultiplexerArgumentValidator
     };
 
     private static int CompareNumbers(JsonElement first, JsonElement second)
-        => first.TryGetDecimal(out decimal a) && second.TryGetDecimal(out decimal b)
-            ? a.CompareTo(b) : first.GetDouble().CompareTo(second.GetDouble());
+        => JsonDecimalNumber.Parse(first).CompareTo(JsonDecimalNumber.Parse(second));
 
     private static bool IsInteger(JsonElement value)
     {
         if (value.ValueKind != JsonValueKind.Number) return false;
-        string raw = value.GetRawText();
-        int exponentOffset = raw.IndexOfAny(['e', 'E']);
-        ReadOnlySpan<char> mantissa = exponentOffset < 0 ? raw.AsSpan() : raw.AsSpan(0, exponentOffset);
-        int dot = mantissa.IndexOf('.');
-        int fractionDigits = dot < 0 ? 0 : mantissa.Length - dot - 1;
-        int trailingZeroes = 0;
-        bool zero = true;
-        for (int index = 0; index < mantissa.Length; index++)
-            if (mantissa[index] is >= '1' and <= '9') zero = false;
-        if (zero) return true;
-        for (int index = mantissa.Length - 1; index >= 0; index--)
-        {
-            if (mantissa[index] == '.') continue;
-            if (mantissa[index] != '0') break;
-            trailingZeroes++;
-        }
-        int exponent = 0;
-        if (exponentOffset >= 0 && !int.TryParse(raw.AsSpan(exponentOffset + 1), System.Globalization.NumberStyles.AllowLeadingSign,
-            System.Globalization.CultureInfo.InvariantCulture, out exponent))
-            return raw[exponentOffset + 1] != '-';
-        return (long)fractionDigits - exponent <= trailingZeroes;
+        JsonDecimalNumber number = JsonDecimalNumber.Parse(value);
+        return number.Digits == "0" || number.Exponent.Sign >= 0;
     }
 
     private static void CheckTypeName(string name, string path)

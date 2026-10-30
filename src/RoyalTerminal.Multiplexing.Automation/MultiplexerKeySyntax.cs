@@ -36,7 +36,7 @@ public static class MultiplexerKeySyntax
                 case "shift": Set(ref shift); break;
                 case "meta": case "super": case "cmd": case "command": case "win": Set(ref meta); break;
                 default:
-                    if (main is not null || token.Length is < 1 or > 64 || token.Any(char.IsWhiteSpace) || token.Contains('/'))
+                    if (main is not null || token.Length is < 1 or > 64 || token.Any(character => char.IsWhiteSpace(character) || char.IsControl(character)) || token.Contains('/'))
                         throw MultiplexerArgumentValidator.Invalid("A stroke requires one key and distinct recognized modifiers; use 'plus' for the plus key.");
                     main = token switch { "esc" => "escape", "return" => "enter", "spacebar" => "space", _ => token };
                     break;
