@@ -29,6 +29,9 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
             throw new ArgumentException("Terminal dimensions exceed the host limits (512 columns, 256 rows).");
         Dictionary<string, string> environment = new(StringComparer.Ordinal)
         {
+            // Local transports merge inherited variables with string overrides. Blank the
+            // host capability explicitly; this does not isolate the child OS account.
+            ["ROYALTERMINAL_MUX_TOKEN"] = string.Empty,
             ["ROYALTERMINAL_MUX_SESSION"] = sessionId.ToString(),
             ["TERM"] = "xterm-256color",
             ["COLORTERM"] = "truecolor",
@@ -61,6 +64,8 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
 
     public async ValueTask CloseBlockAsync(Guid sessionId, Guid blockId)
     {
+        // A rejected session/block pair must not erase another session's inspection.
+        _ = GetBlock(sessionId, blockId);
         try { await Broker.CloseBlockAsync(sessionId, blockId); }
         finally { _options.TryRemove(blockId, out _); }
     }

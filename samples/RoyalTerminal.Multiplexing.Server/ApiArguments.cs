@@ -29,11 +29,11 @@ internal readonly struct ApiArguments(JsonElement value)
     public Guid Id(string key) => Guid.TryParse(String(key), out Guid id) && id != Guid.Empty ? id : throw new ArgumentException($"'{key}' must be a UUID.");
     public Guid? OptionalId(string key) => Value.TryGetProperty(key, out JsonElement item) && item.ValueKind != JsonValueKind.Null ? Id(key) : null;
     public long? Revision() => Value.TryGetProperty("expectedRevision", out JsonElement item) && item.ValueKind != JsonValueKind.Null
-        ? item.TryGetInt64(out long revision) && revision >= 0 ? revision : throw new ArgumentException("expectedRevision must be nonnegative.") : null;
+        ? item.ValueKind == JsonValueKind.Number && item.TryGetInt64(out long revision) && revision >= 0 ? revision : throw new ArgumentException("expectedRevision must be nonnegative.") : null;
     public double Number(string key, double fallback) => Value.TryGetProperty(key, out JsonElement item)
-        ? item.TryGetDouble(out double number) && double.IsFinite(number) ? number : throw new ArgumentException($"'{key}' must be a finite number.") : fallback;
+        ? item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out double number) && double.IsFinite(number) ? number : throw new ArgumentException($"'{key}' must be a finite number.") : fallback;
     public int Integer(string key, int fallback) => Value.TryGetProperty(key, out JsonElement item)
-        ? item.TryGetInt32(out int number) ? number : throw new ArgumentException($"'{key}' must be an integer.") : fallback;
+        ? item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out int number) ? number : throw new ArgumentException($"'{key}' must be an integer.") : fallback;
     public JsonElement Object(string key) => Value.TryGetProperty(key, out JsonElement item) && item.ValueKind == JsonValueKind.Object
         ? item : throw new ArgumentException($"'{key}' must be an object.");
 }

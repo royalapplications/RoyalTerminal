@@ -42,9 +42,13 @@ internal sealed class BlockStreamEndpoint(MultiplexerBroker broker, AccessTokens
             ServerHttp.RequireSession(grant, sessionId);
             if (role == "controller" && !grant.CanControl) throw new ApiException(403, "forbidden", "This share is read only.");
             if (grant.ExpiresUtc != DateTimeOffset.MaxValue)
-                lifetime.CancelAfter(grant.ExpiresUtc - DateTimeOffset.UtcNow);
+            {
+                TimeSpan remaining = grant.ExpiresUtc - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero) throw new ApiException(403, "expired", "The capability expired or was revoked.");
+                lifetime.CancelAfter(remaining);
+            }
             attachment = broker.Attach(sessionId, blockId, role == "controller" ? MultiplexerRole.Controller : MultiplexerRole.Observer, after);
-            clients.Add(attachment.Id, sessionId, blockId, grant, attachment.HasControl, lifetime);
+            RegisterAuthorizedClient(attachment, grant, lifetime);
             await SendAsync(socket, new() { Type = "attached", AttachmentId = attachment.Id, HasControl = attachment.HasControl }, lifetime.Token);
             TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
             Task output = SendEventsAsync(socket, attachment, after, ready, lifetime.Token);
@@ -75,6 +79,16 @@ internal sealed class BlockStreamEndpoint(MultiplexerBroker broker, AccessTokens
                 catch (Exception error) when (error is OperationCanceledException or WebSocketException) { }
             }
         }
+    }
+
+    internal void RegisterAuthorizedClient(MultiplexerAttachment attachment, AccessGrant grant, CancellationTokenSource lifetime)
+    {
+        clients.Add(attachment.Id, attachment.SessionId, attachment.BlockId, grant, attachment.HasControl, lifetime);
+        // Recheck after registration: a prior revoke is rejected here, and a later
+        // revoke will find this client's cancellation source in the registry.
+        if (tokens.IsActive(grant)) return;
+        clients.Remove(attachment.Id);
+        throw new ApiException(403, "expired", "The capability expired or was revoked.");
     }
 
     private static async Task SendEventsAsync(WebSocket socket, MultiplexerAttachment attachment, long after,
