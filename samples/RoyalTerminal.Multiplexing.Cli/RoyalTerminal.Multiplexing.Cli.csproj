@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>royalterminal-mux</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Multiplexing\RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+  </ItemGroup>
+</Project>
