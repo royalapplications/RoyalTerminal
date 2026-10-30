@@ -18,10 +18,24 @@ defines additional CI coverage whose execution must be checked separately.
 | Experiment automation | 87 | 0 | 0 | Actions, schemas, configuration, keys, and target resolution |
 | Experiment HTTP/WebSocket client and CLI | 56 | 0 | 0 | Protocol, authentication, selectors, configuration, and actions |
 | Experiment Avalonia desktop | 8 | 0 | 0 | Headless controls and view models using the managed VT engine |
-| **Experiment subtotal, excluding server** | **198** | **0** | **0** | All five non-server suites passed |
+| Experiment host | 37 | 0 | 0 | Authenticated HTTP/WebSocket flows, revocation races, strict schemas, actions, persistence, and request bounds |
+| **Experiment .NET total** | **235** | **0** | **0** | All six experiment suites passed |
+| Browser end-to-end | 5 | 0 | 0 | Real Chromium, PTY processes, input, sharing, geometry, navigation, and custom key actions |
+| Browser Node cases | 8 | 0 | 0 | Protocol, layout, Unicode input, key modes, chords, and filename safety |
 
-The final server, browser unit, and Playwright runs are recorded separately when
-complete; they are not included in the 198-test subtotal above.
+The final host build completed with zero warnings and errors. All eight Node
+cases also passed with `node --test --test-isolation=none --test-reporter=tap
+browser-tests/*.test.mjs` on Node 24.22.1; the default runner in this environment
+reported the two passing test files as its summary units. Browser flows ran
+against the built host with Chromium for Testing 156.0.8078.80 supplied through
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; the pinned Playwright runner was 1.64.1.
+The default Playwright browser download failed in this environment, so the local
+run used the official Chrome for Testing distribution. CI is configured to use
+Playwright's normal Chromium installation. Browser coverage includes real shell
+input, split/rename/zoom, explicit detach and fresh-client replay, read-only
+mobile sharing and revocation, deferred IME input with parser-response suppression,
+held authoritative resize events, preserved live views across window navigation,
+and configured context-aware key actions.
 
 ### Native prerequisite failures
 

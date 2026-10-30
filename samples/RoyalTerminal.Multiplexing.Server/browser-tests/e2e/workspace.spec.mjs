@@ -78,3 +78,53 @@ test('scoped read-only share strips fragment, disables mutation, and adapts to m
   await expect(page.locator('.pane-state')).not.toHaveText('view only');
   await page.close();await request.delete(`/api/sessions/${session.id}`,{headers});
 });
+
+test('a controller waits for ordered server geometry before resizing its local parser', async ({page,request})=>{
+  const session=await (await request.post('/api/sessions',{headers,data:{label:'Ordered geometry'}})).json();
+  const block=await (await request.post(`/api/sessions/${session.id}/blocks`,{headers,data:{label:'Geometry',transport:'pty',command:{fileName:'/bin/sh',arguments:['-i']}}})).json();
+  let hold=false,heldResizes=0;const held=[];
+  await page.routeWebSocket(/\/stream\?/,socket=>{
+    const server=socket.connectToServer();
+    server.onMessage(message=>{if(hold){if(JSON.parse(String(message)).kind==='resize')heldResizes++;held.push(()=>socket.send(message));}else socket.send(message);});
+  });
+  await login(page);
+  await expect(page.locator('.pane-state')).toHaveText('live');
+  await expect.poll(async()=>{
+    const current=(await sessions(request)).find(item=>item.id===session.id).blocks.find(item=>item.id===block.id);
+    return current.dimensions.columns;
+  }).toBeGreaterThan(100);
+  const screen=page.locator('.xterm-screen');
+  const initial=await screen.evaluate(element=>element.style.width);
+  hold=true;
+  await page.setViewportSize({width:1000,height:800});
+  await expect.poll(()=>heldResizes).toBeGreaterThan(0);
+  expect(await screen.evaluate(element=>element.style.width)).toBe(initial);
+  hold=false;for(const send of held.splice(0))send();
+  await expect.poll(()=>screen.evaluate(element=>element.style.width)).not.toBe(initial);
+  await page.close();await request.delete(`/api/sessions/${session.id}`,{headers});
+});
+
+test('window navigation retains its live terminal and configured key actions use the selection', async ({page,request})=>{
+  const session=await (await request.post('/api/sessions',{headers,data:{label:'Navigation'}})).json();
+  const block=await (await request.post(`/api/sessions/${session.id}/blocks`,{headers,data:{label:'Original',transport:'pty'}})).json();
+  const config={version:1,actions:[{id:'mark_workspace',steps:[{method:'session.set_label',arguments:{sessionId:'${sessionId}',label:'Action applied'}}]}],modes:[{name:'workspace',exclusive:true}],bindings:[{sequence:'ctrl+g',enterMode:'workspace',once:true},{mode:'workspace',sequence:'m',actionId:'mark_workspace'}]};
+  expect((await request.put('/api/config',{headers,data:config})).ok()).toBe(true);
+  const streams=[];page.on('websocket',socket=>streams.push(socket.url()));
+  await login(page);await expect(page.locator('.pane-state')).toHaveText('live');
+  const original=await page.locator('.xterm').elementHandle();
+  await page.getByRole('button',{name:'New window',exact:true}).click();
+  await page.getByLabel('Window name').fill('Other');await page.locator('#dialog-submit').click();
+  await expect(page.getByRole('tab',{name:'Other',exact:true})).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('.pane-state')).toHaveText('live');
+  expect(await original.evaluate(element=>element.isConnected)).toBe(false);
+  await page.getByRole('tab',{name:'Main',exact:true}).click();
+  await expect(page.locator('.pane-title')).toHaveText('Original');
+  expect(await original.evaluate(element=>element.isConnected)).toBe(true);
+  expect(streams.filter(url=>url.includes(block.id))).toHaveLength(1);
+  await page.locator('.xterm-helper-textarea').focus();
+  await page.keyboard.press('Control+g');await page.keyboard.press('m');
+  await expect(page.locator('#workspace-title')).toHaveText('Action applied');
+  await expect(page.locator('#chord-hint')).toHaveText('');
+  await page.close();await request.delete(`/api/sessions/${session.id}`,{headers});
+  await request.put('/api/config',{headers,data:{version:1}});
+});
