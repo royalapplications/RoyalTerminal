@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Multiplexing.Inspection</PackageId>
+    <Description>Experimental server-owned terminal inspection and snapshot capture for RoyalTerminal multiplexing.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
+  </ItemGroup>
+</Project>
