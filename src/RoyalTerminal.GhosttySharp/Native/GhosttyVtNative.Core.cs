@@ -201,6 +201,8 @@ public static partial class GhosttyVtNative
         Csi14T = 1,
         Csi16T = 2,
         Csi18T = 3,
+        /// <summary>Reports the screen dimensions in cells (CSI 9 ; rows ; columns t).</summary>
+        Csi19T = 4,
     }
 
     [StructLayout(LayoutKind.Sequential)]

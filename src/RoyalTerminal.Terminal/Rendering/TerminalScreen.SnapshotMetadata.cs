@@ -112,6 +112,14 @@ public sealed partial class TerminalScreen
     internal int SnapshotCursorHyperlinkToken(int key, int fallback)
         => TracksSnapshotMetadata ? _snapshotPageTracker?.CursorHyperlinkToken(key, fallback) ?? fallback : fallback;
 
+    internal void RestorePrunedSnapshotCursor(int key, GhosttySnapshotStyle pen)
+    {
+        ThrowIfSnapshotMutationFailed();
+        if (_snapshotPageTracker is not { } tracker || GetSnapshotRows(key) is not { } rows) return;
+        try { tracker.RestorePrunedCursor(this, rows, key, pen, SnapshotPageLayout()); }
+        catch (OutOfMemoryException failure) when (RecordSnapshotMutationFailure(failure)) { throw; }
+    }
+
     internal int StartSnapshotHyperlink(int key, int cursorRow, GhosttySnapshotStyle pen,
         ReadOnlySpan<byte> uri, ReadOnlySpan<byte> explicitId, ref uint counter)
     {

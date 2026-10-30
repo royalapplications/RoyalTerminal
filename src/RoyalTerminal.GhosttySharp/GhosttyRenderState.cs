@@ -8,7 +8,7 @@ namespace RoyalTerminal.GhosttySharp;
 /// <summary>
 /// Managed lifetime wrapper for the official <c>GhosttyRenderState</c> libghostty-vt API.
 /// </summary>
-public sealed class GhosttyRenderState : IDisposable
+public sealed partial class GhosttyRenderState : IDisposable
 {
     private nint _handle;
     private nint _rowIterator;
@@ -476,6 +476,12 @@ public sealed class GhosttyRenderState : IDisposable
         }
 
         _disposed = true;
+
+        if (_imageIterator != nint.Zero)
+        {
+            GhosttyVtNative.RenderStateImageIteratorFree(_imageIterator);
+            _imageIterator = nint.Zero;
+        }
 
         if (_rowCells != nint.Zero)
         {

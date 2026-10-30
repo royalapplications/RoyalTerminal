@@ -11,7 +11,7 @@ public sealed partial class BasicVtProcessor
     /// <summary>
     /// Captures the live terminal and unfinished parser input in Ghostty's version-1 binary
     /// format. The caller owns the result and must serialize this call with all terminal access.
-    /// Includes both screens and history; upstream v1 omits images, glyph registrations and
+    /// Includes both screens, history and Kitty graphics; v1 omits glyph registrations and
     /// host selection. During synchronized output this captures live, not frozen render state.
     /// Continuation retention must be enabled. Throws before returning an incomplete snapshot.
     /// </summary>
@@ -49,6 +49,15 @@ public sealed partial class BasicVtProcessor
         int pages = 0;
         GhosttySnapshotPagePlan primary = new(_screen, 0, limits, ref cells, ref pages);
         GhosttySnapshotPagePlan? alternate = alternateExists ? new(_screen, 1, limits, ref cells, ref pages) : null;
+        GhosttySnapshotKittyStorage? primaryKitty = _primaryKittyStore.CaptureSnapshot(_screen, 0, primary);
+        GhosttySnapshotKittyStorage? alternateKitty = alternate is null ? null : _alternateKittyStore?.CaptureSnapshot(_screen, 1, alternate);
+        ManagedKittyGraphicsStore.SnapshotPayloadPlan primaryPixels = _primaryKittyStore.PlanSnapshotPayloads(_screen, 0, primary, primaryKitty);
+        ManagedKittyGraphicsStore.SnapshotPayloadPlan? alternatePixels = alternate is null ? null
+            : _alternateKittyStore?.PlanSnapshotPayloads(_screen, 1, alternate, alternateKitty);
+        Dictionary<int, GhosttySnapshotKittyPagePlacements>? primaryPlacements = primaryKitty is null ? null
+            : _primaryKittyStore.CaptureHistoryPlacements(_screen, 0, primary);
+        Dictionary<int, GhosttySnapshotKittyPagePlacements>? alternatePlacements = alternateKitty is null ? null
+            : _alternateKittyStore?.CaptureHistoryPlacements(_screen, 1, alternate!);
         long totalPayloadBytes = 0;
         GhosttySnapshotRecordBuffer payload = new(stackalloc byte[512], RecordLimit());
         try
@@ -59,8 +68,12 @@ public sealed partial class BasicVtProcessor
             if (alternate is not null) WriteScreen(ref payload, 1, alternate);
             payload.Write(continuation); Emit(ref payload, GhosttySnapshotRecordTag.Continuation);
             Emit(ref payload, GhosttySnapshotRecordTag.Ready);
+            WritePixels(ref payload, _inAltScreen ? 1 : 0, stage: 0);
             WriteHistory(ref payload, 0, primary);
             if (alternate is not null) WriteHistory(ref payload, 1, alternate);
+            WritePixels(ref payload, _inAltScreen ? 0 : 1, stage: 0);
+            WritePixels(ref payload, _inAltScreen ? 1 : 0, stage: 2);
+            WritePixels(ref payload, _inAltScreen ? 0 : 1, stage: 2);
             Emit(ref payload, GhosttySnapshotRecordTag.Finish);
         }
         finally { payload.Dispose(); }
@@ -72,6 +85,11 @@ public sealed partial class BasicVtProcessor
             _ = GhosttySnapshotScreenState.Read(payload.WrittenSpan, limits.MaximumPages, limits.MaximumStringBytesPerRecord);
             Emit(ref payload, GhosttySnapshotRecordTag.Screen);
             foreach (GhosttySnapshotPagePlan.Range range in plan.Resident) WritePage(ref payload, plan, range);
+            if ((key == 0 ? primaryKitty : alternateKitty) is { } kitty)
+            {
+                GhosttySnapshotKittyCodec.WriteStorage(ref payload, kitty);
+                Emit(ref payload, GhosttySnapshotRecordTag.KittyImageStorage);
+            }
         }
 
         void WriteHistory(ref GhosttySnapshotRecordBuffer payload, int key, GhosttySnapshotPagePlan plan)
@@ -80,7 +98,30 @@ public sealed partial class BasicVtProcessor
             BinaryPrimitives.WriteUInt16LittleEndian(header, (ushort)key);
             BinaryPrimitives.WriteUInt32LittleEndian(header[2..], (uint)plan.History.Count);
             payload.Write(header); Emit(ref payload, GhosttySnapshotRecordTag.History);
-            for (int i = plan.History.Count - 1; i >= 0; i--) WritePage(ref payload, plan, plan.History[i]);
+            for (int i = plan.History.Count - 1; i >= 0; i--)
+            {
+                GhosttySnapshotPagePlan.Range range = plan.History[i];
+                WritePage(ref payload, plan, range);
+                Dictionary<int, GhosttySnapshotKittyPagePlacements>? historyPlacements = key == 0 ? primaryPlacements : alternatePlacements;
+                if (historyPlacements is not null && historyPlacements.TryGetValue(i, out GhosttySnapshotKittyPagePlacements? placements))
+                {
+                    GhosttySnapshotKittyCodec.WritePagePlacements(ref payload, placements);
+                    Emit(ref payload, GhosttySnapshotRecordTag.KittyImagePagePlacements);
+                }
+                WritePixels(ref payload, key, stage: 1, page: i);
+            }
+        }
+
+        void WritePixels(ref GhosttySnapshotRecordBuffer payload, int key, int stage, int page = -1)
+        {
+            ManagedKittyGraphicsStore.SnapshotPayloadPlan? plan = key == 0 ? primaryPixels : alternatePixels;
+            if (plan is null) return;
+            foreach (ManagedKittyGraphicsStore.SnapshotPayload item in plan.Get(stage, page))
+            {
+                ManagedKittyImagePixels pixels = item.Image.Animation.FramePixels(item.Frame);
+                GhosttySnapshotKittyCodec.WritePayload(ref payload, key, item.Image.Id, (uint)item.Frame + 1, pixels.Data.Span);
+                Emit(ref payload, GhosttySnapshotRecordTag.KittyImagePayload);
+            }
         }
 
         void WritePage(ref GhosttySnapshotRecordBuffer payload, GhosttySnapshotPagePlan plan, GhosttySnapshotPagePlan.Range range)

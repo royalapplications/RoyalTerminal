@@ -1,0 +1,37 @@
+{
+  "baseline": {
+    "revision": "ad857e6f",
+    "sha256": {
+      "RoyalTerminal.Benchmarks.dll": "cb59ea5549da5c0b317c2e7bc2d3613ca515591d3e1885532c1e2fc31b0a4c6f",
+      "RoyalTerminal.Terminal.dll": "c9e3b49b9c96036d90ae5bb09d79c60bcf19bd4eb0fadb00025d2b97a3ec3ac9",
+      "libghostty-vt.dylib": "8cd464e9ad29dcc6c4367c99a40e4151c6a0c317ffe61eba62f4023c0a4c2341"
+    }
+  },
+  "before": {
+    "revision": "3ede1f13",
+    "sha256": {
+      "RoyalTerminal.Benchmarks.dll": "f46d79e77b1a4ca158d4071996a142465491ec0ef09438a595b694eb16a60128",
+      "RoyalTerminal.Terminal.dll": "f1115fe590a47689c03a8c0b4f7e88909304fd2b79d404a07f87d16050ef2fdc",
+      "libghostty-vt.dylib": "90309c37f0e5dbf4d9750100e4c6b493f8a94a12cee65b44ebe2aeb5d645323e"
+    }
+  },
+  "after": {
+    "revision": "b892a35dd161e1bc5450898152f05c2b7580da06",
+    "sha256": {
+      "RoyalTerminal.Benchmarks.dll": "d1c7716319120ccdacfe8e954d2f3c118a973d3572ccbf26aad5262157cf33e5",
+      "RoyalTerminal.Terminal.dll": "16f6a809958d1803523ce99b68f2c2e6718ff7a80b1f73e044891c5f628045e3",
+      "libghostty-vt.dylib": "90309c37f0e5dbf4d9750100e4c6b493f8a94a12cee65b44ebe2aeb5d645323e"
+    }
+  },
+  "settings": {
+    "tieredCompilation": false,
+    "samplesPerProcess": 7,
+    "processesPerVariant": 3,
+    "machine": "Apple M3 Pro, macOS arm64, 18 GiB RAM",
+    "sdk": "10.0.201",
+    "runtime": "10.0.5",
+    "configuration": "Release",
+    "zig": "0.16.0",
+    "nativeOptimize": "ReleaseFast"
+  }
+}

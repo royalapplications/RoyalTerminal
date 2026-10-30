@@ -111,7 +111,7 @@ const msg_render_failed: [*:0]const u8 = "render failed";
 const msg_out_of_memory: [*:0]const u8 = "out of memory";
 
 fn toCode(result: GhosttyRenderResult) c_int {
-    return @intFromEnum(result);
+    return @backingInt(result);
 }
 
 fn setError(out_error_utf8: ?*?[*:0]const u8, message: ?[*:0]const u8) void {
@@ -323,7 +323,7 @@ fn validateTarget(
                 return .invalid_target;
             }
 
-            if (builtin.os.tag != .macos) {
+            if (builtin.target.os.tag != .macos) {
                 setError(out_error_utf8, "Metal backend is only available on macOS");
                 return .unsupported_platform;
             }
@@ -338,7 +338,7 @@ fn validateTarget(
     return .ok;
 }
 
-const mac = if (builtin.os.tag == .macos) struct {
+const mac = if (builtin.target.os.tag == .macos) struct {
     const MTLOrigin = extern struct {
         x: usize,
         y: usize,
@@ -401,7 +401,7 @@ fn renderMetalToTarget(
     target: *const GhosttyRenderTargetDesc,
     out_sync_token: ?*u64,
 ) GhosttyRenderResult {
-    if (builtin.os.tag != .macos) {
+    if (builtin.target.os.tag != .macos) {
         return .unsupported_platform;
     }
 
@@ -749,7 +749,7 @@ test "validate target rejects unknown backend" {
     var error_text: ?[*:0]const u8 = null;
     const rc = ghostty_render_surface_validate_target(surface, &target, &error_text);
 
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), rc);
     try std.testing.expect(error_text != null);
 }
 
@@ -760,7 +760,7 @@ test "rgba fallback writes non-empty output" {
     const surface = ghostty_render_surface_new(context, .software) orelse return error.OutOfMemory;
     defer ghostty_render_surface_free(surface);
 
-    var buffer: [4 * 4 * 4]u8 = [_]u8{0} ** (4 * 4 * 4);
+    var buffer: [4 * 4 * 4]u8 = @splat(0);
 
     const rc = ghostty_render_surface_render_to_rgba(
         surface,
@@ -771,7 +771,7 @@ test "rgba fallback writes non-empty output" {
         16,
     );
 
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), rc);
 
     var any_non_zero = false;
     for (buffer) |byte| {
@@ -810,7 +810,7 @@ test "validate target enforces device/context handle invariants before backend s
 
     var error_text: ?[*:0]const u8 = null;
     const vulkan_rc = ghostty_render_surface_validate_target(vulkan_surface, &vulkan_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), vulkan_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), vulkan_rc);
     try std.testing.expect(error_text != null);
 
     const opengl_surface = ghostty_render_surface_new(context, .opengl) orelse return error.OutOfMemory;
@@ -835,7 +835,7 @@ test "validate target enforces device/context handle invariants before backend s
 
     error_text = null;
     const opengl_rc = ghostty_render_surface_validate_target(opengl_surface, &opengl_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), opengl_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), opengl_rc);
     try std.testing.expect(error_text != null);
 }
 
@@ -865,14 +865,14 @@ test "validate target enforces backend-specific Vulkan and D3D handle invariants
 
     var error_text: ?[*:0]const u8 = null;
     const vulkan_queue_rc = ghostty_render_surface_validate_target(vulkan_surface, &vulkan_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), vulkan_queue_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), vulkan_queue_rc);
     try std.testing.expect(error_text != null);
 
     vulkan_target.command_queue_handle = @ptrFromInt(0x4);
     vulkan_target.target_view_handle = null;
     error_text = null;
     const vulkan_view_rc = ghostty_render_surface_validate_target(vulkan_surface, &vulkan_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), vulkan_view_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), vulkan_view_rc);
     try std.testing.expect(error_text != null);
 
     const d3d11_surface = ghostty_render_surface_new(context, .d3d11) orelse return error.OutOfMemory;
@@ -897,7 +897,7 @@ test "validate target enforces backend-specific Vulkan and D3D handle invariants
 
     error_text = null;
     const d3d11_rc = ghostty_render_surface_validate_target(d3d11_surface, &d3d11_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), d3d11_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), d3d11_rc);
     try std.testing.expect(error_text != null);
 
     const d3d12_surface = ghostty_render_surface_new(context, .d3d12) orelse return error.OutOfMemory;
@@ -922,7 +922,7 @@ test "validate target enforces backend-specific Vulkan and D3D handle invariants
 
     error_text = null;
     const d3d12_rc = ghostty_render_surface_validate_target(d3d12_surface, &d3d12_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), d3d12_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), d3d12_rc);
     try std.testing.expect(error_text != null);
 }
 
@@ -952,7 +952,7 @@ test "validate target enforces metal target kind and pixel format invariants" {
 
     var error_text: ?[*:0]const u8 = null;
     const framebuffer_rc = ghostty_render_surface_validate_target(surface, &framebuffer_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), framebuffer_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), framebuffer_rc);
     try std.testing.expect(error_text != null);
 
     var rgba16_target: GhosttyRenderTargetDesc = .{
@@ -974,7 +974,7 @@ test "validate target enforces metal target kind and pixel format invariants" {
 
     error_text = null;
     const rgba16_rc = ghostty_render_surface_validate_target(surface, &rgba16_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_target), rgba16_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_target), rgba16_rc);
     try std.testing.expect(error_text != null);
 }
 
@@ -1004,7 +1004,7 @@ test "validate target accepts direct-target descriptors for non-metal backends" 
 
     var error_text: ?[*:0]const u8 = null;
     const vulkan_rc = ghostty_render_surface_validate_target(vulkan_surface, &vulkan_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), vulkan_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), vulkan_rc);
     try std.testing.expect(error_text == null);
 
     const d3d11_surface = ghostty_render_surface_new(context, .d3d11) orelse return error.OutOfMemory;
@@ -1029,7 +1029,7 @@ test "validate target accepts direct-target descriptors for non-metal backends" 
 
     error_text = null;
     const d3d11_rc = ghostty_render_surface_validate_target(d3d11_surface, &d3d11_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), d3d11_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), d3d11_rc);
     try std.testing.expect(error_text == null);
 
     const d3d12_surface = ghostty_render_surface_new(context, .d3d12) orelse return error.OutOfMemory;
@@ -1054,7 +1054,7 @@ test "validate target accepts direct-target descriptors for non-metal backends" 
 
     error_text = null;
     const d3d12_rc = ghostty_render_surface_validate_target(d3d12_surface, &d3d12_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), d3d12_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), d3d12_rc);
     try std.testing.expect(error_text == null);
 
     const opengl_surface = ghostty_render_surface_new(context, .opengl) orelse return error.OutOfMemory;
@@ -1079,7 +1079,7 @@ test "validate target accepts direct-target descriptors for non-metal backends" 
 
     error_text = null;
     const opengl_rc = ghostty_render_surface_validate_target(opengl_surface, &opengl_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), opengl_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), opengl_rc);
     try std.testing.expect(error_text == null);
 
     const software_surface = ghostty_render_surface_new(context, .software) orelse return error.OutOfMemory;
@@ -1104,7 +1104,7 @@ test "validate target accepts direct-target descriptors for non-metal backends" 
 
     error_text = null;
     const software_rc = ghostty_render_surface_validate_target(software_surface, &software_target, &error_text);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), software_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), software_rc);
     try std.testing.expect(error_text == null);
 }
 
@@ -1134,21 +1134,21 @@ test "render_to_target succeeds for non-metal backends and emits sync token" {
 
     var frame_token: u64 = 0;
     const begin_rc = ghostty_render_surface_begin_frame(vulkan_surface, &frame_token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), begin_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), begin_rc);
     try std.testing.expect(frame_token != 0);
 
     var sync_token: u64 = 0;
     const render_rc = ghostty_render_surface_render_to_target(vulkan_surface, &target, &sync_token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), render_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), render_rc);
     try std.testing.expectEqual(frame_token, sync_token);
 
     const end_rc = ghostty_render_surface_end_frame(vulkan_surface, frame_token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), end_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), end_rc);
 
     target.frame_id = 42;
     sync_token = 0;
     const implicit_rc = ghostty_render_surface_render_to_target(vulkan_surface, &target, &sync_token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), implicit_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), implicit_rc);
     try std.testing.expectEqual(@as(u64, 42), sync_token);
 
     const opengl_surface = ghostty_render_surface_new(context, .opengl) orelse return error.OutOfMemory;
@@ -1172,7 +1172,7 @@ test "render_to_target succeeds for non-metal backends and emits sync token" {
     };
 
     const opengl_rc = ghostty_render_surface_render_to_target(opengl_surface, &opengl_target, null);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), opengl_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), opengl_rc);
 }
 
 test "frame lifecycle APIs enforce begin/end ordering" {
@@ -1184,20 +1184,20 @@ test "frame lifecycle APIs enforce begin/end ordering" {
 
     var token: u64 = 0;
     const begin_rc = ghostty_render_surface_begin_frame(surface, &token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), begin_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), begin_rc);
     try std.testing.expect(token != 0);
 
     const second_begin_rc = ghostty_render_surface_begin_frame(surface, null);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_argument), second_begin_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_argument), second_begin_rc);
 
     const bad_end_rc = ghostty_render_surface_end_frame(surface, token + 1);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_argument), bad_end_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_argument), bad_end_rc);
 
     const end_rc = ghostty_render_surface_end_frame(surface, token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.ok), end_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.ok), end_rc);
 
     const second_end_rc = ghostty_render_surface_end_frame(surface, token);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_argument), second_end_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_argument), second_end_rc);
 }
 
 test "set_scale rejects non-finite values" {
@@ -1208,8 +1208,8 @@ test "set_scale rejects non-finite values" {
     defer ghostty_render_surface_free(surface);
 
     const nan_rc = ghostty_render_surface_set_scale(surface, std.math.nan(f64), 1.0);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_argument), nan_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_argument), nan_rc);
 
     const inf_rc = ghostty_render_surface_set_scale(surface, std.math.inf(f64), 1.0);
-    try std.testing.expectEqual(@intFromEnum(GhosttyRenderResult.invalid_argument), inf_rc);
+    try std.testing.expectEqual(@backingInt(GhosttyRenderResult.invalid_argument), inf_rc);
 }

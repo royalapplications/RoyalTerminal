@@ -196,7 +196,7 @@ APIs are unchanged.
 Run the focused suite after building and staging the matching native library:
 
 ```text
-zig build test-history -Dtarget=aarch64-windows -Doptimize=ReleaseFast
+zig build test-history -Dtarget=aarch64-windows -Doptimize=fast
 dotnet test tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj
 ```
 

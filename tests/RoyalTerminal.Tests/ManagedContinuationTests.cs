@@ -11,6 +11,31 @@ namespace RoyalTerminal.Tests;
 public sealed class ManagedContinuationTests
 {
     [Theory]
+    [InlineData("\u001b[12\u009d2;title", "\u001b]2;title")]
+    [InlineData("\u001b_Gabc\u009b1", "\u001b[1")]
+    [InlineData("\u001b[1\u009fx", "\u001b_x")]
+    [InlineData("\u001b[1\u009b2", "\u001b[2")]
+    [InlineData("\u001b\u0098", "\u001bX")]
+    [InlineData("\u001b[1\u009e", "\u001b^")]
+    [InlineData("\u001bP1\u009b2", "\u001b[2")]
+    [InlineData("\u001b]2;\u009b", "\u001b]2;\u009b")]
+    [InlineData("\u001bPq\u009b", "\u001bPq\u009b")]
+    [InlineData("\u001b_a\u009fb", "\u001b_a\u009fb")]
+    public void C1IntroducersRestartOnlyWhenTheyStartANewParserOperation(string input, string expected)
+    {
+        byte[] bytes = Encoding.Latin1.GetBytes(input);
+        byte[] canonical = Encoding.Latin1.GetBytes(expected);
+        for (int split = 0; split <= bytes.Length; split++)
+        {
+            using BasicVtProcessor processor = new(new TerminalScreen(8, 2));
+            processor.Process(bytes.AsSpan(0, split));
+            processor.Process(bytes.AsSpan(split));
+            Assert.Equal(canonical, processor.GetContinuation());
+            Assert.True(RoyalTerminal.Terminal.Snapshots.GhosttySnapshotContinuation.IsValid(canonical));
+        }
+    }
+
+    [Theory]
     [InlineData("\x1b[38;2;1;2;3", "mX")]
     [InlineData("\x1b]2;héllo", "\x1b\\X")]
     [InlineData("\x1b]2;hello\x1b", "\\X")]

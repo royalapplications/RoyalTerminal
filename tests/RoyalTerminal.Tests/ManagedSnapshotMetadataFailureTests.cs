@@ -96,7 +96,7 @@ public sealed partial class ManagedSnapshotMetadataFailureTests
     [InlineData(true, true, false)]
     [InlineData(false, false, true)]
     [InlineData(true, true, true)]
-    public void RefusedCrossPageTransferRetainsSourceAndScalarPrefixAndStopsBeforeTail(bool occupiedTail, bool supplementary, bool remapped)
+    public void WholeCrossPageTransferAvoidsScalarReplacementFragmentation(bool occupiedTail, bool supplementary, bool remapped)
     {
         GhosttySnapshotPageCapacity target = CeilingCapacity(GhosttySnapshotCapacityDimension.GraphemeBytes);
         TerminalScreen screen = Screen(8, 4096, new(8, 1, 16, 192, 1024, 2048), target);
@@ -116,50 +116,64 @@ public sealed partial class ManagedSnapshotMetadataFailureTests
 
         Process(processor, (remapped ? "\u001b(0" : "") + "\u2764");
 
-        // First-fit replacement scratch fragments the free bitmap suffix;
-        // the 49th scalar cannot reserve 13 contiguous chunks before freeing 12.
-        Assert.Equal((remapped ? " " : "\u263a") + string.Concat(Enumerable.Repeat(mark, 48)), destination.ReadOnlyCells[0].Grapheme);
-        Assert.Equal(remapped ? ' ' : 0x263A, destination.ReadOnlyCells[0].Codepoint);
+        // Ghostty now captures the suffix before clearing the source and installs
+        // it once. The old scalar-at-a-time replacement exhausted contiguous
+        // scratch here, even though the completed suffix fits in this page.
+        // Charset selection never remaps a transferred grapheme or a scalar above 0xFF.
+        Assert.Equal(prefix + "\u2764", destination.ReadOnlyCells[0].Grapheme);
+        Assert.Equal(0x263A, destination.ReadOnlyCells[0].Codepoint);
         Assert.Equal((byte)2, destination.ReadOnlyCells[0].Width);
-        Assert.Equal(tail.Grapheme, destination.ReadOnlyCells[1].Grapheme);
-        Assert.Equal(tail.Width, destination.ReadOnlyCells[1].Width);
-        Assert.Equal(prefix, source.ReadOnlyCells[7].Grapheme);
+        Assert.Null(destination.ReadOnlyCells[1].Grapheme);
+        Assert.Equal((byte)0, destination.ReadOnlyCells[1].Width);
+        Assert.Null(source.ReadOnlyCells[7].Grapheme);
         Assert.Equal(0, source.ReadOnlyCells[7].Codepoint);
         Assert.True(source.ReadOnlyCells[7].IsWideSpacerHead);
-        Assert.Equal(0, processor.CursorCol);
+        Assert.Equal(2, processor.CursorCol);
         Assert.Equal(1, processor.CursorRow);
         Assert.False(source.SnapshotAllocation!.MetadataOverflow);
         Assert.False(destination.SnapshotAllocation!.MetadataOverflow);
-        Assert.Equal((1UL, 256UL), GraphemeUsage(screen, source));
-        Assert.Equal((4UL, 736UL), GraphemeUsage(screen, destination));
+        Assert.Equal((0UL, 0UL), GraphemeUsage(screen, source));
+        Assert.Equal(occupiedTail ? (3UL, 544UL) : (4UL, 800UL), GraphemeUsage(screen, destination));
         Assert.Equal((3UL, 544UL), GraphemeUsage(retained, retained.GetViewportRow(1)));
         Assert.Equal(prefix, retained.GetViewportRow(0).ReadOnlyCells[7].Grapheme);
+        Assert.Equal(tail.Grapheme, retained.GetViewportRow(1).ReadOnlyCells[1].Grapheme);
+        Assert.Equal(tail.Width, retained.GetViewportRow(1).ReadOnlyCells[1].Width);
 
-        // A later overwrite releases only the copied prefix, not its source.
-        Process(processor, "X");
-        Assert.Equal(prefix, source.ReadOnlyCells[7].Grapheme);
+        // A later overwrite releases the completed suffix without changing the
+        // source/destination owners retained before the transfer.
+        Process(processor, "\u001b[2;1HX");
+        Assert.Null(source.ReadOnlyCells[7].Grapheme);
         Assert.Null(destination.ReadOnlyCells[0].Grapheme);
-        Assert.Equal((1UL, 256UL), GraphemeUsage(screen, source));
+        Assert.Equal((0UL, 0UL), GraphemeUsage(screen, source));
+        Assert.Equal(occupiedTail ? (2UL, 288UL) : (3UL, 544UL), GraphemeUsage(screen, destination));
+        Assert.Equal(prefix, retained.GetViewportRow(0).ReadOnlyCells[7].Grapheme);
     }
 
     [Fact]
-    public void RefusedFirstTransferredScalarLeavesNoDestinationSuffixAndDoesNotReleaseSource()
+    public void RefusedWholeSuffixTransferKeepsSourceClearedAndStopsBeforeTail()
     {
         TerminalScreen screen = Screen(8, 4096, new(8, 1, 16, 192, 1024, 2048),
             CeilingCapacity(GhosttySnapshotCapacityDimension.GraphemeBytes));
         TerminalRow source = screen.GetViewportRow(0), destination = screen.GetViewportRow(1);
         for (int i = 1; i <= 4; i++) SetGrapheme(destination, i, 64);
         using BasicVtProcessor processor = new(screen);
-        Process(processor, "\u001b[?2027h\u001b[1;8H\u263a\u200d\u2764");
+        Process(processor, "\u001b[?2027h\u001b[1;8H\u263a\u200d");
+        using (screen.EditSnapshotRowMetadata(destination)) { }
+        TerminalScreen retained = screen.CreateStateCopy();
+        Process(processor, "\u2764");
 
         Assert.Null(destination.ReadOnlyCells[0].Grapheme);
         Assert.Equal(0x263A, destination.ReadOnlyCells[0].Codepoint);
         Assert.Equal((byte)2, destination.ReadOnlyCells[0].Width);
-        Assert.Equal("\u263a\u200d", source.ReadOnlyCells[7].Grapheme);
+        Assert.Null(source.ReadOnlyCells[7].Grapheme);
+        Assert.Equal(0, source.ReadOnlyCells[7].Codepoint);
+        Assert.True(source.ReadOnlyCells[7].IsWideSpacerHead);
         Assert.Equal((byte)1, destination.ReadOnlyCells[1].Width);
         Assert.Equal(0, processor.CursorCol);
         Assert.Equal((4UL, 1024UL), GraphemeUsage(screen, destination));
-        Assert.Equal((1UL, 16UL), GraphemeUsage(screen, source));
+        Assert.Equal((0UL, 0UL), GraphemeUsage(screen, source));
+        Assert.Equal("\u263a\u200d", retained.GetViewportRow(0).ReadOnlyCells[7].Grapheme);
+        Assert.Equal((1UL, 16UL), GraphemeUsage(retained, retained.GetViewportRow(0)));
         Assert.False(destination.SnapshotAllocation!.MetadataOverflow);
     }
 

@@ -11,6 +11,27 @@ namespace RoyalTerminal.Tests;
 
 public sealed class ManagedApcParserParityTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData(0x18)]
+    [InlineData(0x1A)]
+    [InlineData(0x9B)]
+    [InlineData(0x85)]
+    public void CancelledOrAbortedKittyCommandHasNoEffectsAndParserRecovers(int exit)
+    {
+        TerminalScreen screen = new(8, 3);
+        using BasicVtProcessor processor = new(screen);
+        processor.NotifyResize(8, 3, 80, 30);
+        List<byte[]> responses = [];
+        processor.ResponseCallback = responses.Add;
+        processor.Process("\u001b_Ga=T,i=7,s=1,v=1,f=24,C=1;AAAA"u8);
+        processor.Process(new byte[] { (byte)exit });
+        Assert.False(screen.TryGetKittyImageSource(7, out _));
+        Assert.Empty(responses);
+        processor.Process("\u001b_Ga=T,i=8,s=1,v=1,f=24,C=1;AAAA\u001b\\"u8);
+        Assert.True(screen.TryGetKittyImageSource(8, out _));
+        Assert.Single(responses);
+    }
+
     [Fact]
     public void EveryApcPayloadByteMatchesNativeTransitionsAndUnknownReporting()
     {
@@ -30,7 +51,7 @@ public sealed class ManagedApcParserParityTests(ITestOutputHelper output)
     [InlineData(0x9C)]
     [InlineData(0x9B)]
     [InlineData(0x85)]
-    public void CompletedKittyQueryMatchesNativeEvenOnAbortingExit(int exit)
+    public void KittyQueryTerminationAndCancellationMatchNative(int exit)
     {
         if (!NativeAvailable()) return;
         byte[] prefix = "\u001b_Ga=q,i=73,s=1,v=1,f=32;AAAA/w=="u8.ToArray();
@@ -57,7 +78,7 @@ public sealed class ManagedApcParserParityTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void C1ExitAfterKittyCommitRetainsOnlyCanonicalNewSequence()
+    public void C1AbortDiscardsKittyCommandAndRetainsOnlyCanonicalNewSequence()
     {
         using BasicVtProcessor source = new(new TerminalScreen(12, 3)), replay = new(new TerminalScreen(12, 3));
         List<byte[]> responses = [], replayResponses = [];
@@ -65,7 +86,7 @@ public sealed class ManagedApcParserParityTests(ITestOutputHelper output)
         replay.ResponseCallback = replayResponses.Add;
         source.Process("\u001b_Ga=q,i=73,s=1,v=1,f=32;AAAA/w=="u8);
         source.Process(new byte[] { 0x9B, (byte)'3' });
-        Assert.Single(responses);
+        Assert.Empty(responses);
         Assert.Equal("\u001b[3"u8.ToArray(), source.GetContinuation());
         Assert.True(GhosttySnapshotContinuation.IsValid(source.GetContinuation()));
         replay.Process(source.GetContinuation());

@@ -59,7 +59,7 @@ public sealed class GhosttyKittyGraphics
     {
         _ = _terminal.Handle;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsAnimationTick(
-            Handle, nowMilliseconds, out ulong delay);
+            Handle, nowMilliseconds, out ulong nextMilliseconds);
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
         {
             return null;
@@ -67,10 +67,10 @@ public sealed class GhosttyKittyGraphics
 
         if (result != GhosttyVtNative.GhosttyResult.Success)
         {
-            throw new InvalidOperationException($"ghostty_royal_kitty_graphics_animation_tick failed with {result}.");
+            throw new InvalidOperationException($"ghostty_kitty_graphics_animation_tick failed with {result}.");
         }
 
-        return delay;
+        return nextMilliseconds > nowMilliseconds ? nextMilliseconds - nowMilliseconds : 0;
     }
 
     /// <summary>Creates an owned placement iterator.</summary>

@@ -1,9 +1,12 @@
 //! Build upstream libghostty-vt with RoyalTerminal's narrowly scoped extensions.
 //! All code shares one Zig module, allocator and process-wide generation source.
 const std = @import("std");
+const package_target = @import("src/package_target.zig");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+    if (package_target.normalize(target.query, target.result.os.tag, target.result.abi)) |query|
+        target = b.resolveTargetQuery(query);
     const optimize = b.standardOptimizeOption(.{});
     const simd = b.option(bool, "simd", "Enable upstream SIMD implementation") orelse true;
     const ghostty = b.dependency("ghostty", .{
@@ -20,6 +23,17 @@ pub fn build(b: *std.Build) !void {
     // exist. Let the build runner fetch them and reconfigure before inspecting
     // Wuffs' nested imports; do not turn a cache miss into a build failure.
     if (b.graph.needed_lazy_dependencies.count() != 0) return;
+
+    // Kitty's POSIX shared-memory loader needs libc even when the portable
+    // packages disable upstream SIMD. Upstream only enables libc for SIMD.
+    // Keep librt explicit on Linux: shm_open/shm_unlink lived there before
+    // glibc 2.34, which is newer than our supported GNU target baseline.
+    if (target.result.os.tag.isDarwin() or
+        (target.result.os.tag == .linux and !target.result.abi.isAndroid()))
+    {
+        module.link_libc = true;
+        if (target.result.os.tag == .linux) module.linkSystemLibrary("rt", .{});
+    }
 
     // Wuffs uses per-function target attributes to emit AVX2 pixel routines
     // even for a baseline module with Ghostty's SIMD bundle disabled. Keep
@@ -49,13 +63,12 @@ pub fn build(b: *std.Build) !void {
             b.pathJoin(&.{ "terminal", "PageList.zig" }),
             b.pathJoin(&.{ "terminal", "bitmap_allocator.zig" }),
             b.pathJoin(&.{ "terminal", "kitty", "graphics_storage.zig" }),
-            b.pathJoin(&.{ "terminal", "stream_continuation.zig" }),
             b.pathJoin(&.{ "terminal", "stream.zig" }),
             b.pathJoin(&.{ "terminal", "stream_terminal.zig" }),
             b.pathJoin(&.{ "terminal", "c", "terminal.zig" }),
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "4ca194a422f9400f4337daccfea8d8ae98d475db47042626e647875a049dc2b5", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "68b23d077e45ec680e158691409705bdfbf6d2fc45322cd30c7153265b8aad70", &.{
         .{
             .before = "            assert(self.screens.active_key == .alternate);\n            self.eraseDisplay(.complete, false);",
             .after = "            assert(self.screens.active_key == .alternate);\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
@@ -90,11 +103,11 @@ pub fn build(b: *std.Build) !void {
             .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "09d759a005b392be35f3c6a42a2513ed586b2f32999b9ea9d76c05cfe6ec04b6", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "33e5bd5515e96a059cbb2c438fb2634333c0a712f29134ffdd2509923f97aa1f", &.{
         .{
             // PageList pruning can remap the cursor before cursorReload gets
             // a chance to migrate its page-local style and hyperlink IDs.
-            .before = "    try self.pages.scrollClear();\n    self.cursorReload();\n",
+            .before = "    const old_node = self.cursor.page_pin.node;\n    try self.pages.scrollClear();\n    if (self.cursor.page_pin.node != old_node) {\n        // The page list marks a moved pin as garbage. The pin does point\n        // at a real location, and cursorReload needs to read it to place\n        // the cursor, so we clear the flag.\n        self.cursor.page_pin.garbage = false;\n\n        // The old page has been freed, so nothing can be released from\n        // it. cursorPageReplaced adds the style and hyperlink to the new\n        // page and then reloads the cursor.\n        self.cursorPageReplaced();\n    } else {\n        self.cursorReload();\n    }\n",
             .after = @embedFile("src/scroll_clear_reload.zig.inc"),
         },
         .{
@@ -110,7 +123,7 @@ pub fn build(b: *std.Build) !void {
             .after = "    // On the new page, we need to migrate our hyperlink\n    if (self.cursor.hyperlink) |link| {\n        if (self.cursor.hyperlink_id != 0) {\n            const page = self.cursor.page_pin.node.page();\n            page.hyperlink_set.release(page.memory, self.cursor.hyperlink_id);\n            self.cursor.hyperlink_id = 0;\n        }\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "ce371ed17ba9eb00f69b776cc78034e17bc588594a54706ae275814eea72d425", &.{
+    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "1c7faa54173b0f3156e4e2ba2df06fb2601fa14a32650aef9a5594508228097f", &.{
         .{
             .before = "page_serial_epoch: u64,",
             .after = "page_serial_epoch: u64,\n\n// Bounded history coordinates: prefix eviction preserves layout identity.\nroyal_history_epoch: u64 = 1,\nroyal_history_origin: u64 = 0,\n",
@@ -186,7 +199,7 @@ pub fn build(b: *std.Build) !void {
         .before = "            // If the number of available chunks at the start of this bitmap\n",
         .after = "            if (i >= bitmaps.len) return null;\n\n            // If the number of available chunks at the start of this bitmap\n",
     }});
-    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "a2c29c02531f00b939485a9e45eeb8198d55648f116282c31e37bed84677328d", &.{
+    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "1c1f3b5cfdbdc26e65fbd42576cc85b18bede7919ec2004e264732cf11afdeb9", &.{
         .{
             .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
             .after = "        const removed_idx: u32 = number - 1;",
@@ -206,31 +219,19 @@ pub fn build(b: *std.Build) !void {
             .after = "        assert(req <= self.total_bytes);",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/stream_continuation.zig", "a86feef9e53dc62349e64ddb6d25f1d6d971b9813578a24e915e39daeb39a9a2", &.{.{
-        .before = "        var scanner: BoundaryScanner = .init();\n        for (self.bytes.items) |c| {\n            if (scanner.next(c) == .omittable) continue;\n            try writer.writeByte(c);\n        }\n",
-        .after = @embedFile("src/continuation_write.zig.inc"),
-    }});
     // Route the already-validated upstream OSC 99 command to our shared host.
     // Deliberately do not add an Action enum member: that would change upstream's C ABI.
-    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "7a32e3f1dbf516d2204a789b8f74cc4ffbcbb3e223ed0f2c66f7a2a953d360f9", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "084e0d3f5d10bd84f9eef31a97ceb976d2abb54e8b4fe139f403a5af91539055", &.{ .{
         .before = "                .kitty_desktop_notification,\n",
         .after = "",
     }, .{
         .before = "                .conemu_sleep,\n",
         .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
     } });
-    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "49dbd67f02e2af36bcd17235b7552bae33fe37e36014fe87221f0d539a277360", &.{
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "1b58936b58f1b553e800fcd1390ed2c62f9ec600998c73ddabc71529131786fd", &.{
         .{
             .before = "    pub const Effects = struct {\n",
-            .after = "    pub const Effects = struct {\n        royal_window_resize: ?*const fn (*Handler, u16, u16) void = null,\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
-        },
-        .{
-            .before = "            .resize_window,\n",
-            .after = "",
-        },
-        .{
-            .before = "            // Have no terminal-modifying effect\n",
-            .after = "            .resize_window => {\n                if (self.effects.royal_window_resize) |callback| callback(self, value.rows, value.columns);\n            },\n\n            // Have no terminal-modifying effect\n",
+            .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
         },
         .{
             // Anchor to the Handler indentation. Test handlers declare the same
@@ -243,52 +244,34 @@ pub fn build(b: *std.Build) !void {
             .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "9b06653cb34f7407b510f25111cb45c83014a3adfc9c031c48ecc537c6f67136", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "af9cffc06f9c0d6323a4071c2a3ba14fe41b3f061d7bc4725e046441ca0688f0", &.{ .{
         .before = "const Effects = struct {\n",
-        .after = "const Effects = struct {\n    royal_window_resize: ?*const fn (Terminal, ?*anyopaque, u16, u16) callconv(.c) void = null,\n    royal_window_resize_userdata: ?*anyopaque = null,\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
+        .after = "const Effects = struct {\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
     }, .{
         .before = "    fn desktopNotificationTrampoline(\n",
-        .after = @embedFile("src/window_resize_effect.zig.inc") ++ @embedFile("src/notification_effect.zig.inc") ++ "    fn desktopNotificationTrampoline(\n",
+        .after = @embedFile("src/notification_effect.zig.inc") ++ "    fn desktopNotificationTrampoline(\n",
     }, .{
         .before = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n",
-        .after = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n        .royal_window_resize = &Effects.royalWindowResizeTrampoline,\n        .royal_notification = &Effects.royalNotificationTrampoline,\n",
+        .after = "        .desktop_notification = &Effects.desktopNotificationTrampoline,\n        .royal_notification = &Effects.royalNotificationTrampoline,\n",
     } });
+    b.dependOnFileContents(ghostty.path("src/lib_vt.zig"));
     const upstream = try std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
-        ghostty.path("src/lib_vt.zig").getPath(b),
+        try ghostty.builder.root.joinString(b.allocator, "src/lib_vt.zig"),
         b.allocator,
         .unlimited,
     );
     module.root_source_file = sources.add(
         "src/lib_vt_royal.zig",
-        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig"), "\n", @embedFile("src/window_resize.zig"), "\n", @embedFile("src/history.zig") }),
+        try std.mem.concat(b.allocator, u8, &.{ upstream, "\n", @embedFile("src/extensions.zig"), "\n", @embedFile("src/drag_drop.zig"), "\n", @embedFile("src/notifications.zig"), "\n", @embedFile("src/history.zig") }),
     );
 
     // Retain Ghostty's platform linking, symbol visibility, static archive
     // bundling, deployment targets and libSystem compatibility workarounds.
     // Every already-created upstream artifact references this same module.
-    const install = b.addInstallDirectory(.{
-        .source_dir = .{ .cwd_relative = ghostty.builder.install_path },
-        .install_dir = .prefix,
-        .install_subdir = "",
-    });
-    install.step.dependOn(ghostty.builder.getInstallStep());
-    b.getInstallStep().dependOn(&install.step);
-    // InstallDirectory skips symlinks. Materialize the canonical shared-library
-    // name explicitly so fresh builds never depend on a stale local artifact.
-    const shared_dir: std.Build.InstallDir = if (target.result.os.tag == .windows) .bin else .lib;
-    const shared_name: []const u8 = switch (target.result.os.tag) {
-        .windows => "ghostty-vt.dll",
-        .macos => "libghostty-vt.dylib",
-        else => "libghostty-vt.so",
-    };
-    const canonical = b.addInstallFileWithDir(
-        .{ .cwd_relative = ghostty.builder.getInstallPath(shared_dir, shared_name) },
-        shared_dir,
-        shared_name,
-    );
-    canonical.step.dependOn(&install.step);
-    b.getInstallStep().dependOn(&canonical.step);
+    b.getInstallStep().dependOn(ghostty.builder.getInstallStep());
+    if (target.result.os.tag == .linux and !target.result.abi.isAndroid())
+        try installLinuxPkgConfig(b, ghostty.builder.getInstallStep());
     b.installFile("include/royalterminal_ghostty_vt.h", "include/royalterminal_ghostty_vt.h");
 
     const static_step = b.step("static", "Build the static library including extensions");
@@ -296,7 +279,52 @@ pub fn build(b: *std.Build) !void {
 
     const history_tests = b.addTest(.{ .root_module = module, .filters = &.{"Royal history"} });
     const history_run = b.addRunArtifact(history_tests);
-    b.step("test-history", "Test bounded-history metadata and row references").dependOn(&history_run.step);
+    const history_step = b.step("test-history", "Test bounded-history metadata and row references");
+    history_step.dependOn(&history_run.step);
+
+    const metadata_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/pkg_config.zig"),
+        .target = b.graph.host,
+    }) });
+    const metadata_run = b.addRunArtifact(metadata_tests);
+    b.step("test-pkg-config", "Test Linux package metadata correction").dependOn(&metadata_run.step);
+    history_step.dependOn(&metadata_run.step);
+
+    const target_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/package_target.zig"),
+        .target = b.graph.host,
+    }) });
+    const target_run = b.addRunArtifact(target_tests);
+    b.step("test-package-target", "Test native and explicit GNU package targets").dependOn(&target_run.step);
+    history_step.dependOn(&target_run.step);
+}
+
+fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void {
+    const generator = b.addExecutable(.{
+        .name = "royal-pkg-config",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/pkg_config.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    var found: usize = 0;
+    const shared_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt.pc" });
+    const static_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt-static.pc" });
+    for (upstream_install.dependencies.items) |step| {
+        const original = step.cast(std.Build.Step.InstallFile) orelse continue;
+        const is_static = std.mem.eql(u8, original.dest_rel_path, static_path);
+        if (!is_static and !std.mem.eql(u8, original.dest_rel_path, shared_path)) continue;
+        const run = b.addRunArtifact(generator);
+        run.addFileArg(original.source);
+        run.addArg(if (is_static) "static" else "shared");
+        const install = b.addInstallFileWithDir(run.captureStdOut(.{}), .prefix, original.dest_rel_path);
+        // Retain every upstream field and finish its installation first, then
+        // replace only the two package descriptions with corrected link flags.
+        install.step.dependOn(upstream_install);
+        b.getInstallStep().dependOn(&install.step);
+        found += 1;
+    }
+    if (found != 2) return error.MissingUpstreamPkgConfigFiles;
 }
 
 const Overlay = struct {
@@ -314,9 +342,10 @@ fn addOverlay(
     overlays: []const Overlay,
 ) !void {
     const source_path = b.pathJoin(&.{ "src", path });
+    b.dependOnFileContents(ghostty.path(source_path));
     const original = try std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
-        ghostty.path(source_path).getPath(b),
+        try ghostty.builder.root.joinString(b.allocator, source_path),
         b.allocator,
         .unlimited,
     );

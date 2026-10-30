@@ -12,19 +12,18 @@ namespace RoyalTerminal.Tests;
 // generic pin tracking for each failed restore append. WT ImageSlice moves row
 // pixel slices and xterm Buffer tracks line markers; neither defines this Kitty
 // pin-restore failure contract. Royal follows Ghostty for margins and uses the
-// same safe degradation for its extra marginless/history compatibility scratch.
+// same safe degradation for its extra marginless compatibility scratch. History
+// erasure removes placements without allocating restore scratch.
 public sealed class ManagedKittyScrollFailureTests
 {
     [Theory]
     [InlineData(0, false)]
     [InlineData(1, false)]
-    [InlineData(2, false)]
     [InlineData(0, true)]
     [InlineData(1, true)]
-    [InlineData(2, true)]
     public void OneFailedGrowthKeepsOtherRestoresAndAllowsRetry(int kind, bool growExisting)
     {
-        (TerminalScreen screen, ManagedKittyGraphicsStore store) = Scene(kind == 2);
+        (TerminalScreen screen, ManagedKittyGraphicsStore store) = Scene(false);
         int count = growExisting ? 6 : 3;
         for (uint id = 1; id <= (growExisting ? 4 : count); id++) Add(screen, store, id);
         if (growExisting)
@@ -74,18 +73,16 @@ public sealed class ManagedKittyScrollFailureTests
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    [InlineData(2)]
     public void WarmRestoreScratchDoesNotAllocateOrInvokeCapacityCheckpoint(int kind)
     {
-        (TerminalScreen screen, ManagedKittyGraphicsStore store) = Scene(kind == 2);
+        (TerminalScreen screen, ManagedKittyGraphicsStore store) = Scene(false);
         for (uint id = 1; id <= 6; id++) Add(screen, store, id);
         Action<ManagedKittyStoreAllocation> unexpected = _ => throw new InvalidOperationException();
         // A zero delta keeps every placement eligible through repeated cycles.
         void Cycle(Action<ManagedKittyStoreAllocation>? checkpoint)
         {
             if (kind == 0) store.BeginMarginScroll(screen, 1, 5, 0, 10, 10, allocationCheckpoint: checkpoint);
-            else if (kind == 1) store.BeginPinScroll(screen, 0, false, checkpoint);
-            else Assert.True(store.BeginHistoryErase(screen, checkpoint));
+            else store.BeginPinScroll(screen, 0, false, checkpoint);
             store.EndMarginScroll(screen);
         }
         Cycle(null);
@@ -154,7 +151,7 @@ public sealed class ManagedKittyScrollFailureTests
             throw new OutOfMemoryException();
         };
         Write(processor, operation);
-        Assert.Equal(1, failures);
+        Assert.Equal(kind == "history" ? 0 : 1, failures);
         Assert.Equal(expected, screen.GetViewportRow(row).ReadOnlyCells[0].Codepoint);
         Assert.False(screen.SnapshotMutationFailed);
         Assert.True(processor.IsParserGround);
@@ -170,7 +167,7 @@ public sealed class ManagedKittyScrollFailureTests
         (TerminalScreen screen, ManagedKittyGraphicsStore store) = Scene(false);
         Action<ManagedKittyStoreAllocation> unexpected = _ => throw new InvalidOperationException();
         store.BeginPinScroll(screen, 0, false, unexpected);
-        Assert.False(store.BeginHistoryErase(screen, unexpected));
+        Assert.False(store.EraseHistory(screen));
         Add(screen, store, 1, row: 0);
         Add(screen, store, 2, options: ",U=1");
         store.BeginMarginScroll(screen, 1, 5, -1, 10, 10, allocationCheckpoint: unexpected);
@@ -215,8 +212,7 @@ public sealed class ManagedKittyScrollFailureTests
         Action<ManagedKittyStoreAllocation>? checkpoint = null)
     {
         if (kind == 0) store.BeginMarginScroll(screen, 1, 5, -1, 10, 10, allocationCheckpoint: checkpoint);
-        else if (kind == 1) store.BeginPinScroll(screen, 0, false, checkpoint);
-        else Assert.True(store.BeginHistoryErase(screen, checkpoint));
+        else store.BeginPinScroll(screen, 0, false, checkpoint);
     }
 
     private static void Write(BasicVtProcessor processor, string text) => processor.Process(Encoding.ASCII.GetBytes(text));

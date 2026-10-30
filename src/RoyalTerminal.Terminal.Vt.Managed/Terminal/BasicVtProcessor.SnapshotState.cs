@@ -16,6 +16,7 @@ public sealed partial class BasicVtProcessor
         InstallSnapshotCursorPolicy(ready.Terminal.Header);
         InstallSnapshotGeometry(ready.Terminal);
         foreach (GhosttySnapshotScreen screen in ready.Screens) InstallSnapshotScreenState(screen.State);
+        InstallSnapshotKitty(ready);
         InstallSnapshotMetadata(ready.Terminal);
         PasswordInput = ready.Terminal.Header.PasswordInput;
         if (!ready.Continuation.IsEmpty) Process(ready.Continuation);

@@ -14,7 +14,7 @@ public sealed partial class BasicVtProcessor
         bool extended = _extendedDecModes.Contains(ManagedDecModeFlag.ReverseWrapExtended);
         if (!_autoWrap || (!extended && !_extendedDecModes.Contains(ManagedDecModeFlag.ReverseWrap)))
         {
-            _cursorCol = Math.Max(0, _cursorCol - count);
+            _cursorCol = Math.Max(CursorLeftLimit, _cursorCol - count);
             ResetDelayedWrap();
             return;
         }

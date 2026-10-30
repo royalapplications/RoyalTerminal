@@ -733,6 +733,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
         if (scrollFraction != 0) canvas.Translate(0, -(float)(scrollFraction * _cellHeight));
         ReadOnlySpan<TerminalHighlightSpan> highlights = _highlightSpans;
         ReadOnlySpan<TerminalHighlightSpan> selectionSpans = _selectionSpans;
+        PrepareWideSelectionDamage(renderRows, selectionSpans);
         ReadOnlySpan<CompiledTextHighlightRule> textHighlightRules = _compiledTextHighlightRules;
         TerminalTextHighlightingMode textHighlightingMode = _textHighlightingMode;
         bool textHighlightingEnabled = textHighlightingMode != TerminalTextHighlightingMode.Disabled &&
@@ -780,6 +781,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                     selectionSpans,
                     highlights,
                     rowOverlays);
+                ExpandWideSelectionFlags(renderRows, index, selectionSpans, rowOverlays);
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(
                     textHighlightBuffer,
                     useFullRowBuffers ? index : 0,
@@ -822,6 +824,7 @@ public sealed partial class SkiaTerminalRenderer : IDisposable
                         selectionSpans,
                         highlights,
                         rowOverlays);
+                    ExpandWideSelectionFlags(renderRows, index, selectionSpans, rowOverlays);
                 }
 
                 Span<CellTextHighlightOverride> rowTextHighlights = GetRowTextHighlightOverrides(

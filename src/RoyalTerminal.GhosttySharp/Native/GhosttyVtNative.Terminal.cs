@@ -14,6 +14,8 @@ public static partial class GhosttyVtNative
         Bottom = 1,
         Delta = 2,
         Row = 3,
+        /// <summary>Move by semantic prompt boundaries.</summary>
+        DeltaPrompt = 4,
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 16)]
@@ -24,6 +26,10 @@ public static partial class GhosttyVtNative
 
         [FieldOffset(0)]
         public nuint Row;
+
+        /// <summary>Signed prompt count; positive moves toward newer prompts.</summary>
+        [FieldOffset(0)]
+        public nint DeltaPrompt;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -71,6 +77,13 @@ public static partial class GhosttyVtNative
                 },
             };
         }
+
+        /// <summary>Moves by prompt boundaries, clamping to the terminal ends.</summary>
+        public static GhosttyTerminalScrollViewport DeltaPrompts(nint delta) => new()
+        {
+            Tag = GhosttyTerminalScrollViewportTag.DeltaPrompt,
+            Value = new GhosttyTerminalScrollViewportValue { DeltaPrompt = delta },
+        };
     }
 
     public enum GhosttyTerminalCompressionMode : int
@@ -220,6 +233,8 @@ public static partial class GhosttyVtNative
     public enum GhosttyTerminalUnknownSequenceTag : int
     {
         Apc = 0,
+        /// <summary>Unsupported OSC sequence.</summary>
+        Osc = 1,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -236,6 +251,10 @@ public static partial class GhosttyVtNative
     {
         [FieldOffset(0)]
         public GhosttyTerminalUnknownStringSequence Apc;
+
+        /// <summary>Unsupported OSC content and terminator.</summary>
+        [FieldOffset(0)]
+        public GhosttyTerminalUnknownOscSequence Osc;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -404,6 +423,18 @@ public static partial class GhosttyVtNative
         ClipboardWriteMaxBytes = 39,
         ResizePullScrollback = 40,
         RenderHold = 41,
+        /// <summary>OSC 133 lifecycle callback.</summary>
+        SemanticPrompt = 42,
+        /// <summary>RIS callback.</summary>
+        Reset = 43,
+        /// <summary>Enable DECRQCRA replies.</summary>
+        XtChecksumReport = 44,
+        /// <summary>Default XTCHECKSUM flags (0–31).</summary>
+        XtChecksumExtension = 45,
+        /// <summary>OSC 7501 report callback; enables feature detection.</summary>
+        ProgramStatus = 46,
+        /// <summary>Host callback for terminal-requested window resizing.</summary>
+        ResizeWindow = 47,
     }
 
     public enum GhosttyTerminalData : int
@@ -449,6 +480,10 @@ public static partial class GhosttyVtNative
         VtGround = 38,
         CursorAtPrompt = 39,
         ClipboardWriteMaxBytes = 40,
+        /// <summary>Application-requested pointer shape.</summary>
+        MouseShape = 41,
+        /// <summary>Native page and image memory usage.</summary>
+        MemoryUsage = 42,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_new")]
@@ -486,14 +521,6 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_vt_write")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial void TerminalVtWrite(nint terminal, byte* data, nuint len);
-
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_vt_write_until_ground")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe partial GhosttyResult TerminalVtWriteUntilGround(
-        nint terminal,
-        byte* data,
-        nuint length,
-        out nuint consumed);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_continuation_write")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

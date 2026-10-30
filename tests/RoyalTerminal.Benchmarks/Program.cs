@@ -11,6 +11,30 @@ using RoyalTerminal.Terminal;
 using RoyalTerminal.Unicode;
 using SkiaSharp;
 
+if (args.Contains("--kitty-snapshot-history", StringComparer.Ordinal))
+{
+    KittySnapshotHistoryBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--program-status", StringComparer.Ordinal))
+{
+    ProgramStatusBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--history-compression", StringComparer.Ordinal))
+{
+    HistoryCompressionBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--terminal-update", StringComparer.Ordinal))
+{
+    TerminalUpdateBenchmark.Run();
+    return;
+}
+
 if (args.Contains("--managed-search-prepend", StringComparer.Ordinal))
 {
     ManagedSearchPrependBenchmark.Run();
@@ -56,6 +80,12 @@ if (args.Contains("--kitty-overscan-projection", StringComparer.Ordinal))
 if (args.Contains("--native-render-overscan", StringComparer.Ordinal))
 {
     NativeRenderOverscanBenchmark.Run();
+    return;
+}
+
+if (args.Contains("--native-kitty-text-refresh", StringComparer.Ordinal))
+{
+    NativeKittyTextRefreshBenchmark.Run();
     return;
 }
 

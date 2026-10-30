@@ -144,6 +144,12 @@ public enum TerminalMouseButton
 
     /// <summary>Right button.</summary>
     Right = 3,
+
+    /// <summary>Back side button (terminal button 8).</summary>
+    Back = 8,
+
+    /// <summary>Forward side button (terminal button 9).</summary>
+    Forward = 9,
 }
 
 /// <summary>

@@ -147,7 +147,8 @@ public sealed class ManagedSnapshotGraphemePressureTests
     [Fact]
     public void HugeHintsDoNotReserveHugeBitmapOrMapStorage()
     {
-        byte[] payload = Payload(uint.MaxValue, Cluster(0, 64));
+        // Large but within the new native 32-bit PAGE address-space ceiling.
+        byte[] payload = Payload(128 * 1024 * 1024, Cluster(0, 64));
         Read(payload);
         long before = GC.GetAllocatedBytesForCurrentThread();
         GhosttySnapshotPage page = Read(payload);

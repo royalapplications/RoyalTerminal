@@ -110,7 +110,7 @@ public class TerminalEffectAndUnicodeTests
     }
 
     [Fact]
-    public void BasicVtProcessor_RejectsMalformedOsc9ProgressSuffixes()
+    public void BasicVtProcessor_RetainsRecognizedProgressStateWhenPercentageIsInvalid()
     {
         using BasicVtProcessor processor =
             new(new TerminalScreen(columns: 80, viewportRows: 24, scrollbackLimit: 100));
@@ -124,14 +124,14 @@ public class TerminalEffectAndUnicodeTests
         processor.Process("\u001b]9;4;1;42garbage\u0007"u8);
         processor.Process("\u001b]9;4;1;\u0007"u8);
 
-        Assert.Empty(progressReports);
         Assert.Equal(
             [
-                new TerminalDesktopNotification(string.Empty, "4;1garbage"),
-                new TerminalDesktopNotification(string.Empty, "4;1;42garbage"),
-                new TerminalDesktopNotification(string.Empty, "4;1;"),
+                new TerminalProgressReport(TerminalProgressState.Set, 0),
+                new TerminalProgressReport(TerminalProgressState.Set, null),
+                new TerminalProgressReport(TerminalProgressState.Set, null),
             ],
-            notifications);
+            progressReports);
+        Assert.Empty(notifications);
     }
 
     [Fact]

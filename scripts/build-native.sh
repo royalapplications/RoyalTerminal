@@ -7,7 +7,7 @@
 #   ./scripts/build-native.sh --help       # Show usage
 #
 # Prerequisites:
-#   - Zig 0.16.0 (https://ziglang.org/download/)
+#   - Zig 0.17.0 (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #
 # The script builds the official libghostty-vt API library and the optional
@@ -40,26 +40,26 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --clean       Clean before building"
-    echo "  --release     Build with ReleaseFast optimization (default)"
-    echo "  --debug       Build with Debug optimization"
+    echo "  --release     Build with fast optimization (default)"
+    echo "  --debug       Build with debug optimization"
     echo "  --static      Also build static library"
     echo "  --help        Show this help message"
     echo ""
     echo "Prerequisites:"
-    echo "  - Zig 0.16.0 must be in PATH"
+    echo "  - Zig 0.17.0 must be in PATH"
     echo "  - Git submodule must be initialized:"
     echo "    git submodule update --init"
 }
 
 # Parse arguments
 CLEAN=false
-OPTIMIZE_ARGS=("-Doptimize=ReleaseFast")
+OPTIMIZE_ARGS=("-Doptimize=fast")
 BUILD_STATIC=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --clean)   CLEAN=true; shift ;;
-        --release) OPTIMIZE_ARGS=("-Doptimize=ReleaseFast"); shift ;;
+        --release) OPTIMIZE_ARGS=("-Doptimize=fast"); shift ;;
         --debug)   OPTIMIZE_ARGS=(); shift ;;
         --static)  BUILD_STATIC=true; shift ;;
         --help)    usage; exit 0 ;;
@@ -71,7 +71,7 @@ done
 if ! command -v zig &>/dev/null; then
     error "Zig not found in PATH."
     echo ""
-    echo "Install Zig 0.16.0:"
+    echo "Install Zig 0.17.0:"
     echo "  macOS:  brew install zig"
     echo "  Linux:  snap install zig --classic"
     echo "  Manual: https://ziglang.org/download/"
@@ -80,8 +80,8 @@ fi
 
 ZIG_VERSION=$(zig version)
 info "Zig version: $ZIG_VERSION"
-if [ "$ZIG_VERSION" != "0.16.0" ]; then
-    error "Ghostty requires Zig 0.16.0, but found $ZIG_VERSION."
+if [ "$ZIG_VERSION" != "0.17.0" ]; then
+    error "Ghostty requires Zig 0.17.0, but found $ZIG_VERSION."
     exit 1
 fi
 
@@ -190,6 +190,7 @@ if [ -z "$VT_LIB" ]; then
     exit 1
 fi
 
+VT_LIB="$GHOSTTY_BUILD_DIR/$VT_LIB"
 info "Built official VT library: $VT_LIB"
 
 # Copy to NuGet native package directory

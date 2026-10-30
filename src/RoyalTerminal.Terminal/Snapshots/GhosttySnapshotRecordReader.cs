@@ -22,6 +22,31 @@ internal sealed class GhosttySnapshotRecordReader : IDisposable
     private bool _finished;
     private bool _failed;
     private bool _disposed;
+    private ReadOnlyMemory<byte> _lastPayload;
+    private readonly byte[] _pendingHeader = new byte[GhosttySnapshotFraming.HeaderLength];
+    private bool _hasHeader;
+
+    internal ReadOnlySpan<byte> LastPayload => _lastPayload.Span;
+    internal ReadOnlyMemory<byte> LastPayloadMemory => _lastPayload;
+
+    internal GhosttySnapshotRecordTag PeekRecordTag()
+    {
+        EnsureUsable();
+        if (!_envelopeRead) throw new InvalidOperationException("Read the snapshot envelope first.");
+        if (_finished) throw new InvalidOperationException("The snapshot FINISH record was already read.");
+        try
+        {
+            if (!_hasHeader)
+            {
+                ReadExactly(_pendingHeader);
+                GhosttySnapshotFraming.ValidateHeader((GhosttySnapshotRecordTag)BinaryPrimitives.ReadUInt16LittleEndian(_pendingHeader),
+                    BinaryPrimitives.ReadUInt32LittleEndian(_pendingHeader.AsSpan(2)), _maximumPayloadBytes);
+                _hasHeader = true;
+            }
+            return (GhosttySnapshotRecordTag)BinaryPrimitives.ReadUInt16LittleEndian(_pendingHeader);
+        }
+        catch { _failed = true; throw; }
+    }
 
     internal GhosttySnapshotRecordReader(Stream source, int maximumPayloadBytes)
     {
@@ -67,23 +92,23 @@ internal sealed class GhosttySnapshotRecordReader : IDisposable
         if (_finished) throw new InvalidOperationException("The snapshot FINISH record was already read.");
         try
         {
-            Span<byte> header = stackalloc byte[GhosttySnapshotFraming.HeaderLength];
-            ReadExactly(header);
-            GhosttySnapshotRecordTag tag = (GhosttySnapshotRecordTag)BinaryPrimitives.ReadUInt16LittleEndian(header);
+            GhosttySnapshotRecordTag tag = PeekRecordTag();
+            ReadOnlySpan<byte> header = _pendingHeader;
             uint length = BinaryPrimitives.ReadUInt32LittleEndian(header[2..]);
-            GhosttySnapshotFraming.ValidateHeader(tag, length, _maximumPayloadBytes);
             int payloadLength = checked((int)length);
 
             if (_source is null)
             {
                 if (payloadLength > _memory.Length - _offset) throw new EndOfStreamException();
                 payload = _memory.Span.Slice(_offset, payloadLength);
+                _lastPayload = _memory.Slice(_offset, payloadLength);
                 _offset += payloadLength;
                 SourceOffset += payloadLength;
             }
             else if (payloadLength == 0)
             {
                 payload = ReadOnlySpan<byte>.Empty;
+                _lastPayload = ReadOnlyMemory<byte>.Empty;
             }
             else
             {
@@ -91,11 +116,13 @@ internal sealed class GhosttySnapshotRecordReader : IDisposable
                 Span<byte> bytes = _scratch.AsSpan(0, payloadLength);
                 ReadExactly(bytes);
                 payload = bytes;
+                _lastPayload = _scratch.AsMemory(0, payloadLength);
             }
 
             if (GhosttySnapshotFraming.ComputeChecksum(header[..6], payload) != BinaryPrimitives.ReadUInt32LittleEndian(header[6..]))
                 throw new InvalidDataException("Ghostty snapshot record checksum mismatch.");
             _finished = tag == GhosttySnapshotRecordTag.Finish;
+            _hasHeader = false;
             return tag;
         }
         catch

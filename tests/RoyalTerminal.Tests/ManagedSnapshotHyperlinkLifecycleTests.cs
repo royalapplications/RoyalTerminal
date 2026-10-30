@@ -233,13 +233,13 @@ public sealed class ManagedSnapshotHyperlinkLifecycleTests
     }
 
     [Fact]
-    public void SoftResetReleasesTheCursorWithoutReclaimingDeadStrings()
+    public void SoftResetPreservesTheCursorHyperlink()
     {
         TerminalScreen screen = Screen(new(8, 2, 8, 192, 0, 2048));
         using BasicVtProcessor processor = new(screen);
         Process(processor, Open("u") + "\u001b[!pA");
-        Assert.Equal((0UL, 0UL, 32UL), Usage(screen, screen.GetViewportRow(0)));
-        Assert.Equal(0, screen.GetViewportRow(0).ReadOnlyCells[0].HyperlinkId);
+        Assert.Equal((1UL, 1UL, 32UL), Usage(screen, screen.GetViewportRow(0)));
+        Assert.NotEqual(0, screen.GetViewportRow(0).ReadOnlyCells[0].HyperlinkId);
     }
 
     [Fact]

@@ -107,6 +107,8 @@ public static class TerminalMouseProtocolEncoder
     {
         mouseCode = 0;
         sgrRelease = false;
+        if (modeState.TrackingMode == TerminalMouseTrackingMode.X10Press &&
+            pointerEvent.Button is not (TerminalMouseButton.Left or TerminalMouseButton.Middle or TerminalMouseButton.Right)) return false;
 
         switch (pointerEvent.Kind)
         {
@@ -209,6 +211,10 @@ public static class TerminalMouseProtocolEncoder
                 return true;
             case TerminalMouseButton.Right:
                 code = 2;
+                return true;
+            case TerminalMouseButton.Back:
+            case TerminalMouseButton.Forward:
+                code = 128 + (int)button - (int)TerminalMouseButton.Back;
                 return true;
             default:
                 code = 0;

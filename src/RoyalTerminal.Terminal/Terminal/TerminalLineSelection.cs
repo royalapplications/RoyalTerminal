@@ -27,7 +27,6 @@ public static class TerminalLineSelection
         int firstRow = Math.Max(0, screen.TotalRows - screen.ViewportRows - screen.MaxScrollOffset);
         if ((uint)position.Column >= (uint)screen.Columns || position.Row < firstRow || position.Row >= screen.TotalRows)
             return false;
-        if (whitespace.IsEmpty) whitespace = [0, 32, 9];
         TerminalSemanticContent semantic = screen.GetRow(position.Row).ReadOnlyCells[position.Column].SemanticContent;
 
         int startRow = position.Row, startColumn = position.Column;
@@ -81,5 +80,6 @@ public static class TerminalLineSelection
     }
 
     private static bool IsTrimmed(in TerminalCell cell, ReadOnlySpan<uint> whitespace)
-        => !cell.HasContent || cell.Width == 0 || cell.IsWideSpacerHead || whitespace.Contains((uint)cell.Codepoint);
+        => !cell.HasContent || cell.Width == 0 || cell.IsWideSpacerHead ||
+            (whitespace.IsEmpty ? cell.Codepoint is 0 or 32 or 9 : whitespace.Contains((uint)cell.Codepoint));
 }

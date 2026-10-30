@@ -8,7 +8,7 @@ namespace RoyalTerminal.Terminal;
 /// The caller serializes access and owns storage quotas, placement visibility and scheduling.
 /// Published pixel arrays are never changed: frame edits use copy-on-write for retained screens.
 /// </summary>
-internal sealed class ManagedKittyAnimation
+internal sealed partial class ManagedKittyAnimation
 {
     private readonly List<Frame> _frames;
     private int _currentIndex;
@@ -17,11 +17,13 @@ internal sealed class ManagedKittyAnimation
     private uint _currentLoop;
     private long? _frameShownAtMilliseconds;
     private long _durationMilliseconds;
+    private int _pendingFrames;
 
     internal ManagedKittyAnimation(ManagedKittyImagePixels root)
     {
         ArgumentNullException.ThrowIfNull(root);
         _frames = new(1) { new(root, 0) };
+        _pendingFrames = root.IsPending ? 1 : 0;
     }
 
     private ManagedKittyAnimation(ManagedKittyAnimation source)
@@ -33,6 +35,7 @@ internal sealed class ManagedKittyAnimation
         _currentLoop = source._currentLoop;
         _frameShownAtMilliseconds = source._frameShownAtMilliseconds;
         _durationMilliseconds = source._durationMilliseconds;
+        _pendingFrames = source._pendingFrames;
     }
 
     internal ManagedKittyAnimation CreateStateCopy() => new(this);
@@ -40,15 +43,61 @@ internal sealed class ManagedKittyAnimation
     internal KittyGraphicsDecodedImage RootImage => _frames[0].Image.GetRgbaImage();
     internal KittyGraphicsDecodedImage CurrentImage => CurrentPixels.GetRgbaImage();
     internal ManagedKittyImagePixels CurrentPixels => _frames[_currentIndex].Image;
+    internal ManagedKittyImagePixels RootPixels => _frames[0].Image;
+    internal ManagedKittyImagePixels FramePixels(int index) => _frames[index].Image;
+    internal uint FrameGap(int index) => _frames[index].GapMilliseconds;
+    internal uint State => _state > 0 ? _state - 1 : 0;
+    internal uint MaximumLoops => _maximumLoops;
+    internal uint CurrentLoop => _currentLoop;
+    internal int CurrentIndex => _currentIndex;
+    internal bool HasPendingFrames => _pendingFrames != 0;
     internal int Width => _frames[0].Image.Width;
     internal int Height => _frames[0].Image.Height;
     internal int FrameCount => _frames.Count;
     internal uint CurrentFrameNumber => (uint)_currentIndex + 1;
     internal long StoredBytes => _frames[0].Image.StorageBytes + (long)_frames[0].Image.RgbaByteLength * (_frames.Count - 1);
 
+    internal static ManagedKittyAnimation Restore(ManagedKittyImagePixels root,
+        IReadOnlyList<ManagedKittyImagePixels> frames, IReadOnlyList<uint> gaps, uint state,
+        uint maximumLoops, uint currentLoop, int currentIndex)
+    {
+        if (state > 2 || gaps.Count != frames.Count + 1 || (uint)currentIndex >= (uint)gaps.Count)
+            throw new ArgumentException("Invalid animation metadata.");
+        ManagedKittyAnimation animation = new(root);
+        animation._frames.EnsureCapacity(gaps.Count);
+        animation.SetGap(0, gaps[0]);
+        for (int i = 0; i < frames.Count; i++)
+        {
+            ManagedKittyImagePixels pixels = frames[i];
+            if (!pixels.IsRgba || pixels.Width != root.Width || pixels.Height != root.Height)
+                throw new ArgumentException("Animation frames must be full-size RGBA canvases.", nameof(frames));
+            animation._frames.Add(new(pixels, gaps[i + 1]));
+            animation._durationMilliseconds += gaps[i + 1];
+            if (pixels.IsPending) animation._pendingFrames++;
+        }
+        animation._state = state + 1;
+        animation._maximumLoops = maximumLoops;
+        animation._currentLoop = currentLoop;
+        animation._currentIndex = currentIndex;
+        return animation;
+    }
+
+    internal bool TryCompletePendingFrame(uint frameNumber, byte[] pixels)
+    {
+        if (frameNumber == 0 || frameNumber > (uint)_frames.Count) return false;
+        int index = (int)frameNumber - 1;
+        Frame frame = _frames[index];
+        ManagedKittyImagePixels? completed = frame.Image.Complete(pixels);
+        if (completed is null) return false;
+        _frames[index] = new(completed, frame.GapMilliseconds);
+        _pendingFrames--;
+        return true;
+    }
+
     internal bool PromoteRootToRgba(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
         Frame root = _frames[0];
+        if (root.Image.IsPending) return false;
         if (root.Image.IsRgba) return false;
         _frames[0] = new(root.Image.AsRgba(allocationCheckpoint), root.GapMilliseconds);
         return true;
@@ -75,9 +124,15 @@ internal sealed class ManagedKittyAnimation
         frameNumber = requested == 0 || requested > (uint)_frames.Count + 1 ? (uint)_frames.Count + 1 : requested;
         bool append = frameNumber == (uint)_frames.Count + 1;
         uint baseFrame = command.Get('c');
-        if (append && baseFrame > (uint)_frames.Count)
+        if (append && (baseFrame > (uint)_frames.Count ||
+            baseFrame > 0 && _frames[(int)baseFrame - 1].Image.IsPending))
         {
             error = "EINVAL: base frame not found";
+            return false;
+        }
+        if (!append && _frames[(int)frameNumber - 1].Image.IsPending)
+        {
+            error = "EINVAL: frame data incomplete";
             return false;
         }
         return true;
@@ -103,6 +158,11 @@ internal sealed class ManagedKittyAnimation
         long maxStoredBytes, out uint frameNumber, out string error, Action<ManagedKittyAnimationAllocation>? allocationCheckpoint)
     {
         frameNumber = 0;
+        if (RootPixels.IsPending)
+        {
+            error = "EINVAL: image data incomplete";
+            return false;
+        }
         error = "EINVAL: frame dimensions exceed image";
         if (source.Width > Width || source.Height > Height) return false;
         // As in the native executor, promotion precedes resolving a frame
@@ -217,12 +277,17 @@ internal sealed class ManagedKittyAnimation
         uint sourceFrame = command.Get('r');
         uint destinationFrame = command.Get('c');
         error = "OK";
-        if (sourceFrame == 0 || sourceFrame > (uint)_frames.Count)
+        if (RootPixels.IsPending)
+        {
+            error = "EINVAL: image data incomplete";
+            return false;
+        }
+        if (sourceFrame == 0 || sourceFrame > (uint)_frames.Count || _frames[(int)sourceFrame - 1].Image.IsPending)
         {
             error = "ENOENT: source frame not found";
             return false;
         }
-        if (destinationFrame == 0 || destinationFrame > (uint)_frames.Count)
+        if (destinationFrame == 0 || destinationFrame > (uint)_frames.Count || _frames[(int)destinationFrame - 1].Image.IsPending)
         {
             error = "ENOENT: destination frame not found";
             return false;
@@ -275,6 +340,7 @@ internal sealed class ManagedKittyAnimation
         int removedIndex = (int)(Math.Clamp(frameNumber, 1, (uint)_frames.Count) - 1);
         ManagedKittyImagePixels previous = CurrentPixels;
         _durationMilliseconds -= _frames[removedIndex].GapMilliseconds;
+        if (_frames[removedIndex].Image.IsPending) _pendingFrames--;
         _frames.RemoveAt(removedIndex);
         if (removedIndex < _currentIndex) _currentIndex--;
         else if (_currentIndex >= _frames.Count) _currentIndex = _frames.Count - 1;
@@ -288,7 +354,7 @@ internal sealed class ManagedKittyAnimation
     {
         ArgumentOutOfRangeException.ThrowIfNegative(nowMilliseconds);
         nextDelayMilliseconds = null;
-        if (_state is 0 or 1 || _frames.Count == 1 || !placed || _durationMilliseconds == 0 ||
+        if (_state is 0 or 1 || _frames.Count == 1 || !placed || _pendingFrames != 0 || _durationMilliseconds == 0 ||
             _maximumLoops > 0 && _currentLoop >= _maximumLoops) return false;
 
         long shownAt = _frameShownAtMilliseconds is long previous && previous <= nowMilliseconds ? previous : nowMilliseconds;

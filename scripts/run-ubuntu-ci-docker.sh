@@ -130,26 +130,26 @@ mkdir -p \
   test-results
 
 (
-  cd external/ghostty
+  cd native/ghostty-vt-extensions
   build_args=(
     build
-    -Doptimize=ReleaseFast
-    -Dapp-runtime=none
-    -Demit-lib-vt=true
-    -Demit-xcframework=false
+    -Doptimize=fast
     "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}"
     -Dsimd=false
   )
   zig "${build_args[@]}"
+  zig build test-history -Doptimize=fast -Dsimd=false
 )
+
+python3 scripts/verify-history-exports.py native/ghostty-vt-extensions/zig-out
 
 (
   cd native/ghostty-renderer-capi
-  build_args=(build -Doptimize=ReleaseFast "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}")
+  build_args=(build -Doptimize=fast "-Dtarget=${ROYALTERMINAL_ZIG_TARGET}")
   zig "${build_args[@]}"
 )
 
-find external/ghostty/zig-out -name "libghostty-vt.so*" -exec cp -L {} "artifacts/${ROYALTERMINAL_BUILD_RID}/native/" \;
+find native/ghostty-vt-extensions/zig-out -name "libghostty-vt.so*" -exec cp -L {} "artifacts/${ROYALTERMINAL_BUILD_RID}/native/" \;
 find native/ghostty-renderer-capi/zig-out -name "libghostty-renderer-capi.so*" -exec cp -L {} "artifacts/${ROYALTERMINAL_BUILD_RID}/native/" \; || true
 
 for base in libghostty-vt libghostty-renderer-capi; do

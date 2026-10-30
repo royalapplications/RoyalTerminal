@@ -12,6 +12,19 @@ public static partial class GhosttyVtNative
     {
         MaxContinuationBytes = 0,
         RetainContinuation = 1,
+        /// <summary>Compress each restored history page when supported.</summary>
+        CompressHistory = 2,
+        /// <summary>Per-screen restored Kitty image budget in bytes (uint64).</summary>
+        KittyImageStorageLimit = 3,
+    }
+
+    /// <summary>Record restored by the most recent successful decoder step.</summary>
+    public enum GhosttySnapshotDecoderProgressKind : int
+    {
+        /// <summary>A history page and its pinned image placements.</summary>
+        Page = 0,
+        /// <summary>Pixels of one Kitty image or animation frame.</summary>
+        Image = 1,
     }
 
     public enum GhosttySnapshotDecoderData : int
@@ -25,6 +38,26 @@ public static partial class GhosttyVtNative
         ProgressRows = 6,
         ProgressRemaining = 7,
         RetainContinuation = 8,
+        /// <summary>Whether restored history is compressed.</summary>
+        CompressHistory = 9,
+        /// <summary>Configured image budget per restored screen (uint64).</summary>
+        KittyImageStorageLimit = 10,
+        /// <summary>Most recent record's progress kind.</summary>
+        ProgressKind = 11,
+        /// <summary>Most recently restored image ID (uint32).</summary>
+        ProgressImageId = 12,
+        /// <summary>Most recently restored one-based animation frame (uint32).</summary>
+        ProgressImageFrame = 13,
+        /// <summary>Pixel bytes applied by the last step (size_t).</summary>
+        ProgressImageBytes = 14,
+        /// <summary>Primary images declared at READY (uint32).</summary>
+        KittyImagesPrimary = 15,
+        /// <summary>Alternate images declared at READY (uint32), if present.</summary>
+        KittyImagesAlternate = 16,
+        /// <summary>Primary pixel bytes pending at READY (uint64).</summary>
+        KittyPendingBytesPrimary = 17,
+        /// <summary>Alternate pixel bytes pending at READY (uint64), if present.</summary>
+        KittyPendingBytesAlternate = 18,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_snapshot_encode")]

@@ -99,6 +99,7 @@ public sealed class LocalKittyGraphicsMediumReader : IKittyGraphicsMediumReader
         bool windows = OperatingSystem.IsWindows();
         if (!windows && (KittyGraphicsPathPolicy.IsWithinDirectory("/tmp", path, false) ||
             KittyGraphicsPathPolicy.IsWithinDirectory("/dev/shm", path, false))) return true;
+        if (OperatingSystem.IsMacOS() && KittyGraphicsPathPolicy.IsWithinDirectory("/private/tmp", path, false)) return true;
         string directory = System.IO.Path.GetFullPath(_policy.TemporaryDirectory!);
         if (KittyGraphicsPathPolicy.IsWithinDirectory(directory, path, windows)) return true;
         using KittyGraphicsFileAccess.OpenedFile openedDirectory = KittyGraphicsFileAccess.Open(directory, temporary: false, directory: true);

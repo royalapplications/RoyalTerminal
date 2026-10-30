@@ -202,16 +202,16 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
         working-directory: native/ghostty-vt-extensions
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast
+            zig build -Doptimize=fast
           else
-            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+            zig build -Doptimize=fast -Dtarget=x86_64-macos
           fi
 
       - name: Verify history ABI exports
@@ -219,15 +219,15 @@ jobs:
 
       - name: Native history ABI tests
         working-directory: native/ghostty-vt-extensions
-        run: zig build test-history -Doptimize=ReleaseFast -Dsimd=false
+        run: zig build test-history -Doptimize=fast -Dsimd=false
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            zig build -Doptimize=ReleaseFast
+            zig build -Doptimize=fast
           else
-            zig build -Doptimize=ReleaseFast -Dtarget=x86_64-macos
+            zig build -Doptimize=fast -Dtarget=x86_64-macos
           fi
 
       - name: Collect artifacts
@@ -304,7 +304,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: ${{ matrix.arch }}
 
       - name: Build libghostty-vt
@@ -316,7 +316,7 @@ jobs:
           # explicit targets make Zig use cross-target system-library discovery.
           build_args=(
             build
-            -Doptimize=ReleaseFast
+            -Doptimize=fast
             -Dtarget=${{ matrix.zig-target }}
             -Dsimd=false
           )
@@ -327,12 +327,12 @@ jobs:
 
       - name: Native history ABI tests
         working-directory: native/ghostty-vt-extensions
-        run: zig build test-history -Doptimize=ReleaseFast -Dsimd=false
+        run: zig build test-history -Doptimize=fast -Dsimd=false
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
         run: |
-          build_args=(build -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig-target }})
+          build_args=(build -Doptimize=fast -Dtarget=${{ matrix.zig-target }})
           zig "${build_args[@]}"
 
       - name: Collect artifacts
@@ -403,7 +403,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: ${{ matrix.arch }}
           # A restored Windows cache referenced a missing build.exe before
           # compilation (runs 35901210398 and 35902114973). Leave compiler
@@ -418,8 +418,8 @@ jobs:
           simd=""
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             target="-Dtarget=aarch64-windows-gnu"
-            # Zig 0.16.0's Windows ARM64 stdlib stack-trace code fails to
-            # compile when Ghostty's vendored SIMD archive is enabled.
+            # Keep ARM64 compatible with the existing portable native packages.
+            # The vendored SIMD archive is disabled on Windows targets.
             simd="-Dsimd=false"
           else
             # Match release compatibility artifacts. The build and test runners
@@ -429,14 +429,14 @@ jobs:
             cpu="-Dcpu=x86_64-vzeroupper"
             simd="-Dsimd=false"
           fi
-          zig build -Doptimize=ReleaseFast ${target} ${cpu} ${simd}
+          zig build -Doptimize=fast ${target} ${cpu} ${simd}
 
       - name: Verify history ABI exports
         run: python scripts/verify-history-exports.py native/ghostty-vt-extensions/zig-out
 
       - name: Native history ABI tests
         working-directory: native/ghostty-vt-extensions
-        run: zig build test-history -Doptimize=ReleaseFast -Dsimd=false
+        run: zig build test-history -Doptimize=fast -Dsimd=false
 
       - name: Build ghostty-renderer-capi
         working-directory: native/ghostty-renderer-capi
@@ -449,7 +449,7 @@ jobs:
             target="-Dtarget=x86_64-windows-msvc"
             cpu="-Dcpu=x86_64-vzeroupper"
           fi
-          zig build -Doptimize=ReleaseFast ${target} ${cpu}
+          zig build -Doptimize=fast ${target} ${cpu}
 
       - name: Collect artifacts
         shell: bash

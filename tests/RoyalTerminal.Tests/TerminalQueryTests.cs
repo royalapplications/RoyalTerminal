@@ -1210,8 +1210,8 @@ public class TerminalQueryTests
         Assert.Equal("\x1b[?9001;1$y", System.Text.Encoding.ASCII.GetString(response));
 
         processor.Process("\x1b[!p"u8); // DECSTR
-        Assert.False(processor.Win32InputMode);
-        Assert.False(processor.ModeState.Win32InputMode);
+        Assert.True(processor.Win32InputMode);
+        Assert.True(processor.ModeState.Win32InputMode);
     }
 
     [Fact]
@@ -1273,10 +1273,10 @@ public class TerminalQueryTests
         Assert.NotNull(response);
         Assert.Equal("\x1b[?1048;1$y", System.Text.Encoding.ASCII.GetString(response));
 
-        processor.Process("\x1b[!p"u8); // DECSTR resets tracked modes to defaults.
+        processor.Process("\x1b[!p"u8); // DECSTR preserves modes outside its reset subset.
         processor.Process("\x1b[?1004$p"u8);
         Assert.NotNull(response);
-        Assert.Equal("\x1b[?1004;2$y", System.Text.Encoding.ASCII.GetString(response));
+        Assert.Equal("\x1b[?1004;1$y", System.Text.Encoding.ASCII.GetString(response));
     }
 
     [Fact]

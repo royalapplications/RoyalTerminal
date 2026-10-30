@@ -86,7 +86,7 @@ public sealed class ManagedGlyphProtocolTests(ITestOutputHelper output)
     [InlineData(0x1B)]
     [InlineData(0x9C)]
     [InlineData(0x9B)]
-    public void AbortStillExecutesCompletedGlyphCommandLikeNative(int exit)
+    public void GlyphTerminationAndCancellationMatchNative(int exit)
     {
         if (!NativeAvailable()) return;
         Compare("\u001b_25a1;r;cp=e000;" + EmptyGlyph + (char)exit + "\u001b\\" + Wire("q;cp=e000"), everySplit: true);

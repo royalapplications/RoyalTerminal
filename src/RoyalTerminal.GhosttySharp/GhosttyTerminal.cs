@@ -97,6 +97,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             GhosttyVtNative.TerminalVtWrite(_handle, dataPtr, (nuint)data.Length);
         }
         GC.KeepAlive(_royalNotificationCallback);
+        GC.KeepAlive(_windowResizeCallback);
     }
 
     /// <summary>
@@ -105,21 +106,39 @@ public sealed partial class GhosttyTerminal : IDisposable
     /// </summary>
     public unsafe bool WriteUntilGround(ReadOnlySpan<byte> data, out nuint consumed)
     {
+        bool reached = WriteUntil(data, GhosttyVtNative.GhosttyTerminalBoundary.Ground, out var stop);
+        consumed = stop.Consumed;
+        return reached;
+    }
+
+    /// <summary>
+    /// Writes through the first requested parser boundary. Returns false when all
+    /// input was consumed without reaching one. Ground can return without consuming
+    /// input; after that stop, omit Ground or use Write to make progress.
+    /// </summary>
+    public unsafe bool WriteUntil(ReadOnlySpan<byte> data,
+        GhosttyVtNative.GhosttyTerminalBoundary boundaries,
+        out GhosttyVtNative.GhosttyTerminalWriteStop stop)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyTerminalWriteStop value = GhosttyVtNative.GhosttyTerminalWriteStop.CreateSized();
         fixed (byte* pointer = data)
         {
-            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalVtWriteUntilGround(
+            GhosttyVtNative.GhosttyResult result = GhosttyVtNative.TerminalVtWriteUntil(
                 _handle,
                 pointer,
                 (nuint)data.Length,
-                out consumed);
+                (uint)boundaries,
+                &value);
+            stop = value;
             GC.KeepAlive(_royalNotificationCallback);
+            GC.KeepAlive(_windowResizeCallback);
             if (result == GhosttyVtNative.GhosttyResult.NoValue)
             {
                 return false;
             }
 
-            ThrowIfFailed(result, "ghostty_terminal_vt_write_until_ground");
+            ThrowIfFailed(result, "ghostty_terminal_vt_write_until");
             return true;
         }
     }
@@ -1216,14 +1235,8 @@ public sealed partial class GhosttyTerminal : IDisposable
                 GC.KeepAlive(_royalNotificationCallback);
                 _royalNotificationCallback = null;
             }
-            if (_royalWindowResizeCallback is not null && _handle != nint.Zero)
-            {
-                // Borrowed wrappers and leased terminals may outlive this
-                // managed wrapper. Remove its callback before releasing the root.
-                GhosttyVtNative.SetRoyalWindowResizeCallback(_handle, 0, 0);
-                GC.KeepAlive(_royalWindowResizeCallback);
-                _royalWindowResizeCallback = null;
-            }
+            // Borrowed wrappers and leased terminals may outlive this wrapper.
+            ClearWindowResizeCallback();
             if (_ownsHandle && _handle != nint.Zero && _nativeLeaseCount > 0)
             {
                 _disposeRequested = true;

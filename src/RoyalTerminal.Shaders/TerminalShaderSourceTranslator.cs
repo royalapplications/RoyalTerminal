@@ -23,6 +23,9 @@ public static partial class TerminalShaderSourceTranslator
         uniform float3 iBackgroundColor;
         uniform float3 iForegroundColor;
         uniform float3 iCursorColor;
+        uniform float3 iCursorText;
+        uniform float3 iSelectionForegroundColor;
+        uniform float3 iSelectionBackgroundColor;
         uniform float4 iCurrentCursor;
         uniform float4 iCurrentCursorColor;
         uniform float4 iCurrentCursorStyle;

@@ -7,7 +7,7 @@
 #   .\scripts\build-native.ps1 -Help        # Show usage
 #
 # Prerequisites:
-#   - Zig 0.16.0 (https://ziglang.org/download/)
+#   - Zig 0.17.0 (https://ziglang.org/download/)
 #   - Git submodule initialized: git submodule update --init
 #   - Windows symlink support (Developer Mode enabled or elevated shell)
 #
@@ -198,14 +198,14 @@ Build Ghostty native shared library from the git submodule.
 
 Options:
   -Clean       Clean before building
-  -Release     Build with ReleaseFast optimization (default)
+  -Release     Build with fast optimization (default)
   -Debug       Build with Debug optimization
   -Static      Also build static library
   -Arch        Target architecture: x64 or arm64 (default: x64)
   -Help        Show this help message
 
 Prerequisites:
-  - Zig 0.16.0 must be in PATH
+  - Zig 0.17.0 must be in PATH
   - Git submodule must be initialized:
     git submodule update --init
   - Windows symlink support:
@@ -223,7 +223,7 @@ $zigPath = Get-Command zig -ErrorAction SilentlyContinue
 if (-not $zigPath) {
     Write-Err "Zig not found in PATH."
     Write-Host ""
-    Write-Host "Install Zig 0.16.0:"
+    Write-Host "Install Zig 0.17.0:"
     Write-Host "  winget install zig.zig"
     Write-Host "  scoop install zig"
     Write-Host "  Manual: https://ziglang.org/download/"
@@ -232,8 +232,8 @@ if (-not $zigPath) {
 
 $zigVersion = & zig version
 Write-Info "Zig version: $zigVersion"
-if ($zigVersion -ne "0.16.0") {
-    Write-Err "Ghostty requires Zig 0.16.0, but found $zigVersion."
+if ($zigVersion -ne "0.17.0") {
+    Write-Err "Ghostty requires Zig 0.17.0, but found $zigVersion."
     exit 1
 }
 
@@ -300,7 +300,7 @@ try {
     }
 
     # Build
-    $optimize = if ($Debug) { "" } else { "-Doptimize=ReleaseFast" }
+    $optimize = if ($Debug) { "" } else { "-Doptimize=fast" }
     Write-Info "Building ghostty-vt shared library..."
     $cpuLog = if ($ZigCpu) { " -Dcpu=$ZigCpu" } else { "" }
     $simdLog = if (-not $GhosttySimd) { " -Dsimd=false" } else { "" }
@@ -309,7 +309,7 @@ try {
     $buildArgs = @("build", "-Dtarget=$ZigTarget")
     if ($ZigCpu) { $buildArgs += "-Dcpu=$ZigCpu" }
     if (-not $GhosttySimd) { $buildArgs += "-Dsimd=false" }
-    if (-not $Debug) { $buildArgs += "-Doptimize=ReleaseFast" }
+    if (-not $Debug) { $buildArgs += "-Doptimize=fast" }
 
     if (-not (Invoke-ZigBuildWithCacheRecovery -Args $buildArgs)) {
         Write-Err "Zig build failed."
@@ -383,7 +383,7 @@ try {
 
             $rendererBuildArgs = @("build", "-Dtarget=$ZigTarget")
             if ($ZigCpu) { $rendererBuildArgs += "-Dcpu=$ZigCpu" }
-            if (-not $Debug) { $rendererBuildArgs += "-Doptimize=ReleaseFast" }
+            if (-not $Debug) { $rendererBuildArgs += "-Doptimize=fast" }
 
             if (Invoke-ZigBuildWithCacheRecovery -Args $rendererBuildArgs) {
                 $rendererLibName = "ghostty-renderer-capi.dll"

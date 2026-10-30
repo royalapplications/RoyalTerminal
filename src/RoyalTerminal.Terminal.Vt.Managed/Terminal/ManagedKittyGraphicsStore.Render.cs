@@ -42,12 +42,13 @@ internal sealed partial class ManagedKittyGraphicsStore
             {
                 rootKeys[placement] = key;
                 targets.Add(new(ToProjectionKey(key), placement.Virtual, placement.Options.Columns, placement.Options.Rows));
-                if (_images.TryGetValue(key.ImageId, out Image? image) && included.Add(image.Id)) images.Add(image.Source);
+                if (_images.TryGetValue(key.ImageId, out Image? image) && !image.Animation.CurrentPixels.IsPending &&
+                    included.Add(image.Id)) images.Add(image.Source);
             }
         }
         foreach ((PlacementKey key, Placement placement) in _placements)
         {
-            if (placement.Virtual || !_images.TryGetValue(key.ImageId, out Image? image) ||
+            if (placement.Virtual || !_images.TryGetValue(key.ImageId, out Image? image) || image.Animation.CurrentPixels.IsPending ||
                 !TryResolveRoot(screen, placement, out Placement? root, out long dx, out long dy) ||
                 root is null || !root.Virtual &&
                 (root.Anchor is null || !screen.TryResolveAnchor(root.Anchor, out _)))

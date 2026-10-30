@@ -39,7 +39,9 @@ internal static class KittyGraphicsPathPolicy
     }
 
     internal static bool IsSharedMemoryName(ReadOnlySpan<byte> name)
-        => name.Length is >= 2 and <= 255 && name[0] == '/' && name[1..].IndexOfAny((byte)'/', (byte)0) < 0;
+        // Pass platform-specific names (including Darwin app-group names) unchanged
+        // to shm_open. The OS owns slash rules; reject only malformed input.
+        => name.Length is > 0 and <= 255 && !name.SequenceEqual("/"u8) && !name.Contains((byte)0);
 
     private static bool IsWindowsSeparator(char character) => character is '\\' or '/';
     private static bool IsSeparator(char character, bool windows) => character == '/' || (windows && character == '\\');

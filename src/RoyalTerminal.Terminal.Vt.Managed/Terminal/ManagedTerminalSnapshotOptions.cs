@@ -35,6 +35,13 @@ public sealed record ManagedTerminalSnapshotOptions
     /// </summary>
     public BasicVtProcessorOptions ProcessorOptions { get; init; } = BasicVtProcessorOptions.Default;
 
+    /// <summary>
+    /// Compresses newly applied history rows using lossless Brotli storage. Disabled
+    /// by default. READY and visible rows stay resident; cell access restores a row
+    /// lazily. Compression is best effort and does not alter logical history quotas.
+    /// </summary>
+    public bool CompressHistory { get; init; }
+
     /// <summary>Hard decoding bounds also applied to pages discarded due to live changes or quotas.</summary>
     public GhosttySnapshotDecodeLimits DecodeLimits { get; init; } = new();
 

@@ -44,6 +44,14 @@ internal sealed class ManagedKittyGraphicsCommand
 
     internal void SetData(ReadOnlyMemory<byte> data) => _data = data;
 
+    internal void SetValue(char key, uint value)
+    {
+        int index = Index(key);
+        if (index < 0) throw new ArgumentOutOfRangeException(nameof(key));
+        _values[index] = value;
+        _present |= 1UL << index;
+    }
+
     internal bool Validate()
     {
         uint action = Get('a', 't');

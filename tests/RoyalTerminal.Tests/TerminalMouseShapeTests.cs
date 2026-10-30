@@ -93,7 +93,6 @@ public sealed class TerminalMouseShapeTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData("22;")]
     [InlineData("22;Pointer")]
     [InlineData("22;pointer;help")]
     [InlineData("22;?pointer")]
@@ -110,6 +109,17 @@ public sealed class TerminalMouseShapeTests(ITestOutputHelper output)
         native.Process(bytes); managed.Process(bytes);
         Assert.Equal(TerminalMouseShape.Crosshair, native.MouseShape);
         Assert.Equal(native.MouseShape, managed.MouseShape);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EmptyNameResetsToText(bool native)
+    {
+        if (native && !Available()) return;
+        using IVtProcessor processor = native ? new GhosttyVtProcessor(new TerminalScreen(8, 3)) : new BasicVtProcessor(new TerminalScreen(8, 3));
+        processor.Process("\u001b]22;crosshair\a\u001b]22;\a"u8);
+        Assert.Equal(TerminalMouseShape.Text, ((ITerminalMouseShapeSource)processor).MouseShape);
     }
 
     [Theory]
@@ -168,4 +178,3 @@ public sealed class TerminalMouseShapeTests(ITestOutputHelper output)
         bool available = GhosttyVtProcessor.IsAvailable(); output.WriteLine($"Native mouse shape available: {available}"); return available;
     }
 }
-

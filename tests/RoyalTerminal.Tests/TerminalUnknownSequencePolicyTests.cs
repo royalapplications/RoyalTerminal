@@ -10,6 +10,25 @@ namespace RoyalTerminal.Tests;
 
 public sealed class TerminalUnknownSequencePolicyTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void ExistingConstructorAndDeconstructionPreserveSequenceData()
+    {
+        byte[] payload = "Xpayload"u8.ToArray();
+        TerminalUnknownSequence sequence = new(Type: TerminalUnknownSequenceType.Apc, Content: payload, Truncated: true);
+        (TerminalUnknownSequenceType type, byte[] content, bool truncated) = sequence;
+        Assert.Equal(TerminalUnknownSequenceType.Apc, type);
+        Assert.Same(payload, content);
+        Assert.True(truncated);
+        Assert.Equal(TerminalOscTerminator.St, sequence.Terminator);
+
+        TerminalUnknownSequence osc = sequence with { Type = TerminalUnknownSequenceType.Osc, Terminator = TerminalOscTerminator.Bel };
+        (type, content, truncated, TerminalOscTerminator terminator) = osc;
+        Assert.Equal(TerminalUnknownSequenceType.Osc, type);
+        Assert.Same(payload, content);
+        Assert.True(truncated);
+        Assert.Equal(TerminalOscTerminator.Bel, terminator);
+    }
+
     public static IEnumerable<object[]> Prefixes()
     {
         foreach (bool native in new[] { false, true })

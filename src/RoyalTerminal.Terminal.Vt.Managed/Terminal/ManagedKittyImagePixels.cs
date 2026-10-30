@@ -13,6 +13,7 @@ namespace RoyalTerminal.Terminal;
 internal sealed class ManagedKittyImagePixels
 {
     private readonly byte[] _pixels;
+    private readonly int _pendingBytes;
     private KittyGraphicsDecodedImage? _rgba;
     private TerminalKittyImageSource? _source;
 
@@ -23,20 +24,24 @@ internal sealed class ManagedKittyImagePixels
         Height = rgba.Height;
         _pixels = rgba.Rgba;
         _rgba = rgba;
-        IsRgba = true;
+        Format = 1;
     }
 
-    private ManagedKittyImagePixels(int width, int height, byte[] rgb)
+    private ManagedKittyImagePixels(int width, int height, byte format, byte[] pixels, int pendingBytes = 0)
     {
         Width = width;
         Height = height;
-        _pixels = rgb;
+        Format = format;
+        _pixels = pixels;
+        _pendingBytes = pendingBytes;
     }
 
     internal int Width { get; }
     internal int Height { get; }
-    internal bool IsRgba { get; }
-    internal int StorageBytes => _pixels.Length;
+    internal byte Format { get; }
+    internal bool IsRgba => Format == 1;
+    internal bool IsPending => _pendingBytes > 0;
+    internal int StorageBytes => IsPending ? _pendingBytes : _pixels.Length;
     internal int RgbaByteLength => checked(Width * Height * 4);
     internal ReadOnlyMemory<byte> Data => _pixels;
 
@@ -48,15 +53,46 @@ internal sealed class ManagedKittyImagePixels
         ulong pixels = (ulong)width * (uint)height;
         if (pixels * 3 != (ulong)rgb.LongLength || pixels * 4 > int.MaxValue)
             throw new ArgumentException("RGB pixels and their RGBA view must fit the specified dimensions.", nameof(rgb));
-        return new(width, height, rgb);
+        return new(width, height, 0, rgb);
     }
+
+    /// <summary>Reserves protocol storage before snapshot pixels arrive, without allocating a canvas.</summary>
+    internal static ManagedKittyImagePixels Pending(int width, int height, byte format, int expectedBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+        int channels = format switch { 0 => 3, 1 => 4, 3 => 2, 4 => 1, _ => 0 };
+        ulong pixels = (ulong)width * (uint)height;
+        if (channels == 0 || expectedBytes <= 0 || pixels * (uint)channels != (ulong)expectedBytes ||
+            pixels * 4 > int.MaxValue)
+            throw new ArgumentException("Pending pixels and their RGBA view must fit the specified format and dimensions.", nameof(expectedBytes));
+        return new(width, height, format, [], expectedBytes);
+    }
+
+    internal ManagedKittyImagePixels? Complete(byte[] pixels) =>
+        IsPending && pixels.Length == _pendingBytes ? new(Width, Height, Format, pixels) : null;
 
     internal KittyGraphicsDecodedImage GetRgbaImage(Action<ManagedKittyAnimationAllocation>? allocationCheckpoint = null)
     {
+        if (IsPending) throw new InvalidOperationException("Image pixels have not arrived yet.");
         if (_rgba is not null) return _rgba;
+        if (IsRgba)
+        {
+            allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaView);
+            return _rgba = new(Width, Height, _pixels);
+        }
         allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaBuffer);
         byte[] rgba = GC.AllocateUninitializedArray<byte>(RgbaByteLength);
-        ManagedKittyAnimationPixels.ExpandRgb(_pixels, rgba);
+        if (Format == 0) ManagedKittyAnimationPixels.ExpandRgb(_pixels, rgba);
+        else
+        {
+            int channels = Format == 3 ? 2 : 1;
+            for (int input = 0, output = 0; input < _pixels.Length; input += channels, output += 4)
+            {
+                rgba[output] = rgba[output + 1] = rgba[output + 2] = _pixels[input];
+                rgba[output + 3] = channels == 2 ? _pixels[input + 1] : (byte)255;
+            }
+        }
         allocationCheckpoint?.Invoke(ManagedKittyAnimationAllocation.RgbaView);
         return _rgba = new(Width, Height, rgba);
     }

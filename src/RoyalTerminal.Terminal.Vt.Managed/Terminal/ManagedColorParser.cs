@@ -58,8 +58,7 @@ internal static partial class ManagedColorParser
     {
         channel = 0;
         if (value.Length is < 1 or > 4 || !Unsigned(value, 16, 65535, out int number)) return false;
-        // Ghostty scales then truncates for both # and rgb: syntax. Underscores
-        // are accepted by Zig parseUnsigned; the divisor uses the original width.
+        // Ghostty scales then truncates for both # and rgb: syntax.
         channel = (byte)(number * 255 / ((1 << (value.Length * 4)) - 1));
         return true;
     }
@@ -67,10 +66,9 @@ internal static partial class ManagedColorParser
     internal static bool Unsigned(ReadOnlySpan<char> value, int radix, int maximum, out int result)
     {
         result = 0;
-        if (value.IsEmpty || value[0] == '_' || value[^1] == '_') return false;
+        if (value.IsEmpty) return false;
         foreach (char c in value)
         {
-            if (c == '_') continue;
             int digit = c is >= '0' and <= '9' ? c - '0' :
                 c is >= 'a' and <= 'f' ? c - 'a' + 10 : c is >= 'A' and <= 'F' ? c - 'A' + 10 : -1;
             if ((uint)digit >= radix || result > (maximum - digit) / radix) return false;

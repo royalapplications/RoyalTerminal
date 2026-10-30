@@ -499,9 +499,16 @@ public static partial class GhosttyVtNative
         /// <summary>Kitty drag-and-drop protocol command.</summary>
         KittyDragAndDropProtocol = 24,
         /// <summary>OSC 3008 context signal.</summary>
-        ContextSignal = 25,
+        /// <summary>OSC 3008 hierarchical context.</summary>
+        HierarchicalContext = 25,
+        /// <summary>Compatibility name for <see cref="HierarchicalContext"/>.</summary>
+        ContextSignal = HierarchicalContext,
         /// <summary>Kitty desktop-notification command.</summary>
         KittyDesktopNotification = 26,
+        /// <summary>Unsupported OSC with retained bytes.</summary>
+        Unknown = 27,
+        /// <summary>OSC 7501 report or feature query.</summary>
+        ProgramStatus = 28,
     }
 
     /// <summary>Data selector when reading typed OSC command data.</summary>
@@ -511,6 +518,12 @@ public static partial class GhosttyVtNative
         Invalid = 0,
         /// <summary><c>ChangeWindowTitleStr</c> enum value.</summary>
         ChangeWindowTitleStr = 1,
+        /// <summary>Borrowed raw unsupported OSC bytes.</summary>
+        UnknownContent = 2,
+        /// <summary>Whether capture was truncated.</summary>
+        UnknownTruncated = 3,
+        /// <summary>Unsupported OSC terminator.</summary>
+        UnknownTerminator = 4,
     }
 
     // ──────────────────────────── SGR ────────────────────────────────
@@ -742,6 +755,11 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_free")]
     public static partial void OscFree(nint parser);
 
+    /// <summary>Configures a standalone OSC parser; options survive reset.</summary>
+    [LibraryImport(LibName, EntryPoint = "ghostty_osc_set")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe partial GhosttyResult OscSet(nint parser, GhosttyOscOption option, void* value);
+
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_reset")]
     public static partial void OscReset(nint parser);
 
@@ -822,6 +840,9 @@ public static partial class GhosttyVtNative
         }
     }
 
+    /// <summary>Pastes according to terminal modes. <paramref name="written"/>
+    /// is defined only when the result is <see cref="GhosttyResult.Success"/>;
+    /// errors send no output to the PTY.</summary>
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_paste")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult TerminalPaste(
