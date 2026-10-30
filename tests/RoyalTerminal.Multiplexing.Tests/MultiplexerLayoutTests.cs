@@ -94,4 +94,20 @@ public sealed class MultiplexerLayoutTests
             Assert.Throws<MultiplexerException>(() => broker.CreateWindow(session.Id, "other")).Code);
         Assert.Equal(session.Revision, broker.GetSession(session.Id).Revision);
     }
+
+    [Fact]
+    public async Task CreationOrderRemainsStableAfterDeletingEarlierEntries()
+    {
+        await using MultiplexerBroker broker = new(new FakeFactory());
+        MultiplexerSessionDescriptor first = broker.CreateSession("first");
+        MultiplexerSessionDescriptor second = broker.CreateSession("second");
+        await broker.CloseSessionAsync(first.Id);
+        MultiplexerSessionDescriptor third = broker.CreateSession("third");
+        Assert.Equal([second.Id, third.Id], broker.ListSessions().Select(session => session.Id).ToArray());
+        MultiplexerBlockDescriptor a = await broker.AddBlockAsync(second.Id, "a", MultiplexerBrokerTests.Options());
+        MultiplexerBlockDescriptor b = await broker.AddBlockAsync(second.Id, "b", MultiplexerBrokerTests.Options());
+        await broker.CloseBlockAsync(second.Id, a.Id);
+        MultiplexerBlockDescriptor c = await broker.AddBlockAsync(second.Id, "c", MultiplexerBrokerTests.Options());
+        Assert.Equal([b.Id, c.Id], broker.GetSession(second.Id).Blocks.Select(block => block.Id).ToArray());
+    }
 }

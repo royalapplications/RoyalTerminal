@@ -326,6 +326,69 @@ public sealed class MultiplexerBrokerTests
         Assert.Throws<ObjectDisposedException>(() => broker.ListSessions());
     }
 
+    [Fact]
+    public async Task TransportMayPublishFromAnotherThreadWhileHandlingInputOrResize()
+    {
+        FakeFactory factory = new()
+        {
+            Configure = transport =>
+            {
+                transport.OnInput = () =>
+                {
+                    if (!Task.Run(() => transport.Emit("input response")).Wait(TimeSpan.FromSeconds(5)))
+                        throw new TimeoutException("The input callback was blocked by the broker event gate.");
+                };
+                transport.OnResize = () =>
+                {
+                    if (!Task.Run(() => transport.Emit("resize response")).Wait(TimeSpan.FromSeconds(5)))
+                        throw new TimeoutException("The resize callback was blocked by the broker event gate.");
+                };
+            },
+        };
+        await using MultiplexerBroker broker = new(factory);
+        MultiplexerSessionDescriptor session = broker.CreateSession("callbacks");
+        MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "shell", Options());
+        using MultiplexerAttachment controller = broker.Attach(session.Id, block.Id, MultiplexerRole.Controller);
+        Drain(controller);
+        controller.SendInput("request"u8);
+        controller.Resize(new(100, 40, 1000, 800));
+        Assert.Equal("input responseresize response", Output(Drain(controller)));
+    }
+
+    [Fact]
+    public async Task BrokerDisposalWaitsForAnExplicitCloseAlreadyInProgress()
+    {
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeFactory factory = new() { Configure = transport => { transport.StopWait = release.Task; transport.OnStop = () => entered.SetResult(); } };
+        MultiplexerBroker broker = new(factory);
+        MultiplexerSessionDescriptor session = broker.CreateSession("closing");
+        MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "shell", Options());
+        using MultiplexerAttachment controller = broker.Attach(session.Id, block.Id, MultiplexerRole.Controller);
+        Task close = broker.CloseBlockAsync(session.Id, block.Id).AsTask();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(MultiplexerErrorCode.Disconnected,
+            Assert.Throws<MultiplexerException>(() => controller.SendInput("during close"u8)).Code);
+        Task dispose = broker.DisposeAsync().AsTask();
+        Assert.False(dispose.IsCompleted);
+        release.SetResult();
+        await Task.WhenAll(close, dispose);
+        Assert.Equal(1, factory.Last.StopCount);
+        Assert.Equal(1, factory.Last.DisposeCount);
+    }
+
+    [Fact]
+    public async Task StopFailureStillDisposesEveryOwnedBlock()
+    {
+        FakeFactory factory = new() { Configure = transport => transport.OnStop = () => throw new IOException("stop failed") };
+        MultiplexerBroker broker = new(factory);
+        MultiplexerSessionDescriptor session = broker.CreateSession("stop failure");
+        await broker.AddBlockAsync(session.Id, "one", Options());
+        await broker.AddBlockAsync(session.Id, "two", Options());
+        await Assert.ThrowsAsync<IOException>(() => broker.DisposeAsync().AsTask());
+        Assert.All(factory.Transports, transport => Assert.Equal(1, transport.DisposeCount));
+    }
+
     internal static PipeTransportOptions Options() => new(new("test", []), null, null, true, new(80, 24, 800, 480));
 
     internal static MultiplexerEvent[] Drain(MultiplexerAttachment attachment)
@@ -364,8 +427,11 @@ internal sealed class FakeTransport : ITerminalTransport
     internal List<byte[]> Inputs { get; } = [];
     internal List<TerminalSessionDimensions> Resizes { get; } = [];
     internal Action? OnStart { get; set; }
+    internal Action? OnInput { get; set; }
     internal Action? OnResize { get; set; }
+    internal Action? OnStop { get; set; }
     internal Task? StartWait { get; set; }
+    internal Task? StopWait { get; set; }
 
     public async ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
     {
@@ -375,9 +441,15 @@ internal sealed class FakeTransport : ITerminalTransport
         if (StartWait is { } wait) await wait.WaitAsync(cancellationToken);
     }
 
-    public void SendInput(ReadOnlySpan<byte> utf8) => Inputs.Add(utf8.ToArray());
+    public void SendInput(ReadOnlySpan<byte> utf8) { Inputs.Add(utf8.ToArray()); OnInput?.Invoke(); }
     public void Resize(TerminalSessionDimensions dimensions) { Resizes.Add(dimensions); OnResize?.Invoke(); }
-    public ValueTask StopAsync() { StopCount++; IsRunning = false; return ValueTask.CompletedTask; }
+    public async ValueTask StopAsync()
+    {
+        StopCount++;
+        OnStop?.Invoke();
+        if (StopWait is { } wait) await wait;
+        IsRunning = false;
+    }
     public void Dispose() => DisposeCount++;
     internal void Emit(string value) => Emit(Encoding.UTF8.GetBytes(value));
     internal void Emit(byte[] value) => DataReceived?.Invoke(value, value.Length);

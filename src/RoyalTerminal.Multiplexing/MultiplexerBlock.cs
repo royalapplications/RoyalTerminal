@@ -13,6 +13,7 @@ internal sealed class MultiplexerBlock
     private readonly Queue<MultiplexerEvent> _journal = new();
     private readonly Dictionary<Guid, MultiplexerAttachment> _attachments = new();
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly SemaphoreSlim _operations = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private string _label;
     private TerminalSessionDimensions _dimensions;
@@ -20,8 +21,9 @@ internal sealed class MultiplexerBlock
     private Guid? _controllerId;
     private int? _exitCode;
     private long _sequence;
-    private int _journalBytes;
+    private long _journalBytes;
     private Task? _closeTask;
+    private bool _closing;
 
     internal MultiplexerBlock(Guid sessionId, Guid windowId, string label,
         ITerminalTransport transport, TerminalSessionDimensions dimensions, MultiplexerOptions options)
@@ -79,7 +81,7 @@ internal sealed class MultiplexerBlock
         if (!Enum.IsDefined(role)) throw new ArgumentOutOfRangeException(nameof(role));
         lock (_gate)
         {
-            if (_state == MultiplexerBlockState.Closed)
+            if (_closing || _state == MultiplexerBlockState.Closed)
                 throw new MultiplexerException(MultiplexerErrorCode.Disconnected, "The block has been closed.");
             if (lastSequence > _sequence)
                 throw new MultiplexerException(MultiplexerErrorCode.Conflict, "The replay cursor is ahead of this block.");
@@ -127,33 +129,45 @@ internal sealed class MultiplexerBlock
     {
         if (bytes.Length > _options.MaxInputBytes)
             throw new MultiplexerException(MultiplexerErrorCode.CapacityExceeded, "Input exceeds the configured operation limit.");
-        lock (_gate)
+        AcquireOperation(attachment);
+        try
         {
-            RequireController(attachment);
+            lock (_gate) RequireController(attachment);
+            // Transport callbacks may originate on another thread. Do not hold the event gate here.
             if (!bytes.IsEmpty) _transport.SendInput(bytes);
         }
+        finally { _operations.Release(); }
     }
 
     internal void Resize(MultiplexerAttachment attachment, TerminalSessionDimensions dimensions)
     {
         ValidateDimensions(dimensions, _options);
-        lock (_gate)
+        AcquireOperation(attachment);
+        try
         {
-            RequireController(attachment);
-            if (_dimensions == dimensions) return;
-            // Publish geometry before calling into a transport: synchronous redraw output then follows it.
-            TerminalSessionDimensions previous = _dimensions;
-            _dimensions = dimensions;
-            Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
+            TerminalSessionDimensions previous;
+            lock (_gate)
+            {
+                RequireController(attachment);
+                if (_dimensions == dimensions) return;
+                // Publish geometry before calling into a transport: synchronous redraw output then follows it.
+                previous = _dimensions;
+                _dimensions = dimensions;
+                Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: dimensions));
+            }
             try { _transport.Resize(dimensions); }
             catch
             {
-                _dimensions = previous;
-                Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: previous,
-                    Message: "Transport rejected the requested resize; previous dimensions restored."));
+                lock (_gate)
+                {
+                    _dimensions = previous;
+                    Publish(new(++_sequence, MultiplexerEventKind.Resize, Dimensions: previous,
+                        Message: "Transport rejected the requested resize; previous dimensions restored."));
+                }
                 throw;
             }
         }
+        finally { _operations.Release(); }
     }
 
     internal Task CloseAsync()
@@ -162,23 +176,30 @@ internal sealed class MultiplexerBlock
         lock (_gate)
         {
             if (_closeTask is not null) return _closeTask;
+            _closing = true;
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _closeTask = completion.Task;
         }
         // Never call cancellation callbacks or transport lifecycle methods while holding the event gate.
-        _lifetime.Cancel();
-        _ = CompleteCloseAsync(completion);
+        Exception? cancellationError = null;
+        try { _lifetime.Cancel(); }
+        catch (Exception error) { cancellationError = error; }
+        _ = CompleteCloseAsync(completion, cancellationError);
         return completion.Task;
     }
 
-    private async Task CompleteCloseAsync(TaskCompletionSource completion)
+    private async Task CompleteCloseAsync(TaskCompletionSource completion, Exception? cancellationError)
     {
         try
         {
             await CloseCoreAsync().ConfigureAwait(false);
-            completion.TrySetResult();
+            if (cancellationError is null) completion.TrySetResult();
+            else completion.TrySetException(cancellationError);
         }
-        catch (Exception error) { completion.TrySetException(error); }
+        catch (Exception error)
+        {
+            completion.TrySetException(cancellationError is null ? error : new AggregateException(cancellationError, error));
+        }
     }
 
     private async Task CloseCoreAsync()
@@ -186,7 +207,11 @@ internal sealed class MultiplexerBlock
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
-            try { await _transport.StopAsync().ConfigureAwait(false); }
+            await _operations.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _transport.StopAsync().ConfigureAwait(false);
+            }
             finally
             {
                 _transport.DataReceived -= OnData;
@@ -202,6 +227,7 @@ internal sealed class MultiplexerBlock
                         _attachments.Clear();
                         _controllerId = null;
                     }
+                    _operations.Release();
                 }
             }
         }
@@ -210,12 +236,22 @@ internal sealed class MultiplexerBlock
 
     private void RequireController(MultiplexerAttachment attachment)
     {
-        if (!attachment.IsConnected || !_attachments.ContainsKey(attachment.Id))
+        if (_closing || !attachment.IsConnected || !_attachments.ContainsKey(attachment.Id))
             throw new MultiplexerException(MultiplexerErrorCode.Disconnected, "This attachment is disconnected.");
         if (attachment.Role != MultiplexerRole.Controller || _controllerId != attachment.Id)
             throw new MultiplexerException(MultiplexerErrorCode.Forbidden, "Observer attachments cannot send input or resize a terminal.");
         if (_state != MultiplexerBlockState.Running)
             throw new MultiplexerException(MultiplexerErrorCode.Disconnected, "The terminal process is not running.");
+    }
+
+    private void AcquireOperation(MultiplexerAttachment attachment)
+    {
+        lock (_gate) RequireController(attachment);
+        try { _operations.Wait(_lifetime.Token); }
+        catch (OperationCanceledException)
+        {
+            throw new MultiplexerException(MultiplexerErrorCode.Disconnected, "The block is closing.");
+        }
     }
 
     private void OnData(byte[] data, int count)

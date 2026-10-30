@@ -14,6 +14,8 @@ public sealed class MultiplexerBroker : IAsyncDisposable
     private readonly ITerminalTransportFactory _factory;
     private readonly MultiplexerOptions _options;
     private readonly Dictionary<Guid, Session> _sessions = new();
+    private readonly List<Guid> _sessionOrder = [];
+    private readonly HashSet<MultiplexerBlock> _retiring = [];
     private Task? _disposeTask;
     private bool _disposed;
 
@@ -37,6 +39,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             Session session = new(label);
             session.Windows.Add(new("Main"));
             _sessions.Add(session.Id, session);
+            _sessionOrder.Add(session.Id);
             return Describe(session);
         }
     }
@@ -49,7 +52,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             ThrowIfDisposed();
             MultiplexerSessionDescriptor[] result = new MultiplexerSessionDescriptor[_sessions.Count];
             int index = 0;
-            foreach (Session session in _sessions.Values) result[index++] = Describe(session);
+            foreach (Guid id in _sessionOrder) result[index++] = Describe(_sessions[id]);
             return result;
         }
     }
@@ -183,8 +186,10 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             Session session = FindSession(sessionId);
             block = FindBlock(session, blockId);
             RemoveBlock(session, block);
+            _retiring.Add(block);
         }
-        await block.CloseAsync().ConfigureAwait(false);
+        try { await block.CloseAsync().ConfigureAwait(false); }
+        finally { lock (_gate) _retiring.Remove(block); }
     }
 
     /// <summary>Removes an entire session and explicitly stops every owned transport.</summary>
@@ -195,9 +200,15 @@ public sealed class MultiplexerBroker : IAsyncDisposable
         {
             Session session = FindSession(sessionId);
             blocks = [.. session.Blocks.Values];
+            foreach (MultiplexerBlock block in blocks) _retiring.Add(block);
             _sessions.Remove(sessionId);
+            _sessionOrder.Remove(sessionId);
         }
-        await CloseBlocksAsync(blocks).ConfigureAwait(false);
+        try { await CloseBlocksAsync(blocks).ConfigureAwait(false); }
+        finally
+        {
+            lock (_gate) foreach (MultiplexerBlock block in blocks) _retiring.Remove(block);
+        }
     }
 
     /// <summary>Stops all server-owned blocks. Repeated concurrent calls share the same completion.</summary>
@@ -211,8 +222,10 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             _disposed = true;
             List<MultiplexerBlock> all = [];
             foreach (Session session in _sessions.Values) all.AddRange(session.Blocks.Values);
+            all.AddRange(_retiring);
             blocks = [.. all];
             _sessions.Clear();
+            _sessionOrder.Clear();
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposeTask = completion.Task;
         }
@@ -240,6 +253,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             if (session.Blocks.Count >= _options.MaxBlocksPerSession) throw Capacity("The block limit has been reached.");
             block = new(sessionId, windowId, label, _factory.Create(options), options.Dimensions, _options);
             session.Blocks.Add(block.Id, block);
+            session.BlockOrder.Add(block.Id);
             MultiplexerLayoutNode leaf = MultiplexerLayoutNode.Leaf(block.Id);
             window.Layout = targetBlockId is { } targetId
                 ? SplitLeaf(window.Layout!, targetId, leaf, orientation, ratio)
@@ -256,9 +270,13 @@ public sealed class MultiplexerBroker : IAsyncDisposable
             lock (_gate)
             {
                 if (_sessions.TryGetValue(sessionId, out Session? session) && session.Blocks.ContainsKey(block.Id))
+                {
                     RemoveBlock(session, block);
+                    _retiring.Add(block);
+                }
             }
-            await block.CloseAsync().ConfigureAwait(false);
+            try { await block.CloseAsync().ConfigureAwait(false); }
+            finally { lock (_gate) _retiring.Remove(block); }
             throw;
         }
     }
@@ -372,6 +390,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
     private static void RemoveBlock(Session session, MultiplexerBlock block)
     {
         session.Blocks.Remove(block.Id);
+        session.BlockOrder.Remove(block.Id);
         Window window = FindWindow(session, block.WindowId);
         window.Layout = RemoveLeaf(window.Layout, block.Id);
         session.Revision++;
@@ -383,7 +402,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
         for (int i = 0; i < windows.Length; i++) windows[i] = Describe(session.Windows[i]);
         MultiplexerBlockDescriptor[] blocks = new MultiplexerBlockDescriptor[session.Blocks.Count];
         int index = 0;
-        foreach (MultiplexerBlock block in session.Blocks.Values) blocks[index++] = block.Describe();
+        foreach (Guid id in session.BlockOrder) blocks[index++] = session.Blocks[id].Describe();
         return new(session.Id, session.Label, session.Revision, session.CreatedUtc, windows, blocks);
     }
 
@@ -399,6 +418,7 @@ public sealed class MultiplexerBroker : IAsyncDisposable
         internal DateTimeOffset CreatedUtc { get; } = DateTimeOffset.UtcNow;
         internal List<Window> Windows { get; } = [];
         internal Dictionary<Guid, MultiplexerBlock> Blocks { get; } = new();
+        internal List<Guid> BlockOrder { get; } = [];
     }
 
     private sealed class Window(string label)
