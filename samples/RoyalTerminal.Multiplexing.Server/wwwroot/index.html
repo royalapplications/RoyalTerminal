@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>RoyalTerminal · Workspaces</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="workspace.css">
+  <script src="vendor/xterm.js" defer></script>
+  <script src="vendor/addon-fit.js" defer></script>
+  <script type="module" src="workspace.js"></script>
+</head>
+<body>
+  <div id="connect-screen" class="connect-screen">
+    <form id="connect-form" class="connect-card">
+      <div class="brand-mark" aria-hidden="true">R<span>_</span></div>
+      <div class="eyebrow">ROYALTERMINAL / EXPERIMENTAL</div>
+      <h1>Work that stays<br>where you left it.</h1>
+      <p>One workspace for your shells, builds, and long-running work. Detach here. Pick up on another device.</p>
+      <label for="access-token">Server access token</label>
+      <input id="access-token" type="password" autocomplete="off" spellcheck="false" required minlength="32" placeholder="Paste the token from your server">
+      <button class="primary" type="submit">Open workspaces <span aria-hidden="true">→</span></button>
+      <p id="connect-error" role="alert" class="error-text"></p>
+      <div class="connect-note">Processes stay alive while the multiplexer server is running.</div>
+    </form>
+    <div class="connect-art" aria-hidden="true"><div class="art-line"></div><div class="art-window"><i></i><i></i><i></i><div class="art-code">~ / work<br><b>›</b> build something enduring<br><span>session connected</span><br>▌</div></div><div class="art-label">CONNECTED BY CONTEXT.<br>UNBOUND FROM A WINDOW.</div></div>
+  </div>
+  <div id="application" class="application" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><span class="brand-symbol">R_</span><strong>RoyalTerminal</strong><span class="experimental">LAB</span></div>
+      <button id="palette-button" class="search-button"><span>Search commands</span><kbd>⌘ K</kbd></button>
+      <div class="section-label"><span>WORKSPACES</span><button id="new-session" class="icon-button" title="New workspace" aria-label="New workspace">＋</button></div>
+      <nav id="session-list" aria-label="Workspaces"></nav>
+      <div class="sidebar-bottom"><span class="connection-dot"></span><span>Local workspace server</span><button id="disconnect" class="icon-button" title="Disconnect" aria-label="Disconnect">↗</button></div>
+    </aside>
+    <main class="main">
+      <header class="workspace-header">
+        <button id="toggle-sidebar" class="icon-button mobile" aria-label="Toggle sidebar">☰</button>
+        <div><div class="eyebrow">DURABLE WORKSPACE</div><h2 id="workspace-title">Your workspaces</h2></div>
+        <div class="header-actions"><span id="workspace-meta" class="meta"></span><button id="share-session">Share</button><button id="workspace-menu" title="Rename or close workspace">•••</button></div>
+      </header>
+      <div class="workspace-toolbar"><div id="window-tabs" class="window-tabs" role="tablist" aria-label="Windows"></div><button id="new-window" class="icon-button" title="New window" aria-label="New window">＋</button><div class="toolbar-spacer"></div><button id="new-shell">＋ Shell</button><button id="split-horizontal" title="Split side by side">Split ↔</button><button id="split-vertical" title="Split above and below">Split ↕</button><button id="zoom-block" title="Zoom focused terminal">Zoom</button></div>
+      <div id="workspace-content" class="workspace-content"><section id="empty-state" class="empty-state"><div class="empty-icon">⌘</div><h2>A place for ongoing work</h2><p>Create a workspace, open a shell, and keep your work together.<br>Closing this tab detaches your terminals.</p><button id="empty-create" class="primary">Create workspace</button><div class="shortcut-guide"><span><kbd>Ctrl B</kbd> then <kbd>%</kbd> split</span><span><kbd>⌘ K</kbd> commands</span></div></section><div id="pane-layout" class="pane-layout"></div></div>
+      <footer class="statusbar"><span id="status-text">Ready</span><span id="chord-hint"></span><span class="status-spacer"></span><span>Experimental protocol v1</span><button id="help-button">Shortcuts</button></footer>
+    </main>
+  </div>
+  <dialog id="dialog" class="dialog"><form id="dialog-form"><div id="dialog-content"></div><div class="dialog-actions"><button type="button" id="dialog-cancel">Cancel</button><button type="submit" id="dialog-submit" class="primary">Continue</button></div></form></dialog>
+  <dialog id="palette" class="palette"><input id="palette-query" placeholder="What would you like to do?" aria-label="Search commands" autocomplete="off"><div id="palette-results"></div><div class="palette-footer">↑ ↓ navigate <span>Enter run</span><span>Esc close</span></div></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

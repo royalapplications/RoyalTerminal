@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Inspection/RoyalTerminal.Multiplexing.Inspection.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Automation/RoyalTerminal.Multiplexing.Automation.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pty/RoyalTerminal.Terminal.Transport.Pty.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pipe/RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+  </ItemGroup>
+</Project>

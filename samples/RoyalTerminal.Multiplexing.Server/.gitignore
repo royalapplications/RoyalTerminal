@@ -1,0 +1,4 @@
+node_modules/
+wwwroot/vendor/
+test-results/
+playwright-report/
