@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Multiplexing\RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Multiplexing.Automation\RoyalTerminal.Multiplexing.Automation.csproj" />
   </ItemGroup>
 </Project>

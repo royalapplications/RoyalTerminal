@@ -3,6 +3,7 @@
 
 using System.Text;
 using System.Text.Json;
+using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal.Transport.Multiplexing;
 
 namespace RoyalTerminal.Multiplexing.Cli;
@@ -23,18 +24,28 @@ internal static class MultiplexingCli
           stop SESSION BLOCK                Explicitly close a terminal block
           send SESSION BLOCK TEXT           Send UTF-8 text to a block
           capture SESSION BLOCK             Read the current block screen
+          config show                       Read effective automation configuration
+          config load FILE|-                Replace server configuration with JSON
+          actions                           List configured action IDs
+          do ACTION [SESSION [BLOCK [WINDOW]]] Invoke a configured action
           api list                          List discoverable automation methods
           api describe METHOD               Show one method's contract
           api call METHOD [JSON|-]          Call a method with JSON arguments
 
         Authentication: ROYALTERMINAL_MUX_TOKEN environment variable (never a URL or command argument).
         Endpoint: --endpoint, then ROYALTERMINAL_MUX_URL, then http://127.0.0.1:7331/.
+        Targets: full GUID, case-insensitive label, 1-based index, then unique ID suffix (4+ characters).
+        An ambiguous label/suffix is an error. Indices follow the host listing order.
+        Action context defaults to ROYALTERMINAL_MUX_SESSION, ROYALTERMINAL_MUX_BLOCK,
+        and ROYALTERMINAL_MUX_WINDOW when no explicit action SESSION is supplied.
+        An explicit action SESSION replaces the entire environment context.
         All management output is JSON. '-' reads bounded JSON from standard input.
         Closing a CLI invocation never terminates a session. Use close/stop explicitly.
         """;
 
     public static async Task<int> RunAsync(string[] args, string? accessToken, string? configuredEndpoint,
-        TextReader input, TextWriter output, TextWriter error, HttpClient http, CancellationToken cancellationToken)
+        TextReader input, TextWriter output, TextWriter error, HttpClient http, CancellationToken cancellationToken,
+        CliCurrentContext? currentContext = null)
     {
         try
         {
@@ -60,16 +71,20 @@ internal static class MultiplexingCli
             }
 
             MultiplexingApiClient client = new(http, new Uri(endpoint, UriKind.Absolute), accessToken);
+            CliTargetResolver targets = new(client);
             JsonElement result = command[0] switch
             {
                 "sessions" => await ListAsync(client, command, cancellationToken),
                 "new" => await NewAsync(client, command, cancellationToken),
-                "show" => await SessionAsync(client, command, HttpMethod.Get, cancellationToken),
-                "close" => await SessionAsync(client, command, HttpMethod.Delete, cancellationToken),
-                "stop" => await BlockAsync(client, command, HttpMethod.Delete, "", cancellationToken),
-                "capture" => await BlockAsync(client, command, HttpMethod.Get, "/capture", cancellationToken),
-                "send" => await SendAsync(client, command, cancellationToken),
-                "run" => await RunBlockAsync(client, command, cancellationToken),
+                "show" => await SessionAsync(client, targets, command, HttpMethod.Get, cancellationToken),
+                "close" => await SessionAsync(client, targets, command, HttpMethod.Delete, cancellationToken),
+                "stop" => await BlockAsync(client, targets, command, HttpMethod.Delete, "", cancellationToken),
+                "capture" => await BlockAsync(client, targets, command, HttpMethod.Get, "/capture", cancellationToken),
+                "send" => await SendAsync(client, targets, command, cancellationToken),
+                "run" => await RunBlockAsync(client, targets, command, cancellationToken),
+                "config" => await ConfigurationAsync(client, command, input, cancellationToken),
+                "actions" => await ActionsAsync(client, command, cancellationToken),
+                "do" => await DoAsync(client, targets, command, currentContext, cancellationToken),
                 "api" => await ApiAsync(client, command, input, cancellationToken),
                 _ => throw new ArgumentException($"Unknown command '{command[0]}'. Run --help for usage."),
             };
@@ -96,7 +111,17 @@ internal static class MultiplexingCli
             await error.WriteLineAsync("Invalid JSON: " + exception.Message);
             return 2;
         }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or OperationCanceledException)
+        catch (MultiplexerAutomationException exception)
+        {
+            await error.WriteLineAsync($"{exception.Code}: {exception.Message}");
+            return 2;
+        }
+        catch (MultiplexingApiException exception)
+        {
+            await error.WriteLineAsync(exception.Code is { } code ? $"{exception.Message} Code: {code}." : exception.Message);
+            return 1;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException)
         {
             await error.WriteLineAsync(exception.Message);
             return 1;
@@ -116,36 +141,35 @@ internal static class MultiplexingCli
         return await client.SendAsync(HttpMethod.Post, "api/sessions", body, token);
     }
 
-    private static async ValueTask<JsonElement> SessionAsync(MultiplexingApiClient client, string[] args,
+    private static async ValueTask<JsonElement> SessionAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args,
         HttpMethod method, CancellationToken token)
     {
         Require(args, 2, 2);
-        Guid session = Id(args[1]);
+        Guid session = await targets.SessionAsync(args[1], token);
         return await client.SendAsync(method, $"api/sessions/{session:D}", cancellationToken: token);
     }
 
-    private static async ValueTask<JsonElement> BlockAsync(MultiplexingApiClient client, string[] args,
+    private static async ValueTask<JsonElement> BlockAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args,
         HttpMethod method, string suffix, CancellationToken token)
     {
         Require(args, 3, 3);
-        Guid session = Id(args[1]);
-        Guid block = Id(args[2]);
+        Guid session = await targets.SessionAsync(args[1], token);
+        Guid block = await targets.BlockAsync(session, args[2], token);
         return await client.SendAsync(method, $"api/sessions/{session:D}/blocks/{block:D}{suffix}", cancellationToken: token);
     }
 
-    private static async ValueTask<JsonElement> SendAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    private static async ValueTask<JsonElement> SendAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args, CancellationToken token)
     {
         Require(args, 4, 4);
-        Guid session = Id(args[1]);
-        Guid block = Id(args[2]);
+        Guid session = await targets.SessionAsync(args[1], token);
+        Guid block = await targets.BlockAsync(session, args[2], token);
         JsonElement body = BuildJson(writer => writer.WriteString("data", Convert.ToBase64String(Encoding.UTF8.GetBytes(args[3]))));
         return await client.SendAsync(HttpMethod.Post, $"api/sessions/{session:D}/blocks/{block:D}/input", body, token);
     }
 
-    private static async ValueTask<JsonElement> RunBlockAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    private static async ValueTask<JsonElement> RunBlockAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args, CancellationToken token)
     {
         Require(args, 4);
-        Guid session = Id(args[1]);
         string label = "Terminal";
         string? directory = null;
         string transport = "pty";
@@ -172,6 +196,7 @@ internal static class MultiplexingCli
 
         string executable = args[index++];
         string[] arguments = args[index..];
+        Guid session = await targets.SessionAsync(args[1], token);
         JsonElement body = BuildJson(writer =>
         {
             writer.WriteString("label", label);
@@ -192,6 +217,81 @@ internal static class MultiplexingCli
         });
         return await client.SendAsync(HttpMethod.Post, $"api/sessions/{session:D}/blocks", body, token);
     }
+
+    private static async ValueTask<JsonElement> ConfigurationAsync(MultiplexingApiClient client, string[] args,
+        TextReader input, CancellationToken token)
+    {
+        Require(args, 2);
+        if (args[1] == "show")
+        {
+            Require(args, 2, 2);
+            return await client.SendAsync(HttpMethod.Get, "api/config", cancellationToken: token);
+        }
+        if (args[1] != "load") throw new ArgumentException("Expected config show or config load FILE|-.");
+        Require(args, 3, 3);
+        string json;
+        if (args[2] == "-") json = await ReadBoundedAsync(input, token);
+        else
+        {
+            using StreamReader file = new(args[2], new UTF8Encoding(false, true));
+            json = await ReadBoundedAsync(file, token);
+        }
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("Automation configuration must be a JSON object.");
+        return await client.SendAsync(HttpMethod.Put, "api/config", document.RootElement, token);
+    }
+
+    private static async ValueTask<JsonElement> ActionsAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    {
+        Require(args, 1, 1);
+        JsonElement resolved = await client.SendAsync(HttpMethod.Get, "api/config", cancellationToken: token);
+        if (resolved.ValueKind != JsonValueKind.Object || !resolved.TryGetProperty("configuration", out JsonElement config)
+            || config.ValueKind != JsonValueKind.Object || !config.TryGetProperty("actions", out JsonElement actions)
+            || actions.ValueKind != JsonValueKind.Array || actions.GetArrayLength() > 4096)
+            throw new IOException("The host returned an invalid action configuration.");
+        return BuildJson(writer =>
+        {
+            writer.WriteStartArray("actions");
+            foreach (JsonElement action in actions.EnumerateArray())
+            {
+                if (action.ValueKind != JsonValueKind.Object || !action.TryGetProperty("id", out JsonElement id)
+                    || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()))
+                    throw new IOException("The host returned an invalid action descriptor.");
+                writer.WriteStringValue(id.GetString());
+            }
+            writer.WriteEndArray();
+        });
+    }
+
+    private static async ValueTask<JsonElement> DoAsync(MultiplexingApiClient client, CliTargetResolver targets,
+        string[] args, CliCurrentContext? context, CancellationToken token)
+    {
+        Require(args, 2, 5);
+        string action = args[1];
+        if (string.IsNullOrEmpty(action) || action == "." || action.Length > 128 || action.Contains("..", StringComparison.Ordinal)
+            || action.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')))
+            throw new ArgumentException("Action IDs must use 1–128 ASCII letters, digits, periods, underscores, or hyphens, without '..'.");
+
+        // An explicit session starts a new context; never mix in the previous environment's block/window.
+        string? sessionSelector = args.Length > 2 ? args[2] : NullIfBlank(context?.Session);
+        string? blockSelector = args.Length > 3 ? args[3] : args.Length > 2 ? null : NullIfBlank(context?.Block);
+        string? windowSelector = args.Length > 4 ? args[4] : args.Length > 2 ? null : NullIfBlank(context?.Window);
+        if (sessionSelector is null && (blockSelector is not null || windowSelector is not null))
+            throw new ArgumentException("Action block/window context requires a session.");
+        Guid? session = sessionSelector is null ? null : await targets.SessionAsync(sessionSelector, token);
+        Guid? block = blockSelector is null ? null : await targets.BlockAsync(session!.Value, blockSelector, token);
+        Guid? window = windowSelector is null ? null : await targets.WindowAsync(session!.Value, windowSelector, token);
+        JsonElement body = BuildJson(writer =>
+        {
+            if (session is { } sessionId) writer.WriteString("sessionId", sessionId);
+            if (block is { } blockId) writer.WriteString("blockId", blockId);
+            if (window is { } windowId) writer.WriteString("windowId", windowId);
+        });
+        return await client.SendAsync(HttpMethod.Post, $"api/actions/{action}/invoke", body, token);
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static async ValueTask<JsonElement> ApiAsync(MultiplexingApiClient client, string[] args,
         TextReader input, CancellationToken token)
@@ -227,7 +327,7 @@ internal static class MultiplexingCli
         {
             Require(args, 3, 4);
             string json = args.Length == 3 ? "{}" : args[3] == "-" ? await ReadBoundedAsync(input, token) : args[3];
-            if (json.Length > 1024 * 1024) { throw new ArgumentException("JSON arguments exceed one MiB."); }
+            ValidateJsonSize(json);
             using JsonDocument document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
@@ -247,8 +347,13 @@ internal static class MultiplexingCli
         while (true)
         {
             int read = await input.ReadAsync(buffer.AsMemory(), token);
-            if (read == 0) { return content.ToString(); }
-            if (content.Length + read > 1024 * 1024) { throw new ArgumentException("JSON arguments exceed one MiB."); }
+            if (read == 0)
+            {
+                string result = content.ToString();
+                ValidateJsonSize(result);
+                return result;
+            }
+            if (content.Length + read > 1024 * 1024) { throw new ArgumentException("JSON input exceeds one MiB."); }
             content.Append(buffer, 0, read);
         }
     }
@@ -273,8 +378,11 @@ internal static class MultiplexingCli
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static Guid Id(string value)
-        => Guid.TryParse(value, out Guid id) && id != Guid.Empty ? id : throw new ArgumentException("A nonempty session or block GUID is required.");
+    private static void ValidateJsonSize(string json)
+    {
+        if (json.Length > 1024 * 1024 || Encoding.UTF8.GetByteCount(json) > 1024 * 1024)
+            throw new ArgumentException("JSON input exceeds one MiB.");
+    }
 
     private static void Require(string[] args, int minimum, int? maximum = null)
     {
