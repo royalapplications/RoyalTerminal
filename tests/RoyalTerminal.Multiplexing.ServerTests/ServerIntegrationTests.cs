@@ -47,7 +47,7 @@ public sealed class ServerIntegrationTests
         Assert.Equal(HttpStatusCode.Forbidden, (await observer.PostAsJsonAsync("api/sessions", new NewSession("denied"), ServerJsonContext.Default.NewSession)).StatusCode);
         Guid block = await host.CreateEchoBlockAsync(session);
         await using MultiplexingTerminalTransport transport = new();
-        await Assert.ThrowsAnyAsync<Exception>(() => transport.StartAsync(new(host.Address, share.GetProperty("token").GetString()!, session, block, new(80,24,0,0))).AsTask());
+        await Assert.ThrowsAnyAsync<Exception>(() => transport.StartAsync(new MultiplexingTransportOptions(host.Address, share.GetProperty("token").GetString()!, session, block, new(80,24,0,0))).AsTask());
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class ServerIntegrationTests
                 Assert.True(geometrySeen);
                 lock (received) { received.Append(Encoding.UTF8.GetString(bytes,0,length)); if(received.ToString().Contains("first-marker",StringComparison.Ordinal))firstOutput.TrySetResult(); }
             };
-            await first.StartAsync(new(host.Address, Host.Token, session, block, new(80,24,0,0)));
+            await first.StartAsync(new MultiplexingTransportOptions(host.Address, Host.Token, session, block, new(80,24,0,0)));
             first.SendInput("first-marker\n"u8);
             await first.FlushAsync();
             await firstOutput.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -78,7 +78,7 @@ public sealed class ServerIntegrationTests
         await using MultiplexingTerminalTransport second = new();
         StringBuilder replay = new();
         second.DataReceived += (bytes,length) => { lock(replay) { replay.Append(Encoding.UTF8.GetString(bytes,0,length));if(replay.ToString().Contains("second-marker",StringComparison.Ordinal))secondOutput.TrySetResult(); } };
-        await second.StartAsync(new(host.Address, Host.Token, session, block, new(80,24,0,0)));
+        await second.StartAsync(new MultiplexingTransportOptions(host.Address, Host.Token, session, block, new(80,24,0,0)));
         second.SendInput("second-marker\n"u8);
         await second.FlushAsync();
         await secondOutput.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -95,10 +95,100 @@ public sealed class ServerIntegrationTests
         using JsonDocument methods=JsonDocument.Parse(await host.Client.GetStringAsync("api/methods"));
         Assert.Contains(methods.RootElement.GetProperty("methods").EnumerateArray(), x=>x.GetProperty("name").GetString()=="terminal.format");
         Guid session=await host.CreateSessionAsync("before");
-        using StringContent body=new($$"""{"method":"session.set_label","arguments":{"sessionId":"{{session}}","lable":"after"}}""",Encoding.UTF8,"application/json");
+        using StringContent body=new("{\"method\":\"session.set_label\",\"arguments\":{\"sessionId\":\""+session+"\",\"lable\":\"after\"}}",Encoding.UTF8,"application/json");
         Assert.Equal(HttpStatusCode.BadRequest,(await host.Client.PostAsync("api/call",body)).StatusCode);
         using JsonDocument view=JsonDocument.Parse(await host.Client.GetStringAsync($"api/sessions/{session}"));
         Assert.Equal("before",view.RootElement.GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task ConfigurationAndActionsResolveContextAndRequireAdministratorAccess()
+    {
+        await using Host host = await Host.StartAsync();
+        Guid session = await host.CreateSessionAsync("before action");
+        const string config = """
+            {"version":1,"actions":[{"id":"rename_focused","steps":[
+              {"method":"session.set_label","arguments":{"sessionId":"${sessionId}","label":"after action"}}
+            ]}]}
+            """;
+        using StringContent body = new(config, Encoding.UTF8, "application/json");
+        (await host.Client.PutAsync("api/config", body)).EnsureSuccessStatusCode();
+        using HttpResponseMessage action = await host.Client.PostAsJsonAsync("api/actions/rename_focused/invoke",
+            new ActionContext(SessionId: session), ServerJsonContext.Default.ActionContext);
+        action.EnsureSuccessStatusCode();
+        using JsonDocument result = JsonDocument.Parse(await action.Content.ReadAsStringAsync());
+        Assert.Single(result.RootElement.GetProperty("steps").EnumerateArray());
+        using JsonDocument view = JsonDocument.Parse(await host.Client.GetStringAsync($"api/sessions/{session}"));
+        Assert.Equal("after action", view.RootElement.GetProperty("label").GetString());
+
+        JsonElement share = await host.CallAsync("share.create", $$"""{"sessionId":"{{session}}","role":"observer"}""");
+        using HttpClient observer = new() { BaseAddress = host.Address };
+        observer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", share.GetProperty("token").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await observer.GetAsync("api/config")).StatusCode);
+        using HttpResponseMessage denied = await observer.PostAsJsonAsync("api/actions/rename_focused/invoke",
+            new ActionContext(SessionId: session), ServerJsonContext.Default.ActionContext);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+    }
+
+    [Fact]
+    public async Task InvalidConfigurationAndMissingContextLeaveExistingStateUntouched()
+    {
+        await using Host host = await Host.StartAsync();
+        const string config = """
+            {"version":1,"actions":[{"id":"two_steps","steps":[
+              {"method":"session.create","arguments":{"label":"must not be created"}},
+              {"method":"session.view","arguments":{"sessionId":"${sessionId}"}}
+            ]}]}
+            """;
+        using StringContent body = new(config, Encoding.UTF8, "application/json");
+        (await host.Client.PutAsync("api/config", body)).EnsureSuccessStatusCode();
+        using StringContent invalid = new(config.Replace("session.view", "session.unknown", StringComparison.Ordinal), Encoding.UTF8, "application/json");
+        Assert.Equal(HttpStatusCode.BadRequest, (await host.Client.PutAsync("api/config", invalid)).StatusCode);
+        using JsonDocument current = JsonDocument.Parse(await host.Client.GetStringAsync("api/config"));
+        Assert.Equal("session.view", current.RootElement.GetProperty("configuration").GetProperty("actions")[0].GetProperty("steps")[1].GetProperty("method").GetString());
+        using HttpResponseMessage missing = await host.Client.PostAsJsonAsync("api/actions/two_steps/invoke",
+            new ActionContext(), ServerJsonContext.Default.ActionContext);
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        using JsonDocument sessions = JsonDocument.Parse(await host.Client.GetStringAsync("api/sessions"));
+        Assert.Empty(sessions.RootElement.GetProperty("sessions").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ActionRuntimeFailureReportsCompletedEffectsWithoutRetryingOrRollback()
+    {
+        await using Host host = await Host.StartAsync();
+        const string config = """
+            {"version":1,"actions":[{"id":"partial","steps":[
+              {"method":"session.create","arguments":{"label":"created once"}},
+              {"method":"session.close","arguments":{"sessionId":"11111111-1111-1111-1111-111111111111"}}
+            ]}]}
+            """;
+        using StringContent body = new(config, Encoding.UTF8, "application/json");
+        (await host.Client.PutAsync("api/config", body)).EnsureSuccessStatusCode();
+        using HttpResponseMessage result = await host.Client.PostAsJsonAsync("api/actions/partial/invoke",
+            new ActionContext(), ServerJsonContext.Default.ActionContext);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        using JsonDocument failure = JsonDocument.Parse(await result.Content.ReadAsStringAsync());
+        Assert.Equal("InvocationFailed", failure.RootElement.GetProperty("code").GetString());
+        JsonElement detail = failure.RootElement.GetProperty("action");
+        Assert.Equal(1, detail.GetProperty("stepIndex").GetInt32());
+        Assert.Single(detail.GetProperty("completedSteps").EnumerateArray());
+        using JsonDocument sessions = JsonDocument.Parse(await host.Client.GetStringAsync("api/sessions"));
+        Assert.Single(sessions.RootElement.GetProperty("sessions").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ConfigurationBodyBudgetHandlesKnownAndChunkedContentLengths()
+    {
+        await using Host host = await Host.StartAsync();
+        string padded = "{\"version\":1,\"actions\":[]}" + new string(' ', 300 * 1024);
+        using StringContent accepted = new(padded, Encoding.UTF8, "application/json");
+        Assert.Equal(HttpStatusCode.OK, (await host.Client.PutAsync("api/config", accepted)).StatusCode);
+        using StreamContent oversized = new(new MemoryStream(Encoding.UTF8.GetBytes(new string(' ', 1024 * 1024 + 1))));
+        oversized.Headers.ContentType = new("application/json");
+        using HttpRequestMessage request = new(HttpMethod.Put, "api/config") { Content = oversized };
+        request.Headers.TransferEncodingChunked = true;
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await host.Client.SendAsync(request)).StatusCode);
     }
 
     private sealed class Host : IAsyncDisposable

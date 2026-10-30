@@ -4,6 +4,7 @@
 using System.Net;
 using System.Text.Json;
 using RoyalTerminal.Multiplexing.Inspection;
+using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Transport.Pipe;
 using RoyalTerminal.Terminal.Transport.Pty;
@@ -48,6 +49,7 @@ internal static class ServerHost
         WorkspaceOperations workspaces = new(broker, inspections);
         ClientRegistry clients = new();
         ApiCatalog catalog = new(workspaces, tokens, clients);
+        AutomationService automation = new(catalog, Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_CONFIG"));
         BlockStreamEndpoint streams = new(broker, tokens, clients);
         builder.Services.AddSingleton(broker);
         builder.Services.AddSingleton(workspaces);
@@ -84,6 +86,26 @@ internal static class ServerHost
         {
             _ = ServerHttp.Authorize(context, tokens);
             return ServerHttp.WriteAsync(context, catalog.Describe(), ServerJsonContext.Default.MethodList);
+        });
+        app.MapGet("/api/config", (HttpContext context) =>
+        {
+            _ = ServerHttp.Authorize(context, tokens, administrator: true);
+            return ServerHttp.WriteAsync(context, automation.Current, MultiplexerAutomationJsonContext.Default.MultiplexerResolvedConfiguration);
+        });
+        app.MapPut("/api/config", async (HttpContext context) =>
+        {
+            _ = ServerHttp.Authorize(context, tokens, administrator: true);
+            byte[] bytes = await ServerHttp.ReadBytesAsync(context, 1024 * 1024);
+            MultiplexerResolvedConfiguration result = await automation.UpdateAsync(bytes, context.RequestAborted);
+            await ServerHttp.WriteAsync(context, result, MultiplexerAutomationJsonContext.Default.MultiplexerResolvedConfiguration);
+        });
+        app.MapPost("/api/actions/{actionId}/invoke", async (HttpContext context) =>
+        {
+            AccessGrant grant = ServerHttp.Authorize(context, tokens, administrator: true);
+            ActionContext request = await ServerHttp.ReadAsync(context, ServerJsonContext.Default.ActionContext);
+            string id = context.Request.RouteValues["actionId"]?.ToString() ?? throw new ArgumentException("An action ID is required.");
+            MultiplexerActionResult result = await automation.RunAsync(id, request, grant, context.RequestAborted);
+            await ServerHttp.WriteAsync(context, result, MultiplexerAutomationJsonContext.Default.MultiplexerActionResult);
         });
         app.MapPost("/api/call", async (HttpContext context) =>
         {

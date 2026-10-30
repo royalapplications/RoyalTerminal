@@ -4,11 +4,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using RoyalTerminal.Multiplexing;
+using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Multiplexing.Server;
 
-internal sealed record ApiError(string Code, string Message);
+internal sealed record ApiError(string Code, string Message, ActionFailure? Action = null);
+internal sealed record ActionFailure(string ActionId, int StepIndex, string Method,
+    IReadOnlyList<MultiplexerActionStepResult> CompletedSteps);
 internal sealed record ApiSuccess(bool Success = true);
 internal sealed record CapabilityDescription(bool Administrator, Guid? SessionId, bool CanControl);
 internal sealed record ServerVersion(string Product, string Version, int Protocol, string Durability);
@@ -31,6 +34,7 @@ internal sealed record ShareList(IReadOnlyList<ShareDescriptor> Shares);
 internal sealed record ConnectedClient(Guid Id, Guid SessionId, Guid BlockId, string Role, DateTimeOffset ConnectedUtc);
 internal sealed record ClientList(IReadOnlyList<ConnectedClient> Clients);
 internal sealed record ScreenCapture(string Format, string Content, string Title, string? WorkingDirectory);
+internal sealed record TerminalTextValue(string Value);
 
 internal sealed record ServerFrame
 {
@@ -64,6 +68,7 @@ internal sealed record ClientFrame(string Type, string? Token = null, string? Da
 [JsonSerializable(typeof(MethodList))]
 [JsonSerializable(typeof(MethodDescription))]
 [JsonSerializable(typeof(ApiCall))]
+[JsonSerializable(typeof(ActionContext))]
 [JsonSerializable(typeof(NewSession))]
 [JsonSerializable(typeof(NewBlock))]
 [JsonSerializable(typeof(InputRequest))]
@@ -72,6 +77,7 @@ internal sealed record ClientFrame(string Type, string? Token = null, string? Da
 [JsonSerializable(typeof(ShareList))]
 [JsonSerializable(typeof(ClientList))]
 [JsonSerializable(typeof(ScreenCapture))]
+[JsonSerializable(typeof(TerminalTextValue))]
 [JsonSerializable(typeof(ServerFrame))]
 [JsonSerializable(typeof(ClientFrame))]
 [JsonSerializable(typeof(TerminalProgramStatus[]))]
