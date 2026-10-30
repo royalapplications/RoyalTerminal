@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\samples\RoyalTerminal.Multiplexing.Desktop\RoyalTerminal.Multiplexing.Desktop.csproj" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+    <Compile Include="..\RoyalTerminal.Multiplexing.ClientTests\TestWebSocket.cs" Link="TestWebSocket.cs" />
+  </ItemGroup>
+</Project>

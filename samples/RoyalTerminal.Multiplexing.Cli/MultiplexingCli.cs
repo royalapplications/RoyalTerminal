@@ -22,7 +22,7 @@ internal static class MultiplexingCli
               --label TEXT --cwd PATH --pipe
           stop SESSION BLOCK                Explicitly close a terminal block
           send SESSION BLOCK TEXT           Send UTF-8 text to a block
-          capture SESSION BLOCK             Read the retained block event log
+          capture SESSION BLOCK             Read the current block screen
           api list                          List discoverable automation methods
           api describe METHOD               Show one method's contract
           api call METHOD [JSON|-]          Call a method with JSON arguments
