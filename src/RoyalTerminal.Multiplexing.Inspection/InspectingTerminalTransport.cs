@@ -12,7 +12,7 @@ namespace RoyalTerminal.Multiplexing.Inspection;
 /// <remarks>Output is parsed and forwarded in one serialized order. Query replies originate here exactly
 /// once; attached presentation terminals must suppress their automatic replies while permitting user input.
 /// No host filesystem reader, clipboard, notification service, or window-resize callback is installed.</remarks>
-public sealed class InspectingTerminalTransport : ITerminalTransport
+public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplexerResizeSource
 {
     private readonly object _gate = new();
     private readonly object _resizeGate = new();
@@ -68,6 +68,9 @@ public sealed class InspectingTerminalTransport : ITerminalTransport
 
     /// <inheritdoc />
     public event Action<int>? ProcessExited;
+
+    /// <summary>Raised after canonical geometry commits, in the same serialized order as output.</summary>
+    public event Action<TerminalSessionDimensions>? DimensionsChanged;
 
     /// <inheritdoc />
     public bool IsRunning => !Volatile.Read(ref _disposed) && _inner.IsRunning;
@@ -216,6 +219,7 @@ public sealed class InspectingTerminalTransport : ITerminalTransport
     /// <inheritdoc />
     public void Dispose()
     {
+        Action? onDisposed;
         lock (_gate)
         {
             if (_disposed) return;
@@ -225,9 +229,11 @@ public sealed class InspectingTerminalTransport : ITerminalTransport
             _inner.DataReceived -= OnData;
             _inner.ProcessExited -= OnExit;
             _processor.Dispose();
+            onDisposed = Disposed;
+            Disposed = null;
         }
         try { _inner.Dispose(); }
-        finally { Disposed?.Invoke(); }
+        finally { onDisposed?.Invoke(); }
     }
 
     private void OnData(byte[] data, int count)
@@ -263,6 +269,7 @@ public sealed class InspectingTerminalTransport : ITerminalTransport
     {
         _processor.ResizeScreen(dimensions.Columns, dimensions.Rows, dimensions.WidthPixels, dimensions.HeightPixels);
         _dimensions = dimensions;
+        DimensionsChanged?.Invoke(dimensions);
     }
 
     private void EnqueueResponse(byte[] response)

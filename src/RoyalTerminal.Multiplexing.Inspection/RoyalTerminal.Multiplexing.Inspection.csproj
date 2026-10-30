@@ -5,6 +5,7 @@
     <IsPackable>true</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
     <ProjectReference Include="../RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
   </ItemGroup>
 </Project>

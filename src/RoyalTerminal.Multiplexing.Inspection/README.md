@@ -36,7 +36,11 @@ parser lock, allowing transports to deliver synchronous or cross-thread output.
 
 Screen mutation, metadata/status reads, snapshot capture, and output publication
 share a lock. Resize updates the canonical screen before asking the transport
-to redraw. Transport calls themselves run outside the parser lock. Consumers
+to redraw. `IMultiplexerResizeSource.DimensionsChanged` publishes committed
+geometry under that same lock, including rollback when a transport rejects a
+resize. The broker consumes this event instead of announcing geometry before
+the canonical terminal has changed, so concurrent output and replay use the
+same order. Transport calls themselves run outside the parser lock. Consumers
 of synchronous output/exit events must return promptly. Providers remain
 responsible for serializing concurrent input writes, as in ordinary terminal
 sessions. A response queue overflow or write failure is retained in

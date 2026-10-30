@@ -261,6 +261,86 @@ public sealed class InspectingTerminalTransportTests
         Assert.Equal("kept", transport.Capture(TerminalSnapshotExportFormat.PlainText));
     }
 
+    [Fact]
+    public async Task BrokerResizeCannotOvertakeAlreadyParsedOutput()
+    {
+        using ManualResetEventSlim parsed = new();
+        using ManualResetEventSlim publish = new();
+        using ManualResetEventSlim resizeEntered = new();
+        FakeFactory inner = new();
+        InspectingTerminalTransportFactory inspection = new(inner);
+        CallbackFactory sequenced = new(options =>
+        {
+            InspectingTerminalTransport terminal = (InspectingTerminalTransport)inspection.Create(options);
+            terminal.DataReceived += (bytes, count) =>
+            {
+                if (!bytes.AsSpan(0, count).SequenceEqual("old"u8)) return;
+                parsed.Set();
+                Assert.True(publish.Wait(TimeSpan.FromSeconds(5)), "Test did not release output publication.");
+            };
+            return new ResizeSignalingTransport(terminal, resizeEntered);
+        });
+        await using MultiplexerBroker broker = new(sequenced);
+        MultiplexerSessionDescriptor session = broker.CreateSession("ordered");
+        Options options = new(Dimensions);
+        MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "terminal", options);
+        using MultiplexerAttachment controller = broker.Attach(session.Id, block.Id, MultiplexerRole.Controller);
+        Assert.Equal(MultiplexerEventKind.Resize, (await controller.Events.ReadAsync()).Kind);
+        inner.Transports[0].OnResize = _ => inner.Transports[0].Emit("new");
+        Task output = Task.Run(() => inner.Transports[0].Emit("old"));
+        Task? resize = null;
+        try
+        {
+            Assert.True(parsed.Wait(TimeSpan.FromSeconds(5)));
+            resize = Task.Run(() => controller.Resize(new(40, 8, 0, 0)));
+            Assert.True(resizeEntered.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(controller.Events.TryRead(out _), "Resize was published before already-parsed output.");
+        }
+        finally { publish.Set(); }
+        await output;
+        if (resize is not null) await resize;
+        MultiplexerEvent[] events = Drain(controller);
+        Assert.Equal([MultiplexerEventKind.Output, MultiplexerEventKind.Resize, MultiplexerEventKind.Output],
+            events.Select(item => item.Kind).ToArray());
+        Assert.Equal("old", Encoding.UTF8.GetString(events[0].Data!));
+        Assert.Equal(new TerminalSessionDimensions(40, 8, 0, 0), events[1].Dimensions);
+        Assert.Equal("new", Encoding.UTF8.GetString(events[2].Data!));
+    }
+
+    [Fact]
+    public async Task BrokerPublishesRejectedResizeRollbackInCanonicalOutputOrder()
+    {
+        FakeFactory inner = new();
+        InspectingTerminalTransportFactory factory = new(inner);
+        await using MultiplexerBroker broker = new(factory);
+        MultiplexerSessionDescriptor session = broker.CreateSession("rollback");
+        Options options = new(Dimensions);
+        MultiplexerBlockDescriptor block = await broker.AddBlockAsync(session.Id, "terminal", options);
+        using MultiplexerAttachment controller = broker.Attach(session.Id, block.Id, MultiplexerRole.Controller);
+        Drain(controller);
+        inner.Transports[0].OnResize = _ =>
+        {
+            inner.Transports[0].Emit("redraw");
+            throw new IOException("rejected after redraw");
+        };
+        Assert.Throws<IOException>(() => controller.Resize(new(40, 8, 0, 0)));
+        MultiplexerEvent[] events = Drain(controller);
+        Assert.Equal([MultiplexerEventKind.Resize, MultiplexerEventKind.Output, MultiplexerEventKind.Resize],
+            events.Select(item => item.Kind).ToArray());
+        Assert.Equal(new TerminalSessionDimensions(40, 8, 0, 0), events[0].Dimensions);
+        Assert.Equal(Dimensions, events[2].Dimensions);
+        Assert.Equal(Dimensions, broker.GetSession(session.Id).Blocks[0].Dimensions);
+        Assert.True(factory.TryGetInspection(options, out InspectingTerminalTransport? inspection));
+        Assert.Equal(Dimensions, inspection.Dimensions);
+    }
+
+    private static MultiplexerEvent[] Drain(MultiplexerAttachment attachment)
+    {
+        List<MultiplexerEvent> events = [];
+        while (attachment.Events.TryRead(out MultiplexerEvent? item)) events.Add(item);
+        return [.. events];
+    }
+
     private static TerminalSessionDimensions Dimensions => new(20, 4, 200, 80);
 
     private sealed record Options(TerminalSessionDimensions Dimensions) : ITerminalTransportOptions
@@ -277,6 +357,30 @@ public sealed class InspectingTerminalTransportTests
             Transports.Add(transport);
             return transport;
         }
+    }
+
+    private sealed class CallbackFactory(Func<ITerminalTransportOptions, ITerminalTransport> create) : ITerminalTransportFactory
+    {
+        public ITerminalTransport Create(ITerminalTransportOptions options) => create(options);
+    }
+
+    private sealed class ResizeSignalingTransport(InspectingTerminalTransport inner, ManualResetEventSlim entered)
+        : ITerminalTransport, IMultiplexerResizeSource
+    {
+        public event Action<byte[], int>? DataReceived { add => inner.DataReceived += value; remove => inner.DataReceived -= value; }
+        public event Action<int>? ProcessExited { add => inner.ProcessExited += value; remove => inner.ProcessExited -= value; }
+        public event Action<TerminalSessionDimensions>? DimensionsChanged
+        {
+            add => inner.DimensionsChanged += value;
+            remove => inner.DimensionsChanged -= value;
+        }
+        public bool IsRunning => inner.IsRunning;
+        public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
+            => inner.StartAsync(options, cancellationToken);
+        public void SendInput(ReadOnlySpan<byte> utf8) => inner.SendInput(utf8);
+        public void Resize(TerminalSessionDimensions dimensions) { entered.Set(); inner.Resize(dimensions); }
+        public ValueTask StopAsync() => inner.StopAsync();
+        public void Dispose() => inner.Dispose();
     }
 
     private sealed class FakeTransport : ITerminalTransport
