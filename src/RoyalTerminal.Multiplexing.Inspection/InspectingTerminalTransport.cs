@@ -8,10 +8,8 @@ using RoyalTerminal.Terminal.Snapshots;
 
 namespace RoyalTerminal.Multiplexing.Inspection;
 
-/// <summary>Owns canonical managed VT state around a transport, including when no client is attached.</summary>
-/// <remarks>Output is parsed and forwarded in one serialized order. Query replies originate here exactly
-/// once; attached presentation terminals must suppress their automatic replies while permitting user input.
-/// No host filesystem reader, clipboard, notification service, or window-resize callback is installed.</remarks>
+/// <summary>Maintains canonical managed VT state even while no client is attached.</summary>
+/// <remarks>Output is parsed and published under one gate; only this parser writes terminal-query replies.</remarks>
 public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplexerResizeSource
 {
     private readonly object _gate = new();
@@ -45,33 +43,28 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
         };
         _processor = new(screen, new BasicVtProcessorOptions
         {
-            TitleReportEnabled = false,
-            ClipboardWriteLimitBytes = 0,
-            SixelGraphicsEnabled = false,
-            GlyphProtocolEnabled = false,
-            KittyGraphicsMaxApcBytes = 0,
-            KittyGraphicsMaxImageBytes = 0,
-            KittyGraphicsStorageLimitBytes = 0,
-            UnknownSequenceMaxBytes = 0,
-            TerminfoName = "xterm-256color",
+            TitleReportEnabled = false, ClipboardWriteLimitBytes = 0, SixelGraphicsEnabled = false,
+            GlyphProtocolEnabled = false, KittyGraphicsMaxApcBytes = 0, KittyGraphicsMaxImageBytes = 0,
+            KittyGraphicsStorageLimitBytes = 0, UnknownSequenceMaxBytes = 0, TerminfoName = "xterm-256color",
         });
         _processor.NotifyResize(dimensions.Columns, dimensions.Rows, dimensions.WidthPixels, dimensions.HeightPixels);
         _processor.ResponseCallback = EnqueueResponse;
+        _processor.BellCallback = Metadata.Bell;
+        _processor.TitleCallback = Metadata.Title;
+        _processor.ProgramStatusChangedCallback = () => Metadata.StatusChanged(_processor.ProgramStatuses);
         _inner.DataReceived += OnData;
         _inner.ProcessExited += OnExit;
     }
 
+    /// <summary>Reads recent metadata transitions independently from the VT replay journal.</summary>
+    public TerminalMetadataFeed Metadata { get; } = new();
     internal event Action? Disposed;
-
     /// <inheritdoc />
     public event Action<byte[], int>? DataReceived;
-
     /// <inheritdoc />
     public event Action<int>? ProcessExited;
-
     /// <summary>Raised after canonical geometry commits, in the same serialized order as output.</summary>
     public event Action<TerminalSessionDimensions>? DimensionsChanged;
-
     /// <inheritdoc />
     public bool IsRunning => !Volatile.Read(ref _disposed) && _inner.IsRunning;
 
@@ -88,8 +81,7 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
             }
         }
     }
-
-    /// <summary>Gets the terminal-reported working-directory value; it is not resolved against the host filesystem.</summary>
+    /// <summary>Gets the terminal-reported directory without resolving it against the host filesystem.</summary>
     public string WorkingDirectory
     {
         get
@@ -102,45 +94,35 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
             }
         }
     }
-
-    /// <summary>Gets an owned snapshot of current OSC 7501 records, preserving declared application identities.</summary>
+    /// <summary>Gets an owned snapshot of current OSC 7501 records.</summary>
     public IReadOnlyList<TerminalProgramStatus> ProgramStatuses
     {
         get { lock (_gate) { ThrowIfDisposed(); return _processor.ProgramStatuses.ToArray(); } }
     }
-
     /// <summary>Gets the geometry used by the canonical screen.</summary>
     public TerminalSessionDimensions Dimensions
     {
         get { lock (_gate) { ThrowIfDisposed(); return _dimensions; } }
     }
-
-    /// <summary>Gets a terminal-reply failure, if any; output remains inspectable after response failure.</summary>
-    public Exception? ResponseError
-    {
-        get { lock (_gate) return _responseError; }
-    }
-
-    /// <summary>Captures the active screen and its retained history using the existing terminal export formatter.</summary>
+    /// <summary>Gets a terminal-reply failure, if any. Output remains inspectable.</summary>
+    public Exception? ResponseError { get { lock (_gate) return _responseError; } }
+    /// <summary>Captures the active screen and retained history with the existing terminal formatter.</summary>
     public string Capture(TerminalSnapshotExportFormat format, TerminalSnapshotExportOptions options = default)
     {
         lock (_gate)
         {
-            ThrowIfDisposed();
-            _processor.RefreshTimedState();
+            ThrowIfDisposed(); _processor.RefreshTimedState();
             if (!_processor.TryExportSnapshot(format, options, out string snapshot))
                 throw new ArgumentOutOfRangeException(nameof(format), "Unsupported terminal snapshot format.");
             return snapshot;
         }
     }
-
-    /// <summary>Resolves the application identity inherited by a program-status record.</summary>
+    /// <summary>Resolves the nearest inherited application identity.</summary>
     public string GetProgramStatusApplication(string id)
     {
         ArgumentNullException.ThrowIfNull(id);
         lock (_gate) { ThrowIfDisposed(); return _processor.GetProgramStatusApplication(id); }
     }
-
     /// <inheritdoc />
     public async ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
     {
@@ -152,8 +134,7 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
             {
                 ThrowIfDisposed();
                 if (_startAttempted) throw new InvalidOperationException("An inspected terminal can only be started once.");
-                if (options.Dimensions != _dimensions)
-                    throw new ArgumentException("Start dimensions must match the transport's initial inspection dimensions.", nameof(options));
+                if (options.Dimensions != _dimensions) throw new ArgumentException("Start dimensions must match initial inspection dimensions.", nameof(options));
                 _startAttempted = true;
             }
             await _inner.StartAsync(options, cancellationToken).ConfigureAwait(false);
@@ -163,16 +144,13 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
         }
         finally { _lifecycle.Release(); }
     }
-
     /// <inheritdoc />
     public void SendInput(ReadOnlySpan<byte> utf8)
     {
         ThrowIfDisposed();
-        // Native transport calls must never run under the parser lock: they may synchronously
-        // wait for an output callback on another thread. Providers serialize their own writes.
+        // A native write can synchronously wait for an output callback; never hold the parser gate here.
         _inner.SendInput(utf8);
     }
-
     /// <inheritdoc />
     public void Resize(TerminalSessionDimensions dimensions)
     {
@@ -183,39 +161,26 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
             bool drain;
             lock (_gate)
             {
-                ThrowIfDisposed();
-                previous = _dimensions;
+                ThrowIfDisposed(); previous = _dimensions;
                 if (previous == dimensions) return;
-                ApplyDimensions(dimensions);
-                drain = BeginResponseDrain();
+                ApplyDimensions(dimensions); drain = BeginResponseDrain();
             }
             try { _inner.Resize(dimensions); }
-            catch
-            {
-                lock (_gate) if (!_disposed) ApplyDimensions(previous);
-                throw;
-            }
+            catch { lock (_gate) if (!_disposed) ApplyDimensions(previous); throw; }
             finally { if (drain) DrainResponses(); }
         }
     }
-
     /// <inheritdoc />
     public async ValueTask StopAsync()
     {
         await _lifecycle.WaitAsync().ConfigureAwait(false);
         try
         {
-            lock (_gate)
-            {
-                if (_disposed) return;
-                _started = false;
-                ClearResponses();
-            }
+            lock (_gate) { if (_disposed) return; _started = false; ClearResponses(); }
             await _inner.StopAsync().ConfigureAwait(false);
         }
         finally { _lifecycle.Release(); }
     }
-
     /// <inheritdoc />
     public void Dispose()
     {
@@ -223,19 +188,13 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
         lock (_gate)
         {
             if (_disposed) return;
-            _disposed = true;
-            _started = false;
-            ClearResponses();
-            _inner.DataReceived -= OnData;
-            _inner.ProcessExited -= OnExit;
-            _processor.Dispose();
-            onDisposed = Disposed;
-            Disposed = null;
+            _disposed = true; _started = false; ClearResponses();
+            _inner.DataReceived -= OnData; _inner.ProcessExited -= OnExit;
+            Metadata.End(); _processor.Dispose(); onDisposed = Disposed; Disposed = null;
         }
         try { _inner.Dispose(); }
         finally { onDisposed?.Invoke(); }
     }
-
     private void OnData(byte[] data, int count)
     {
         if (count <= 0 || count > data.Length) return;
@@ -244,54 +203,40 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
         {
             if (_disposed || _exited) return;
             _processor.Process(data.AsSpan(0, count));
-            // The broker gets bytes only after the matching canonical state is available.
-            // Keeping the callback in this serialized region preserves order across stdout/stderr.
             DataReceived?.Invoke(data, count);
             drain = BeginResponseDrain();
         }
         if (drain) DrainResponses();
     }
-
     private void OnExit(int code)
     {
         lock (_gate)
         {
             if (_disposed || _exited) return;
-            _exited = true;
-            _started = false;
-            ClearResponses();
-            _processor.NotifyProgramStatusProcessExit();
-            ProcessExited?.Invoke(code);
+            _exited = true; _started = false; ClearResponses();
+            _processor.NotifyProgramStatusProcessExit(); Metadata.ChildExited(code); ProcessExited?.Invoke(code);
         }
     }
-
     private void ApplyDimensions(TerminalSessionDimensions dimensions)
     {
         _processor.ResizeScreen(dimensions.Columns, dimensions.Rows, dimensions.WidthPixels, dimensions.HeightPixels);
-        _dimensions = dimensions;
-        DimensionsChanged?.Invoke(dimensions);
+        _dimensions = dimensions; DimensionsChanged?.Invoke(dimensions);
     }
-
     private void EnqueueResponse(byte[] response)
     {
         if (_responseError is not null || response.Length == 0) return;
         if (response.Length > _options.MaxPendingResponseBytes - _responseBytes)
         {
             _responseError = new IOException("Terminal query responses exceeded the configured pending-byte limit.");
-            ClearResponses();
-            return;
+            ClearResponses(); return;
         }
-        _responses.Enqueue(response);
-        _responseBytes += response.Length;
+        _responses.Enqueue(response); _responseBytes += response.Length;
     }
-
     private bool BeginResponseDrain()
     {
         if (!_started || _disposed || _drainingResponses || _responses.Count == 0) return false;
-        _drainingResponses = true;
-        return true;
+        _drainingResponses = true; return true;
     }
-
     private void DrainResponses()
     {
         while (true)
@@ -299,32 +244,17 @@ public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplex
             byte[] response;
             lock (_gate)
             {
-                if (!_started || _disposed || !_responses.TryDequeue(out response!))
-                {
-                    _drainingResponses = false;
-                    return;
-                }
+                if (!_started || _disposed || !_responses.TryDequeue(out response!)) { _drainingResponses = false; return; }
                 _responseBytes -= response.Length;
             }
             try { _inner.SendInput(response); }
             catch (Exception error)
             {
-                lock (_gate)
-                {
-                    _responseError = error;
-                    ClearResponses();
-                    _drainingResponses = false;
-                }
+                lock (_gate) { _responseError = error; ClearResponses(); _drainingResponses = false; }
                 return;
             }
         }
     }
-
-    private void ClearResponses()
-    {
-        _responses.Clear();
-        _responseBytes = 0;
-    }
-
+    private void ClearResponses() { _responses.Clear(); _responseBytes = 0; }
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
 }

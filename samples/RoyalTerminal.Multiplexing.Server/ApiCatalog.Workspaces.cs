@@ -9,6 +9,7 @@ internal sealed partial class ApiCatalog
 {
     private void RegisterWorkspaceMethods()
     {
+        RegisterInspectionMethods();
         Add("block.place", "Move without restarting. kind: tiled, floating or unplaced. Floating coordinates use ten-thousandths of the home window.",
             ["sessionId:string!", "blockId:string!", "windowId:string!", "kind:string!", "relativeTo:string", "orientation:string", "ratio:number", "before:boolean", "bounds:object", "expectedRevision:integer"], Place);
         Add("block.swap", "Exchange two placements in one session, including across windows.",
@@ -35,8 +36,7 @@ internal sealed partial class ApiCatalog
 
     private ValueTask<JsonElement> Place(ApiArguments a, AccessGrant grant, CancellationToken cancellationToken)
     {
-        ServerHttp.RequireAdministrator(grant);
-        cancellationToken.ThrowIfCancellationRequested();
+        ServerHttp.RequireAdministrator(grant); cancellationToken.ThrowIfCancellationRequested();
         MultiplexerPaneKind kind = a.String("kind") switch { "tiled" => MultiplexerPaneKind.Tiled, "floating" => MultiplexerPaneKind.Floating, "unplaced" => MultiplexerPaneKind.Unplaced, _ => throw new ArgumentException("Unknown placement kind.") };
         MultiplexerSplitOrientation orientation = a.String("orientation", "horizontal") switch { "horizontal" => MultiplexerSplitOrientation.Horizontal, "vertical" => MultiplexerSplitOrientation.Vertical, _ => throw new ArgumentException("Unknown split orientation.") };
         bool before = a.Value.TryGetProperty("before", out JsonElement item) && (item.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => throw new ArgumentException("before must be a boolean.") });
@@ -99,8 +99,10 @@ internal sealed partial class ApiCatalog
             w.WriteStartObject("properties"); foreach (string key in keys) { w.WriteStartObject(key); w.WriteString("type", "integer"); w.WriteNumber("minimum", key is "width" or "height" ? 1 : 0); w.WriteNumber("maximum", 10000); w.WriteEndObject(); } w.WriteEndObject();
         }
         if (method == "block.place" && property == "ratio") { w.WriteNumber("exclusiveMinimum", 0); w.WriteNumber("exclusiveMaximum", 1); }
-        if (method == "session.wait_change" && property == "afterRevision") w.WriteNumber("minimum", 0);
+        if (method == "session.wait_change" && property == "afterRevision" || method == "terminal.events" && property == "after") w.WriteNumber("minimum", 0);
         if (method == "session.wait_change" && property == "timeoutMs") { w.WriteNumber("minimum", 1); w.WriteNumber("maximum", 25000); }
+        if (method == "terminal.events" && property == "timeoutMs") { w.WriteNumber("minimum", 0); w.WriteNumber("maximum", 25000); }
+        if (method == "terminal.events" && property == "limit") { w.WriteNumber("minimum", 1); w.WriteNumber("maximum", 128); }
         if (method == "session.move_window" && property == "position") w.WriteNumber("minimum", 1);
     }
 }
