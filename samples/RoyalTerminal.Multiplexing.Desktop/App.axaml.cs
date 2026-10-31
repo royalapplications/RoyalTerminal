@@ -19,11 +19,11 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
+            HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
             MainWindow window = new();
             RemoteTerminalControl terminal = window.FindControl<RemoteTerminalControl>("Terminal")
                 ?? throw new InvalidOperationException("The compiled terminal surface was not found.");
-            WorkspaceTerminalController controller = new(terminal);
+            WorkspaceTerminalController controller = new(terminal, http);
             WorkspaceViewModel viewModel = new(new WorkspaceClient(http), controller)
             {
                 Endpoint = Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_URL") ?? "http://127.0.0.1:7331/",
