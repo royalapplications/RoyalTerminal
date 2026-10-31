@@ -11,6 +11,7 @@ internal static class WorkspaceRoutes
     internal static void Map(WebApplication app, MultiplexerBroker broker, WorkspaceOperations workspaces,
         ApiCatalog catalog, AutomationService automation, BlockStreamEndpoint streams, AccessTokens tokens)
     {
+        WorkspaceCheckpointEndpoint.Map(app, workspaces, tokens);
         app.MapGet("/healthz", (HttpContext context) => ServerHttp.WriteAsync(context, new ApiSuccess(), ServerJsonContext.Default.ApiSuccess));
         app.MapGet("/api/context", (HttpContext context) =>
         {

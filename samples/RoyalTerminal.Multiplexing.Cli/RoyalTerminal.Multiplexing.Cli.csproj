@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Multiplexing\RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Vt.Managed\RoyalTerminal.Terminal.Vt.Managed.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Multiplexing.Automation\RoyalTerminal.Multiplexing.Automation.csproj" />
     <None Update="Lua\*.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

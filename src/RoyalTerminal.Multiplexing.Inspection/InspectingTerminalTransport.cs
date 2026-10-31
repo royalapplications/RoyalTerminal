@@ -10,7 +10,7 @@ namespace RoyalTerminal.Multiplexing.Inspection;
 
 /// <summary>Maintains canonical managed VT state even while no client is attached.</summary>
 /// <remarks>Output is parsed and published under one gate; only this parser writes terminal-query replies.</remarks>
-public sealed class InspectingTerminalTransport : ITerminalTransport, IMultiplexerResizeSource
+public sealed partial class InspectingTerminalTransport : ITerminalTransport, IMultiplexerResizeSource
 {
     private readonly object _gate = new();
     private readonly object _resizeGate = new();
