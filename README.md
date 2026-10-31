@@ -18,6 +18,20 @@ High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`R
 
 Read the published documentation at [royalapplications.github.io/RoyalTerminal](https://royalapplications.github.io/RoyalTerminal/). Source lives in [docs/](docs/) and is published through the VitePress/GitHub Pages workflow in [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
+## Experimental durable workspaces
+
+The opt-in [workspace server and browser](samples/RoyalTerminal.Multiplexing.Server/README.md),
+[native Avalonia client](samples/RoyalTerminal.Multiplexing.Desktop/README.md), and
+[automation CLI](samples/RoyalTerminal.Multiplexing.Cli/README.md) explore server-owned
+terminals, shared sessions, split layouts, bounded reconnect, capture, and actions.
+Processes survive client disconnection while the server remains running.
+
+The [Rex product research](docs/specs/rex-product-research.md) and
+[implementation specification](docs/specs/rex-experimental-implementation.md)
+document the public evidence, implemented contracts, and remaining differences.
+These samples use an independent experimental protocol and are separate from
+the stable terminal packages and release workflow.
+
 ## NuGet Packages
 
 ### Primary Packages

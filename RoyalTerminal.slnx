@@ -7,6 +7,9 @@
   <Folder Name="/samples/">
     <Project Path="samples/RoyalTerminal.ControlCatalog/RoyalTerminal.ControlCatalog.csproj" />
     <Project Path="samples/RoyalTerminal.Demo/RoyalTerminal.Demo.csproj" />
+    <Project Path="samples/RoyalTerminal.Multiplexing.Cli/RoyalTerminal.Multiplexing.Cli.csproj" />
+    <Project Path="samples/RoyalTerminal.Multiplexing.Desktop/RoyalTerminal.Multiplexing.Desktop.csproj" />
+    <Project Path="samples/RoyalTerminal.Multiplexing.Server/RoyalTerminal.Multiplexing.Server.csproj" />
     <Project Path="samples/RoyalTerminal.WinFormsHost/RoyalTerminal.WinFormsHost.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -16,6 +19,9 @@
     <Project Path="src/RoyalTerminal.GhosttySharp.Native.Linux64/RoyalTerminal.GhosttySharp.Native.Linux64.csproj" />
     <Project Path="src/RoyalTerminal.GhosttySharp.Native.OSX/RoyalTerminal.GhosttySharp.Native.OSX.csproj" />
     <Project Path="src/RoyalTerminal.GhosttySharp.Native.Win64/RoyalTerminal.GhosttySharp.Native.Win64.csproj" />
+    <Project Path="src/RoyalTerminal.Multiplexing.Automation/RoyalTerminal.Multiplexing.Automation.csproj" />
+    <Project Path="src/RoyalTerminal.Multiplexing.Inspection/RoyalTerminal.Multiplexing.Inspection.csproj" />
+    <Project Path="src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
     <Project Path="src/RoyalTerminal.Rendering.Contracts/RoyalTerminal.Rendering.Contracts.csproj" />
     <Project Path="src/RoyalTerminal.Rendering.Interop.Ghostty.Skia/RoyalTerminal.Rendering.Interop.Ghostty.Skia.csproj" />
     <Project Path="src/RoyalTerminal.Rendering.Interop.Ghostty/RoyalTerminal.Rendering.Interop.Ghostty.csproj" />
@@ -28,6 +34,7 @@
     <Project Path="src/RoyalTerminal.Terminal.Pty.Windows/RoyalTerminal.Terminal.Pty.Windows.csproj" />
     <Project Path="src/RoyalTerminal.Terminal.Services.Contracts/RoyalTerminal.Terminal.Services.Contracts.csproj" />
     <Project Path="src/RoyalTerminal.Terminal.Services/RoyalTerminal.Terminal.Services.csproj" />
+    <Project Path="src/RoyalTerminal.Terminal.Transport.Multiplexing/RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
     <Project Path="src/RoyalTerminal.Terminal.Transport.Pipe/RoyalTerminal.Terminal.Transport.Pipe.csproj" />
     <Project Path="src/RoyalTerminal.Terminal.Transport.Pty/RoyalTerminal.Terminal.Transport.Pty.csproj" />
     <Project Path="src/RoyalTerminal.Terminal.Transport.Raw/RoyalTerminal.Terminal.Transport.Raw.csproj" />
@@ -45,6 +52,12 @@
   <Folder Name="/tests/">
     <Project Path="tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj" />
     <Project Path="tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.AutomationTests/RoyalTerminal.Multiplexing.AutomationTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.ClientTests/RoyalTerminal.Multiplexing.ClientTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.DesktopTests/RoyalTerminal.Multiplexing.DesktopTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.InspectionTests/RoyalTerminal.Multiplexing.InspectionTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.ServerTests/RoyalTerminal.Multiplexing.ServerTests.csproj" />
+    <Project Path="tests/RoyalTerminal.Multiplexing.Tests/RoyalTerminal.Multiplexing.Tests.csproj" />
     <Project Path="tests/RoyalTerminal.PtyHarness/RoyalTerminal.PtyHarness.csproj" />
     <Project Path="tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj" />
     <Project Path="tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj" />

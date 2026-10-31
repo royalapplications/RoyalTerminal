@@ -1,0 +1,112 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RoyalTerminal.Multiplexing.Desktop"
+        xmlns:controls="using:RoyalTerminal.Multiplexing.Desktop.Controls"
+        x:Class="RoyalTerminal.Multiplexing.Desktop.MainWindow"
+        x:DataType="vm:WorkspaceViewModel"
+        Title="RoyalTerminal · Experimental Workspaces"
+        Width="1280" Height="860" MinWidth="880" MinHeight="620"
+        Background="#10151E">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="20" RowSpacing="16">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="4">
+        <TextBlock Text="RoyalTerminal Workspaces" FontSize="25" FontWeight="SemiBold" />
+        <TextBlock Text="Durable sessions · native terminal rendering · shared remote state" Foreground="#95A4B8" />
+      </StackPanel>
+      <Border Grid.Column="1" Background="#2A2440" CornerRadius="6" Padding="12,7" VerticalAlignment="Center">
+        <TextBlock Text="EXPERIMENTAL" FontSize="11" FontWeight="Bold" Foreground="#CAB7FF" />
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="1" Background="#192230" CornerRadius="8" Padding="14">
+      <Grid ColumnDefinitions="2*,3*,Auto" ColumnSpacing="12">
+        <StackPanel Spacing="5">
+          <TextBlock Text="Server URL" FontSize="12" Foreground="#95A4B8" />
+          <TextBox Text="{Binding Endpoint, Mode=TwoWay}" PlaceholderText="http://127.0.0.1:7331/" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Spacing="5">
+          <TextBlock Text="Bearer token · kept in memory" FontSize="12" Foreground="#95A4B8" />
+          <TextBox Text="{Binding Token, Mode=TwoWay}" PasswordChar="●" PlaceholderText="Administrator or scoped sharing token" />
+        </StackPanel>
+        <Button Grid.Column="2" Content="Refresh sessions" Command="{Binding RefreshCommand}" VerticalAlignment="Bottom" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="2" ColumnDefinitions="275,*" ColumnSpacing="16">
+      <Border Background="#192230" CornerRadius="8" Padding="14">
+        <Grid RowDefinitions="Auto,Auto,180,Auto,*" RowSpacing="12">
+          <TextBlock Text="SESSIONS" Foreground="#95A4B8" FontSize="11" FontWeight="Bold" />
+          <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+            <TextBox Text="{Binding NewSessionLabel, Mode=TwoWay}" PlaceholderText="Session name" />
+            <Button Grid.Column="1" Content="+" Command="{Binding NewSessionCommand}" ToolTip.Tip="Create session" />
+          </Grid>
+          <ListBox Grid.Row="2" ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:WorkspaceSession">
+                <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+            <TextBlock Text="TERMINAL BLOCKS" Foreground="#95A4B8" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Content="+ Shell" Command="{Binding NewShellCommand}" />
+          </Grid>
+          <ListBox Grid.Row="4" ItemsSource="{Binding Blocks}" SelectedItem="{Binding SelectedBlock, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:WorkspaceBlock">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding State}" Foreground="#95A4B8" FontSize="11" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="12">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Session GUID" FontSize="11" Foreground="#95A4B8" />
+            <TextBox Text="{Binding SessionId, Mode=TwoWay}" FontSize="11" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="4">
+            <TextBlock Text="Block GUID" FontSize="11" Foreground="#95A4B8" />
+            <TextBox Text="{Binding BlockId, Mode=TwoWay}" FontSize="11" />
+          </StackPanel>
+        </Grid>
+        <Border Grid.Row="1" Background="#0B1018" BorderBrush="#283647" BorderThickness="1" CornerRadius="8" Padding="10" ClipToBounds="True">
+          <ScrollViewer x:Name="TerminalViewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <Border>
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <controls:RemoteTerminalControl x:Name="Terminal" TerminalFontSize="12" />
+              </ScrollViewer>
+            </Border>
+          </ScrollViewer>
+        </Border>
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+          <CheckBox Content="Observe only" IsChecked="{Binding Observer, Mode=TwoWay}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Content="Attach" Command="{Binding AttachCommand}" />
+          <Button Grid.Column="2" Content="Detach" Command="{Binding DetachCommand}" />
+        </Grid>
+      </Grid>
+    </Grid>
+
+    <Border Grid.Row="3" Background="#192230" CornerRadius="8" Padding="14">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="4">
+          <TextBlock Text="{Binding Status}" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Error}" Foreground="#FFB2A5" TextWrapping="Wrap" />
+          <TextBlock Text="Window resizing does not change the remote grid. Detaching keeps server processes alive."
+                     FontSize="11" Foreground="#95A4B8" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <NumericUpDown Value="{Binding Columns, Mode=TwoWay}" Minimum="1" Maximum="500" Width="82" FormatString="0" />
+          <TextBlock Text="×" VerticalAlignment="Center" />
+          <NumericUpDown Value="{Binding Rows, Mode=TwoWay}" Minimum="1" Maximum="300" Width="82" FormatString="0" />
+          <Button Content="Resize remote" Command="{Binding ResizeCommand}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

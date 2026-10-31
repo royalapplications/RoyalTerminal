@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Multiplexing\RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="ReactiveUI.Avalonia.Reactive" />
+  </ItemGroup>
+</Project>

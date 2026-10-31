@@ -1,0 +1,16 @@
+-- No sleeps or timing assumptions are needed to check callbacks and context propagation.
+assert(_VERSION == 'Lua 5.1' and rex.args[1] == 'space separated argument')
+assert(os.getenv('ROYALTERMINAL_MUX_TOKEN') == nil, 'credential leaked to child')
+local s=assert(rex.session.view());assert(s.id==rex.session_id)
+rex.action{name='rename',title='Rename session',run=function(ctx, args)
+  assert(ctx.session_id==s.id);return assert(rex.session.set_label{label=args.label,expected_revision=s.revision})
+end}
+rex.on('session_view_changed',function(ctx,ev)
+  assert(ctx.session_id==s.id and ev.revision==s.revision+1)
+  local now=assert(rex.session.view());assert(now.label=='from Lua');print('LUA_RPC_SMOKE_OK');rex.stop(0)
+end)
+local stale=rex.after(0,function() error('cancelled timer ran') end);stale:cancel();assert(not stale:active())
+local ticks=0;local timer;timer=rex.every(0.001,function(ctx)
+  assert(ctx.origin=='timer');ticks=ticks+1;assert(ticks==1);timer:cancel();assert(not timer:active());assert(rex.invoke('rename',{label='from Lua'}))
+end)
+rex.after(8,function() rex.stop(7) end)

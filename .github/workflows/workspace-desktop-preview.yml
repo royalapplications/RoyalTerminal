@@ -1,0 +1,61 @@
+name: Workspace desktop previews
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'samples/RoyalTerminal.Multiplexing.Desktop/**'
+      - 'src/RoyalTerminal.Terminal.Transport.Multiplexing/**'
+      - 'src/RoyalTerminal.Avalonia/**'
+      - '.github/workflows/workspace-desktop-preview.yml'
+permissions:
+  contents: read
+concurrency:
+  group: workspace-desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  publish:
+    name: Desktop (${{ matrix.rid }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [linux-x64, win-x64, osx-x64, osx-arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish framework-dependent native launcher and dependencies
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          name=RoyalTerminal.Multiplexing.Desktop
+          dotnet publish "samples/$name/$name.csproj" -c Release -r "$RID" --self-contained false -o "$RUNNER_TEMP/desktop"
+          test -s "$RUNNER_TEMP/desktop/$name.dll"
+          if [[ $RID == win-* ]]; then test -s "$RUNNER_TEMP/desktop/$name.exe"; else test -x "$RUNNER_TEMP/desktop/$name"; fi
+          cp "samples/$name/README.md" LICENSE "$RUNNER_TEMP/desktop/"
+          git rev-parse HEAD > "$RUNNER_TEMP/desktop/SOURCE_COMMIT"
+          mkdir -p dist
+          if [[ $RID == win-* ]]; then (cd "$RUNNER_TEMP/desktop" && zip -q -r "$GITHUB_WORKSPACE/dist/workspace-$RID.zip" .); else tar -C "$RUNNER_TEMP/desktop" -czf "dist/workspace-$RID.tar.gz" .; fi
+          (cd dist && sha256sum workspace-* > SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: workspace-desktop-${{ matrix.rid }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+  source:
+    name: Matching source for experimental previews
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Archive tracked source from exactly the build revision
+        run: git archive --prefix=RoyalTerminal/ --format=tar.gz -o "$RUNNER_TEMP/workspace-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v7
+        with:
+          name: workspace-desktop-source
+          path: ${{ runner.temp }}/workspace-source.tar.gz
+          retention-days: 7
+          if-no-files-found: error

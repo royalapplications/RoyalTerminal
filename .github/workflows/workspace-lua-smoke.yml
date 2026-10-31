@@ -1,0 +1,37 @@
+name: Workspace Lua and process smoke
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/workspace-lua-smoke.yml'
+      - 'src/**'
+      - 'samples/RoyalTerminal.Multiplexing.*/**'
+      - 'scripts/workspace/**'
+      - 'Directory.*'
+      - 'global.json'
+permissions:
+  contents: read
+concurrency:
+  group: workspace-lua-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install Lua 5.1 and JSON module
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 lua-dkjson
+      - name: Build independently runnable host and CLI
+        run: |
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+      - name: Validate agent setup and removal in a disposable project
+        run: bash scripts/workspace/test-agent-skill.sh
+      - name: Exercise script and action entry points and real CLI-owned processes
+        run: bash scripts/workspace/test-script-processes.sh
+      - name: Run a real script and propagate a real workspace child process exit
+        run: bash scripts/workspace/smoke-lua.sh

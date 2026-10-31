@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Terminal.Transport.Multiplexing</PackageId>
+    <Description>Experimental durable multiplexer WebSocket transport and HTTP API client.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RoyalTerminal.Terminal\RoyalTerminal.Terminal.csproj" />
+  </ItemGroup>
+</Project>
