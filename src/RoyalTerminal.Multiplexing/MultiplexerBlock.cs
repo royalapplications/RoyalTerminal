@@ -46,7 +46,11 @@ internal sealed class MultiplexerBlock
         await _lifecycle.WaitAsync(linked.Token).ConfigureAwait(false);
         try
         {
-            linked.Token.ThrowIfCancellationRequested(); await _transport.StartAsync(options, linked.Token).ConfigureAwait(false); linked.Token.ThrowIfCancellationRequested();
+            linked.Token.ThrowIfCancellationRequested();
+            // Factory lookup keeps the original options identity; bind a private child environment only at OS launch.
+            var context = new MultiplexerProcessContext(SessionId, WindowId, Id);
+            await _transport.StartAsync(context.Bind(options), linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
             lock (_gate) { if (_state == MultiplexerBlockState.Starting) _state = MultiplexerBlockState.Running; }
         }
         finally { _lifecycle.Release(); }

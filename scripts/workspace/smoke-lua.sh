@@ -27,8 +27,6 @@ status=0
 dotnet "$cli" run "$ROYALTERMINAL_MUX_SESSION" --wait --pipe -- /bin/sh -c 'exit 37' >"$scratch/exit.json" || status=$?
 [[ $status == 37 ]] || { echo "Expected process status 37, got $status" >&2; exit 1; }
 jq -e '.exitCode == 37' "$scratch/exit.json" >/dev/null
-# Start a process that cannot finish until the mirror is really observing. Its two output writes
-# straddle a CSI. Plain capture-only implementations and input-controlling clients fail this test.
 s=$ROYALTERMINAL_MUX_SESSION
 b=$(dotnet "$cli" run "$s" --pipe -- /bin/sh -c 'printf "READY\033["; IFS= read -r line || exit 99; printf "2;1H%s\n" "$line"; exit 37' | jq -er .id)
 for ((i=0;i<40;i++)); do dotnet "$cli" capture "$s" "$b" | jq -e '.content|contains("READY")' >/dev/null && break; sleep .1; done
@@ -44,4 +42,17 @@ done
 dotnet "$cli" send "$s" "$b" $'RESTORED_LIVE_SCREEN\n' >/dev/null
 result=0; wait "$mirror" || result=$?; [[ $result == 37 ]] || { cat "$scratch/mirror.err" >&2; exit 1; }
 grep -q READY "$scratch/mirror.txt"; grep -q RESTORED_LIVE_SCREEN "$scratch/mirror.txt"
-echo 'Verified Lua callbacks, timer cancellation, structural observation, checkpoint mirror/live observation and child exit 37.'
+# Bare `do` names must still reach the server catalog rather than the trusted local Lua loader.
+dotnet "$cli" config load samples/RoyalTerminal.Multiplexing.Server/automation.example.json >/dev/null
+dotnet "$cli" do capture_focused "$s" "$b" | jq -e '.steps[-1].result.content|contains("RESTORED_LIVE_SCREEN")' >/dev/null
+# Register first, then emit a BEL: no timing assumption about the shell or event subscriber.
+ROYALTERMINAL_MUX_BLOCK=$(dotnet "$cli" run "$s" --pipe -- /bin/cat | jq -er .id);export ROYALTERMINAL_MUX_BLOCK
+cat > "$scratch/bell.lua" <<'LUA'
+rex.on('com.superlogical.terminal.bell', function(ctx, ev)
+  assert(ctx.block_id==rex.block_id and ev.type=='terminal.bell'); print('METADATA_BELL_OK'); rex.stop(0)
+end)
+assert(rex.call('block.input',{sessionId=rex.session_id,blockId=rex.block_id,data='Bw=='}))
+rex.after(8,function()rex.stop(19)end)
+LUA
+timeout 15 dotnet "$cli" lua "$scratch/bell.lua" 2>"$scratch/bell.result";grep -q METADATA_BELL_OK "$scratch/bell.result"
+echo 'Verified scoped metadata, legacy server actions, Lua scripts, observer recovery and real child exits.'

@@ -29,6 +29,8 @@ jobs:
         run: |
           dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
           dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+      - name: Validate agent setup and removal in a disposable project
+        run: bash scripts/workspace/test-agent-skill.sh
       - name: Exercise script and action entry points and real CLI-owned processes
         run: bash scripts/workspace/test-script-processes.sh
       - name: Run a real script and propagate a real workspace child process exit
