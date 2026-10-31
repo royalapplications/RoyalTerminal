@@ -29,6 +29,7 @@ jobs:
         run: |
           dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
           dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
-      - name: Run a real script and propagate a real child process exit
-        shell: bash
+      - name: Exercise script and action entry points and real CLI-owned processes
+        run: bash scripts/workspace/test-script-processes.sh
+      - name: Run a real script and propagate a real workspace child process exit
         run: bash scripts/workspace/smoke-lua.sh
