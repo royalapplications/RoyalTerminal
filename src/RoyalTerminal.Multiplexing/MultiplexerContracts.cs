@@ -142,5 +142,5 @@ public sealed class MultiplexerException : InvalidOperationException
     /// <summary>Creates an operation error with a stable category.</summary>
     public MultiplexerException(MultiplexerErrorCode code, string message) : base(message) => Code = code;
     /// <summary>Gets the error category.</summary>
-    public MultiplexerErrorCode Code { get; } = code;
+    public MultiplexerErrorCode Code { get; }
 }
