@@ -16,6 +16,17 @@ internal static class WorkspaceCheckpointEndpoint
             ctx.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'";
             return Results.Text("import './replica-host.js';", "text/javascript");
         });
+        // StaticFileMiddleware deliberately does not serve unknown extensions. Do not enable it globally:
+        // these specific SDK-supplied ICU blobs are the only .dat files this browser worker needs.
+        foreach (string name in new[] { "icudt_EFIGS.dat", "icudt_no_CJK.dat", "icudt_CJK.dat" })
+        {
+            string relative = $"vendor/managed/_framework/{name}";
+            app.MapGet("/" + relative, () =>
+            {
+                var file = app.Environment.WebRootFileProvider.GetFileInfo(relative);
+                return file.Exists ? Results.Stream(file.CreateReadStream(), "application/octet-stream", lastModified:file.LastModified) : Results.NotFound();
+            });
+        }
         SemaphoreSlim permits = new(2, 2);
         app.MapGet("/api/sessions/{sessionId}/blocks/{blockId}/checkpoint", async (HttpContext context) =>
         {
