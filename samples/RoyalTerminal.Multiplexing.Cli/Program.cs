@@ -9,9 +9,8 @@ Console.CancelKeyPress += (_, eventArgs) =>
     eventArgs.Cancel = true;
     cancellation.Cancel();
 };
-// The host permits action deadlines up to 120 seconds; allow a small transport margin.
 using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(130) };
-return await MultiplexingCli.RunAsync(args, Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_TOKEN"),
+return await WorkspaceCli.RunAsync(args, Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_TOKEN"),
     Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_URL"), Console.In, Console.Out, Console.Error,
     http, cancellation.Token, new CliCurrentContext(
         Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SESSION"),
