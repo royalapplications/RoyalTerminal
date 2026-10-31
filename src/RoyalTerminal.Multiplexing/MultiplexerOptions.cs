@@ -14,15 +14,18 @@ public sealed record MultiplexerOptions
     public int MaxWindowsPerSession { get; init; } = 16;
     /// <summary>Maximum simultaneous attachments to one block.</summary>
     public int MaxAttachmentsPerBlock { get; init; } = 8;
-    /// <summary>Maximum payload bytes retained by one block's replay journal.</summary>
+    /// <summary>Maximum output bytes in the hot replay journal per block.</summary>
     public int MaxJournalBytes { get; init; } = 8 * 1024 * 1024;
-    /// <summary>Maximum retained journal events, including non-output events.</summary>
+    /// <summary>Maximum retained hot events, including non-output events.</summary>
     public int MaxJournalEvents { get; init; } = 4096;
+    /// <summary>Optional additional cold history budget per block. Zero disables it. Payload pages are losslessly
+    /// compressed; every event incurs a logical metadata charge. Older pages are evicted first.</summary>
+    public int MaxColdReplayBytes { get; init; }
     /// <summary>Maximum output bytes in a single event. Larger transport chunks are split.</summary>
     public int MaxEventBytes { get; init; } = 16 * 1024;
-    /// <summary>Maximum queued events per attachment, including replay.</summary>
+    /// <summary>Maximum events queued for an attachment's hot replay and live output.</summary>
     public int MaxPendingEventsPerAttachment { get; init; } = 8192;
-    /// <summary>Maximum queued output bytes per attachment, including replay.</summary>
+    /// <summary>Maximum output bytes queued for an attachment's hot replay and live output.</summary>
     public int MaxPendingBytesPerAttachment { get; init; } = 16 * 1024 * 1024;
     /// <summary>Maximum accepted input bytes per operation.</summary>
     public int MaxInputBytes { get; init; } = 64 * 1024;
@@ -39,6 +42,8 @@ public sealed record MultiplexerOptions
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxAttachmentsPerBlock, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxJournalBytes, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxJournalEvents, 1);
+        ArgumentOutOfRangeException.ThrowIfNegative(MaxColdReplayBytes);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxColdReplayBytes, 32 * 1024 * 1024);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxEventBytes, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxEventBytes, MaxJournalBytes);
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxPendingEventsPerAttachment, 1);
