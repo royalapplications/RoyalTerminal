@@ -3,13 +3,11 @@ Description=RoyalTerminal account-owned workspace for %i (experimental)
 Documentation=man:systemd.exec(5)
 
 [Service]
-Type=exec
+Type=simple
 User=%i
 PAMName=royalterminal-workspace
-# The root admission check reads only root-controlled policy and operating-system account records.
 ExecStartPre=+/usr/bin/python3 -I /usr/local/libexec/royalterminal-account/access.py admit %i
 ExecStart=/usr/bin/python3 -I /usr/local/libexec/royalterminal-account/launch.py start %i
-ExecStartPost=/usr/bin/python3 -I /usr/local/libexec/royalterminal-account/launch.py ready %i
 RuntimeDirectory=royalterminal-account-%i
 RuntimeDirectoryMode=0700
 StateDirectory=royalterminal-account-%i
@@ -20,5 +18,3 @@ TimeoutStartSec=45s
 TimeoutStopSec=15s
 KillMode=control-group
 NoNewPrivileges=yes
-# Do not sandbox the workspace into a different home or temporary filesystem from its OS user.
-# The proxy is independently restartable. Explicitly stopping this account unit ends its processes.

@@ -24,3 +24,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y acl
           sudo env ROYALTERMINAL_DISPOSABLE_CI=github-hosted bash deploy/account-login/ci.sh "$RUNNER_TEMP/workspace-account-server"
+      - name: Diagnose service ordering and account admission without printing credentials
+        if: failure()
+        run: |
+          for name in rtworkalpha rtworkbeta; do
+            sudo journalctl -b --no-pager -n 80 -u "royalterminal-account@$name.service" -u "royalterminal-login@$name.service" -u "royalterminal-login@$name.socket" | sed -E 's/[0-9a-fA-F]{64}/[redacted]/g'
+            systemctl show "royalterminal-account@$name.service" "royalterminal-login@$name.service" -p ActiveState -p SubState -p Result || true
+          done

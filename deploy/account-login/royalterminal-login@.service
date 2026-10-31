@@ -5,7 +5,11 @@ After=royalterminal-account@%i.service
 
 [Service]
 User=%i
+# Wait on the real private HTTP endpoint, not a PID or the mere presence of a Unix socket.
+# The readiness probe runs as the target user without opening a second PAM session.
+ExecStartPre=/usr/bin/python3 -I /usr/local/libexec/royalterminal-account/launch.py ready %i
 ExecStart=/usr/lib/systemd/systemd-socket-proxyd --connections-max=32 /run/royalterminal-account-%i/host.sock
+TimeoutStartSec=30s
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
