@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using RoyalTerminal.Multiplexing.Desktop.Controls;
 using RoyalTerminal.Multiplexing.Desktop.Services;
@@ -13,25 +14,26 @@ namespace RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview;
 public sealed partial class OverviewWindow : Window
 {
     private sealed record Choice(Guid Id, string Label) { public override string ToString() => Label; }
-    private sealed class Pane(HttpClient http)
+    private sealed class Pane(HttpClient http, IMultiplexingSocketConnector? connector)
     {
-        internal readonly RemoteTerminalControl Terminal = new() { TerminalFontSize = 12 };
+        internal readonly RemoteTerminalControl Terminal = connector is null ? new() : new(connector);
         internal readonly TextBlock Caption = new() { TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(5, 2) };
         internal readonly Border Root = new() { ClipToBounds = true, Margin = new Thickness(2), Background = Brushes.Black,
             BorderBrush = Brushes.SlateGray, BorderThickness = new Thickness(1) };
-        internal string Label = string.Empty, Status = "Attaching…";
+        private string _label = string.Empty, _status = "Attaching…";
         private WorkspaceTerminalController? _controller;
         private readonly CancellationTokenSource _life = new();
         private Task _startup = Task.CompletedTask;
         internal void Start(MultiplexingTransportOptions options)
         {
+            Terminal.TerminalFontSize = 12;
             var layout = new DockPanel(); DockPanel.SetDock(Caption, Dock.Top); layout.Children.Add(Caption);
-            layout.Children.Add(new ScrollViewer { Content = Terminal, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }); Root.Child = layout;
+            layout.Children.Add(new ScrollViewer { Content = Terminal, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }); Root.Child = layout;
             _controller = new(Terminal, http); _controller.StatusChanged += Updated;
             _startup = AttachAsync(_controller, options, _life.Token);
         }
-        internal void Refresh(string label) { Label = label; Caption.Text = $"{Label} · {Status}"; }
-        private void Updated(string status) { Status = status; Refresh(Label); }
+        internal void Refresh(string label) { _label = label; Caption.Text = $"{_label} · {_status}"; }
+        private void Updated(string status) { _status = status; Refresh(_label); }
         private async Task AttachAsync(WorkspaceTerminalController controller, MultiplexingTransportOptions options, CancellationToken token)
         {
             try { await controller.AttachAsync(options with { Observer = true }, token); }
@@ -47,7 +49,8 @@ public sealed partial class OverviewWindow : Window
     }
 
     private readonly Dictionary<Guid, Pane> _panes = [];
-    private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(35) };
+    private readonly HttpClient _http;
+    private readonly IMultiplexingSocketConnector? _connector;
     private readonly CancellationTokenSource _life = new();
     private readonly SemaphoreSlim _render = new(1, 1);
     private Task? _watch;
@@ -56,9 +59,14 @@ public sealed partial class OverviewWindow : Window
     private Guid _sessionId, _windowId;
     private MultiplexerSessionDescriptor? _snapshot;
     private bool _binding;
+    internal Task Shutdown { get; private set; } = Task.CompletedTask;
 
-    public OverviewWindow()
+    public OverviewWindow() : this(new HttpClientHandler { AllowAutoRedirect = false }, null) { }
+
+    internal OverviewWindow(HttpMessageHandler http, IMultiplexingSocketConnector? connector)
     {
+        _http = new(http) { Timeout = TimeSpan.FromSeconds(35) };
+        _connector = connector;
         InitializeComponent();
         WindowsList.SelectionChanged += async (_, _) =>
         {
@@ -67,12 +75,14 @@ public sealed partial class OverviewWindow : Window
             try { await RenderAsync(); } catch (Exception e) { StatusText.Text = e.Message; }
         };
         Opened += (_, _) => { if (_endpoint is not null) _watch = WatchAsync(); };
-        Closed += async (_, _) =>
-        {
-            _life.Cancel();
-            try { if (_watch is not null) await _watch; await ClearAsync(); }
-            finally { _http.Dispose(); _token = string.Empty; _life.Dispose(); }
-        };
+        Closed += (_, _) => Shutdown = StopAsync();
+    }
+
+    private async Task StopAsync()
+    {
+        _life.Cancel();
+        try { if (_watch is not null) await _watch; await ClearAsync(); }
+        finally { _http.Dispose(); _token = string.Empty; _life.Dispose(); }
     }
 
     internal void Connect(Uri endpoint, string token, Guid sessionId) => (_endpoint, _token, _sessionId) = (endpoint, token, sessionId);
@@ -103,7 +113,12 @@ public sealed partial class OverviewWindow : Window
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (Exception e) { StatusText.Text = "Workspace subscription stopped: " + e.Message; await ClearAsync(); }
+        catch (Exception e)
+        {
+            _snapshot = null; _binding = true; WindowsList.ItemsSource = null; ShelfText.Text = string.Empty;
+            Title = "Workspace overview"; StatusText.Text = "Workspace subscription stopped: " + e.Message;
+            await ClearAsync();
+        }
     }
 
     private async Task RenderAsync()
@@ -112,18 +127,17 @@ public sealed partial class OverviewWindow : Window
         try
         {
             if (_life.IsCancellationRequested || _snapshot is not { } session) return;
-            var plan = LayoutProjection.Build(session, _windowId);
+            Guid windowId = _windowId;
+            var plan = LayoutProjection.Build(session, windowId);
             var wanted = plan.Slots.Select(s => s.Block.Id).ToHashSet();
             var obsolete = _panes.Keys.Where(k => !wanted.Contains(k)).ToArray();
             await Task.WhenAll(obsolete.Select(Remove).ToArray());
-            if (_life.IsCancellationRequested || session != _snapshot || !session.Windows.Any(w => w.Id == _windowId)) return;
-            // A window switch may arrive while old observers are detaching. Its queued render uses the newest selection.
-            if (plan.Slots.Any(s => s.Block.WindowId != _windowId)) return;
+            if (_life.IsCancellationRequested || !ReferenceEquals(session, _snapshot) || windowId != _windowId) return;
             foreach (var slot in plan.Slots)
             {
                 if (!_panes.TryGetValue(slot.Block.Id, out var pane))
                 {
-                    pane = new(_http); _panes.Add(slot.Block.Id, pane); Surface.Place(pane.Root, slot.Area, slot.Layer);
+                    pane = new(_http, _connector); _panes.Add(slot.Block.Id, pane); Surface.Place(pane.Root, slot.Area, slot.Layer);
                     pane.Start(new(_endpoint!, _token, _sessionId, slot.Block.Id, slot.Block.Dimensions));
                 }
                 else Surface.Place(pane.Root, slot.Area, slot.Layer);
