@@ -1,0 +1,15 @@
+[Unit]
+Description=RoyalTerminal local stream proxy for %i
+Requires=royalterminal-account@%i.service
+After=royalterminal-account@%i.service
+
+[Service]
+User=%i
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --connections-max=32 /run/royalterminal-account-%i/host.sock
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+UMask=0077

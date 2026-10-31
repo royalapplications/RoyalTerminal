@@ -1,0 +1,8 @@
+# Debian/Ubuntu systemd PAMName stack. Kernel socket ACL authenticates the local peer;
+# this service policy is not a password-login mechanism. Keep local account policy in effect.
+auth      required  pam_permit.so
+account   requisite pam_nologin.so
+account   requisite pam_shells.so
+account   include   common-account
+session   required  pam_limits.so
+session   include   common-session-noninteractive
