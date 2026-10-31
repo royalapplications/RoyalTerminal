@@ -35,3 +35,5 @@ jobs:
         run: bash scripts/workspace/test-script-processes.sh
       - name: Run a real script and propagate a real workspace child process exit
         run: bash scripts/workspace/smoke-lua.sh
+      - name: Validate server Lua publication, invocation, authorization and rollback
+        run: bash scripts/workspace/smoke-server-lua.sh
