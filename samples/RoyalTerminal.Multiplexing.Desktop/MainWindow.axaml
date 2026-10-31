@@ -8,16 +8,16 @@
         Width="1280" Height="860" MinWidth="880" MinHeight="620"
         Background="#10151E">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="20" RowSpacing="16">
-    <Grid ColumnDefinitions="*,Auto">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
       <StackPanel Spacing="4">
         <TextBlock Text="RoyalTerminal Workspaces" FontSize="25" FontWeight="SemiBold" />
         <TextBlock Text="Durable sessions · native terminal rendering · shared remote state" Foreground="#95A4B8" />
       </StackPanel>
-      <Border Grid.Column="1" Background="#2A2440" CornerRadius="6" Padding="12,7" VerticalAlignment="Center">
+      <Button Grid.Column="1" Content="Workspace overview" Click="OpenOverview" ToolTip.Tip="Observe all visible terminals in the selected workspace window" />
+      <Border Grid.Column="2" Background="#2A2440" CornerRadius="6" Padding="12,7" VerticalAlignment="Center">
         <TextBlock Text="EXPERIMENTAL" FontSize="11" FontWeight="Bold" Foreground="#CAB7FF" />
       </Border>
     </Grid>
-
     <Border Grid.Row="1" Background="#192230" CornerRadius="8" Padding="14">
       <Grid ColumnDefinitions="2*,3*,Auto" ColumnSpacing="12">
         <StackPanel Spacing="5">
@@ -31,7 +31,6 @@
         <Button Grid.Column="2" Content="Refresh sessions" Command="{Binding RefreshCommand}" VerticalAlignment="Bottom" />
       </Grid>
     </Border>
-
     <Grid Grid.Row="2" ColumnDefinitions="275,*" ColumnSpacing="16">
       <Border Background="#192230" CornerRadius="8" Padding="14">
         <Grid RowDefinitions="Auto,Auto,180,Auto,*" RowSpacing="12">
@@ -63,7 +62,6 @@
           </ListBox>
         </Grid>
       </Border>
-
       <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="12">
         <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
           <StackPanel Spacing="4">
@@ -91,12 +89,12 @@
         </Grid>
       </Grid>
     </Grid>
-
     <Border Grid.Row="3" Background="#192230" CornerRadius="8" Padding="14">
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
         <StackPanel Spacing="4">
           <TextBlock Text="{Binding Status}" FontWeight="SemiBold" />
           <TextBlock Text="{Binding Error}" Foreground="#FFB2A5" TextWrapping="Wrap" />
+          <TextBlock x:Name="OverviewError" Foreground="#FFB2A5" TextWrapping="Wrap" />
           <TextBlock Text="Window resizing does not change the remote grid. Detaching keeps server processes alive."
                      FontSize="11" Foreground="#95A4B8" TextWrapping="Wrap" />
         </StackPanel>

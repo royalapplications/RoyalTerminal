@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\RoyalTerminal.Avalonia\RoyalTerminal.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\RoyalTerminal.Multiplexing\RoyalTerminal.Multiplexing.csproj" />
     <ProjectReference Include="..\..\src\RoyalTerminal.Terminal.Transport.Multiplexing\RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
