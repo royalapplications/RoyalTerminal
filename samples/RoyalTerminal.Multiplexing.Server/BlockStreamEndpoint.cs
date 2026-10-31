@@ -32,7 +32,6 @@ internal sealed class BlockStreamEndpoint(MultiplexerBroker broker, AccessTokens
             if (header.StartsWith("Bearer ", StringComparison.Ordinal)) grant = tokens.Resolve(header[7..]);
             if (grant is null)
             {
-                // Browsers cannot set Authorization on WebSocket handshakes. Credentials stay out of URLs.
                 using CancellationTokenSource handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
                 handshake.CancelAfter(TimeSpan.FromSeconds(5));
                 ClientFrame authentication = await ReceiveAsync(socket, handshake.Token);
@@ -54,13 +53,30 @@ internal sealed class BlockStreamEndpoint(MultiplexerBroker broker, AccessTokens
             Task output = SendEventsAsync(socket, attachment, after, ready, lifetime.Token);
             Task input = ReceiveInputAsync(socket, attachment, grant, ready.Task, lifetime.Token);
             Task completed = await Task.WhenAny(output, input);
-            await lifetime.CancelAsync();
-            try { await Task.WhenAll(output, input); }
-            catch (OperationCanceledException) when (lifetime.IsCancellationRequested && completed.IsCompletedSuccessfully) { }
+            try
+            {
+                // A cancelled WebSocket ReceiveAsync can abort the underlying socket. On normal EOF
+                // the writer has sent the exit and replay fence: send CLOSE before cancelling the reader.
+                if (completed == output && output.IsCompletedSuccessfully && !lifetime.IsCancellationRequested)
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(2));
+                    if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                        await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Process stream ended", deadline.Token);
+                    try { await input.WaitAsync(deadline.Token); }
+                    catch (OperationCanceledException) when (deadline.IsCancellationRequested || socket.State is WebSocketState.Closed or WebSocketState.CloseReceived) { }
+                }
+            }
+            finally
+            {
+                await lifetime.CancelAsync();
+                try { await Task.WhenAll(output, input); }
+                catch (OperationCanceledException) when (lifetime.IsCancellationRequested && completed.IsCompletedSuccessfully) { }
+            }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            if (error is not (OperationCanceledException or WebSocketException))
+            if (error is not (OperationCanceledException or WebSocketException) && socket.State == WebSocketState.Open)
             {
                 (_, ApiError api) = ServerHttp.Classify(error);
                 using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(2));
@@ -84,8 +100,6 @@ internal sealed class BlockStreamEndpoint(MultiplexerBroker broker, AccessTokens
     internal void RegisterAuthorizedClient(MultiplexerAttachment attachment, AccessGrant grant, CancellationTokenSource lifetime)
     {
         clients.Add(attachment.Id, attachment.SessionId, attachment.BlockId, grant, attachment.HasControl, lifetime);
-        // Recheck after registration: a prior revoke is rejected here, and a later
-        // revoke will find this client's cancellation source in the registry.
         if (tokens.IsActive(grant)) return;
         clients.Remove(attachment.Id);
         throw new ApiException(403, "expired", "The capability expired or was revoked.");
