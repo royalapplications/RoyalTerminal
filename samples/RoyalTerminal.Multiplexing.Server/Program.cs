@@ -21,6 +21,8 @@ internal static class Program
 
 internal static class ServerHost
 {
+    internal const string ContentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+
     public static WebApplication Build(string[] args, ITerminalTransportFactory? transportFactory = null,
         string? administratorToken = null, string? listenUrl = null)
     {
@@ -78,7 +80,7 @@ internal static class ServerHost
         {
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
-            context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+            context.Response.Headers["Content-Security-Policy"] = ContentPolicy;
             try
             {
                 if (!ServerHttp.IsSameOrigin(context.Request)) throw new ApiException(403, "origin", "Cross-origin requests are disabled.");

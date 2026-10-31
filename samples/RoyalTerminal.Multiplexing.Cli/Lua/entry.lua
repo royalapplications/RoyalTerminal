@@ -17,12 +17,22 @@ for _, name in ipairs {'after','every'} do
 end
 local on = rex.on
 rex.on = function(event, fn) return on(event, function(...) return scoped(fn, ...) end) end
+local declared = {}
 local action = rex.action
 rex.action = function(def)
   local copy = {}; for k, v in pairs(def) do copy[k] = v end
   local run = assert(copy.run)
   copy.run = function(...) return scoped(run, ...) end
-  return action(copy)
+  action(copy); declared[copy.name] = true
+end
+-- An error in a registered local action must never trigger a second invocation on the host.
+local invoke = rex.invoke
+rex.invoke = function(name, args)
+  if declared[name] then return invoke(name, args) end
+  if type(name) ~= 'string' or (args ~= nil and type(args) ~= 'table') then return nil, 'invalid action invocation' end
+  local params = {}; for k,v in pairs(args or {}) do params[k] = v end
+  setmetatable(params,{__jsontype='object'})
+  return rex.call('lua.invoke',{name=name,arguments=params,session_id=rex.session_id,block_id=rex.block_id,window_id=os.getenv('ROYALTERMINAL_MUX_WINDOW')})
 end
 local chunk
 if plan then rex.args = plan.args; chunk = assert(loadstring(plan.source, plan.name))
