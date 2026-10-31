@@ -49,9 +49,7 @@ public sealed partial class InspectingTerminalTransport : ITerminalTransport, IM
         });
         _processor.NotifyResize(dimensions.Columns, dimensions.Rows, dimensions.WidthPixels, dimensions.HeightPixels);
         _processor.ResponseCallback = EnqueueResponse;
-        _processor.BellCallback = Metadata.Bell;
-        _processor.TitleCallback = Metadata.Title;
-        _processor.ProgramStatusChangedCallback = () => Metadata.StatusChanged(_processor.ProgramStatuses);
+        Metadata.Observe(_processor);
         _inner.DataReceived += OnData;
         _inner.ProcessExited += OnExit;
     }
