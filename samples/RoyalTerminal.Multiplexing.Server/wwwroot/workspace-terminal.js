@@ -1,64 +1,60 @@
-import {base64Bytes,encodeInput,formatState,nextSequence} from './workspace-model.js';
-import {bindUserInput} from './terminal-input.js';
+import { TerminalPane as StreamPane } from './workspace-terminal-stream.js';
+import { nextSequence } from './workspace-model.js';
+import { openReplica, readCut } from './replica-client.js';
 
-// One parser and cursor per server block, independent of the DOM element's parent or presentation plane.
-export class TerminalPane {
-  constructor(block,ctx){
-    this.ctx=ctx;this.id=block.id;this.sessionId=block.sessionId;this.sequence=0;this.lastVisible=performance.now();this.ready=false;this.hasControl=false;this.closed=false;this.disposed=false;this.exited=false;this.retries=0;this.pending=Promise.resolve();this.connection=null;
-    const {text,button}=ctx;this.element=text('section','','terminal-pane');this.element.dataset.blockId=this.id;
-    const header=text('div','','pane-header');this.name=text('span',block.label,'pane-title');this.name.title='Double-click to rename';this.indicator=text('span','connecting','pane-state');
-    header.append(text('span','›'),this.name,this.indicator,button('↗','Capture terminal',()=>ctx.captureBlock(this.id)),button('◇','Detach or reconnect this view',()=>this.toggleAttachment()),button('×','Close process',()=>ctx.closeBlock(this.id)));
-    this.host=text('div','','terminal-host');const footer=text('div','','pane-footer');this.geometry=text('span','');this.access=text('span','');footer.append(this.geometry,this.access);
-    this.element.append(header,this.host,footer);for(const type of ['pointerdown','focusin'])this.element.addEventListener(type,()=>ctx.focusBlock(this.id));
-    this.name.ondblclick=()=>void ctx.renameBlock(this.id).catch(e=>ctx.toast(e.message));
-    this.terminal=new window.Terminal({fontFamily:'"SFMono-Regular",Consolas,"Liberation Mono",monospace',fontSize:12,lineHeight:1.18,cursorBlink:true,scrollback:15000,allowProposedApi:false,convertEol:false,theme:{background:'#0e1217',foreground:'#c6d2dd',cursor:'#8be6c9',selectionBackground:'#3c625b80',black:'#15202a',red:'#df8d8d',green:'#8fc9a4',yellow:'#d9c18a',blue:'#8bb4da',magenta:'#b69ed4',cyan:'#86c9c7',white:'#ccd8df',brightBlack:'#667b8e',brightRed:'#f2aaaa',brightGreen:'#b2e8c4',brightYellow:'#f0d8a2',brightBlue:'#b5d7f3',brightMagenta:'#d3b8ef',brightCyan:'#b4e5df',brightWhite:'#eff7fc'}});
-    this.fit=new window.FitAddon.FitAddon();this.terminal.loadAddon(this.fit);
-    this.userInput=bindUserInput(this.terminal,data=>this.sendInput(data),data=>{if(this.ready&&this.hasControl)this.send({type:'input',data:btoa(data)});});
-    const touch=text('div','','touch-keys');for(const [label,v] of [['Esc','\u001b'],['Tab','\t'],['Ctrl C','\u0003'],['↑','\u001b[A'],['↓','\u001b[B'],['←','\u001b[D'],['→','\u001b[C']])touch.append(button(label,`Send ${label}`,()=>this.sendInput(v)));this.element.append(touch);
-    this.resizeObserver=new ResizeObserver(()=>this.scheduleFit());
-  }
-  mount(){if(this.opened)return;this.opened=true;this.terminal.open(this.host);this.resizeObserver.observe(this.host);
-    for(const [name,data] of [['focus','\u001b[I'],['blur','\u001b[O']])this.terminal.textarea.addEventListener(name,()=>{if(this.terminal._core.coreService.decPrivateModes.sendFocus)this.sendInput(data);});
-    this.connect();
-  }
-  connect(observer=false){
-    if(this.disposed||this.connection||this.exited)return;clearTimeout(this.retryTimer);this.closed=false;this.ready=false;this.hasControl=false;
-    const role=observer||!this.ctx.state.capability.canControl?'observer':'controller';this.indicator.textContent='connecting';
-    const address=new URL(`/api/sessions/${this.sessionId}/blocks/${this.id}/stream`,location.href);address.protocol=location.protocol==='https:'?'wss:':'ws:';address.searchParams.set('after',this.sequence);address.searchParams.set('role',role);
-    const socket=new WebSocket(address);let finish;const c={socket,role,failed:false,pendingBytes:0,pendingFrames:0,done:new Promise(r=>{finish=r;})};this.connection=c;
-    socket.onopen=()=>{if(!this.closed&&!this.disposed)socket.send(JSON.stringify({type:'authenticate',token:this.ctx.state.token}));};
-    socket.onmessage=({data})=>{
-      if(this.disposed||c.failed)return;
-      if(typeof data!=='string'||data.length>1048576||c.pendingBytes+data.length>8*1048576||c.pendingFrames>=4096){this.fail(c,'Client receive queue exceeded its bound; reconnect from the last applied event.');return;}
-      ++c.pendingFrames;c.pendingBytes+=data.length;
-      this.pending=this.pending.then(async()=>{if(!c.failed&&!this.disposed)await this.apply(c,JSON.parse(data));}).catch(e=>this.fail(c,e.message)).finally(()=>{--c.pendingFrames;c.pendingBytes-=data.length;});
-    };
-    socket.onclose=()=>{this.pending=this.pending.then(()=>{
-      if(this.connection===c){this.connection=null;this.ready=this.hasControl=false;
-        if(!this.disposed&&!this.closed&&!this.exited){this.indicator.textContent='reconnecting';this.access.textContent='Connection lost · process retained';this.retryTimer=setTimeout(()=>this.connect(c.observerFallback||role==='observer'),c.observerFallback?0:Math.min(1000*2**Math.min(this.retries++,4),15000));}}
-      finish();});};
+// Ordinary replay stays entirely in xterm. After eviction the managed worker owns all parsing;
+// never feed a raw suffix into an xterm instance bootstrapped with only visible rows.
+export class TerminalPane extends StreamPane {
+  constructor(block,ctx){super(block,ctx);this.epoch=0;this.cuts=0;this.replica=null;this.dirty=false;this.paintTask=null;}
+  async recover(c){
+    if(++this.cuts>3)throw Error('The replay suffix expired three times during recovery. Reattach explicitly.');
+    this.ready=this.hasControl=false;this.indicator.textContent='recovering';
+    const epoch=this.epoch, abort=new AbortController();this.cutAbort=abort;
+    const timeout=setTimeout(()=>abort.abort(),30000);let staged;
+    const current=()=>!this.disposed&&!this.closed&&this.epoch===epoch&&this.connection===c;
+    try{
+      const cut=await readCut(this.sessionId,this.id,this.ctx.state.token,abort.signal);if(!current())return;
+      if(cut.sequence<this.sequence)throw Error('Checkpoint cursor is older than the displayed state.');
+      staged=await openReplica(cut.bytes);if(!current())return;
+      if(this.paintTask)await this.paintTask;
+      const frame=await staged.call('paint');if(!current())return;
+      await this.showFrame(frame);if(!current())return;
+      const previous=this.replica;this.replica=staged;staged=null;void previous?.dispose();
+      this.dirty=false;this.sequence=cut.sequence;this.element.dataset.recovery='managed';
+      this.access.textContent='Restored terminal · attaching to live output';
+      if(cut.exit!==null){this.exited=true;this.indicator.textContent=`exit ${cut.exit}`;this.access.textContent='Process exited · recovered final viewport';}
+      c.failed=true;c.socket.close();
+    }finally{clearTimeout(timeout);if(this.cutAbort===abort)this.cutAbort=null;void staged?.dispose();}
   }
   async apply(c,f){
-    if(f.type==='attached'){this.hasControl=!this.closed&&f.hasControl===true;return;}
-    if(f.type==='ready'){if(f.sequence!==this.sequence)throw Error('Replay fence does not match applied history.');this.ready=!this.closed;this.retries=0;if(!this.exited&&!this.closed){this.indicator.textContent=this.hasControl?'live':'view only';this.access.textContent=this.hasControl?'Input + resize control':'Shared read-only view';}this.scheduleFit();return;}
-    if(f.type==='error'){if(f.code==='Conflict'&&c.role==='controller'&&!this.closed){c.observerFallback=true;c.failed=true;c.socket.close();return;}throw Error(`${f.code}: ${f.message}`);}
-    if(!nextSequence(this.sequence,f.sequence))return;
-    switch(f.kind){
-      case 'resize':{const d=f.dimensions;if(!Number.isInteger(d?.columns)||!Number.isInteger(d?.rows)||d.columns<1||d.rows<1||d.columns>512||d.rows>512)throw Error('Invalid shared geometry.');this.terminal.resize(d.columns,d.rows);this.geometry.textContent=`${d.columns} × ${d.rows}`;break;}
-      case 'output':{const bytes=base64Bytes(f.data||'');await new Promise(resolve=>this.terminal.write(bytes,resolve));break;}
-      case 'exit':this.exited=true;this.hasControl=false;this.indicator.textContent=`exit ${f.exitCode}`;this.access.textContent='Process exited · output retained';break;
-      case 'closed':this.closed=true;this.hasControl=this.ready=false;this.indicator.textContent='closed';break;
-      default:throw Error(`Unknown stream event ${f.kind}`);
+    if(this.closed||this.disposed)return;
+    if(f.type==='error'&&f.code==='HistoryGap')return this.recover(c);
+    const r=this.replica;
+    if(r&&!f.type&&(f.kind==='output'||f.kind==='resize')){
+      if(!nextSequence(this.sequence,f.sequence))return;
+      await r.call(f.kind,f.kind==='resize'?f.dimensions:f.data);
+      if(this.disposed||r!==this.replica)return;
+      this.sequence=f.sequence;this.dirty=true;this.planPaint(c);return;
     }
-    this.sequence=f.sequence;
+    if(r&&(f.type==='ready'||f.kind==='exit'))await this.paint();
+    await super.apply(c,f);if(f.type==='ready')this.cuts=0;
   }
-  fail(c,message){if(c.failed||this.disposed)return;c.failed=true;this.closed=true;this.ready=this.hasControl=false;c.socket.close();this.indicator.textContent='detached';this.access.textContent=message;this.ctx.toast(message);}
-  send(frame){const socket=this.connection?.socket;if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(frame));}
-  sendInput(data){if(!this.ready||!this.hasControl||this.closed)return;const bytes=new TextEncoder().encode(data);if(bytes.length>65536){this.ctx.toast('Paste exceeds 64 KiB.');return;}this.send({type:'input',data:encodeInput(data)});}
-  scheduleFit(){clearTimeout(this.fitTimer);this.fitTimer=setTimeout(()=>{if(!this.ready||!this.hasControl||!this.element.isConnected)return;const size=this.fit.proposeDimensions();if(!size||size.cols<2||size.rows<1)return;const cols=Math.min(512,size.cols),rows=Math.min(256,size.rows);if(cols!==this.terminal.cols||rows!==this.terminal.rows)this.send({type:'resize',columns:cols,rows,widthPixels:0,heightPixels:0});},100);}
-  update(b){this.name.textContent=b.label;if(formatState(b)==='exited'){this.indicator.textContent=`exit ${b.exitCode}`;this.hasControl=false;}}
-  async detach(){this.closed=true;this.ready=this.hasControl=false;clearTimeout(this.retryTimer);const c=this.connection;if(c){c.socket.close();await c.done;}}
-  async toggleAttachment(){if(this.exited)return;if(this.closed){if(this.connection)await this.connection.done;this.connect();}else{await this.detach();this.indicator.textContent='detached';this.access.textContent='Process still running · ◇ reconnects';}}
-  async reconnectController(){await this.detach();this.connect();}
-  dispose(){this.disposed=this.closed=true;clearTimeout(this.retryTimer);clearTimeout(this.fitTimer);this.connection?.socket.close();this.resizeObserver.disconnect();this.userInput.dispose();this.terminal.dispose();this.element.remove();}
+  planPaint(c){if(this.paintTimer||this.disposed||this.closed)return;this.paintTimer=setTimeout(()=>{this.paintTimer=0;this.paint().catch(e=>this.fail(c,e.message));},32);}
+  async paint(){
+    while(this.dirty||this.paintTask){
+      if(this.paintTask){await this.paintTask;continue;}
+      const r=this.replica, epoch=this.epoch;if(!r||this.disposed||this.closed)return;this.dirty=false;
+      const work=(async()=>{const f=await r.call('paint');if(epoch===this.epoch&&!this.disposed&&!this.closed&&r===this.replica)await this.showFrame(f);})();
+      this.paintTask=work;try{await work;}finally{if(this.paintTask===work)this.paintTask=null;}
+      // Further writes schedule their own presentation. Never keep the ingest queue waiting on an animation loop.
+    }
+  }
+  async showFrame({cols,rows,vt}){
+    if(!Number.isInteger(cols)||!Number.isInteger(rows)||cols<1||rows<1||cols>512||rows>512||typeof vt!=='string'||vt.length>4*1024*1024)throw Error('Invalid recovered viewport.');
+    if(this.terminal.cols!==cols||this.terminal.rows!==rows)this.terminal.resize(cols,rows);
+    this.geometry.textContent=`${cols} × ${rows}`;
+    await new Promise(resolve=>this.terminal.write('\x1bc'+vt,resolve));
+  }
+  async detach(){++this.epoch;this.cutAbort?.abort();clearTimeout(this.paintTimer);this.paintTimer=0;this.cuts=0;await super.detach();}
+  dispose(){++this.epoch;this.cutAbort?.abort();clearTimeout(this.paintTimer);void this.replica?.dispose();this.replica=null;super.dispose();}
 }

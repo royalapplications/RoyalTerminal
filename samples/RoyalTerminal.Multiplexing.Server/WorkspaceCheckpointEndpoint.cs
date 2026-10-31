@@ -10,7 +10,12 @@ internal static class WorkspaceCheckpointEndpoint
 {
     internal static void Map(WebApplication app, WorkspaceOperations workspaces, AccessTokens tokens)
     {
-        // Bound retained transfer buffers as well as encoder concurrency. Do not queue work behind slow readers.
+        // Only this same-origin worker may compile Wasm. The workspace document's script CSP is unchanged.
+        app.MapGet("/checkpoint-worker.mjs", (HttpContext ctx) =>
+        {
+            ctx.Response.Headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'";
+            return Results.Text("import './replica-host.js';", "text/javascript");
+        });
         SemaphoreSlim permits = new(2, 2);
         app.MapGet("/api/sessions/{sessionId}/blocks/{blockId}/checkpoint", async (HttpContext context) =>
         {

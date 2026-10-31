@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <AssemblyName>RoyalTerminal.BrowserReplica</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <WasmMainJSPath>bootstrap.mjs</WasmMainJSPath>
+    <WasmBuildNative>false</WasmBuildNative>
+    <WasmFingerprintAssets>false</WasmFingerprintAssets>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <WasmEnableWebcil>true</WasmEnableWebcil>
+    <WasmEnableThreads>false</WasmEnableThreads>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <WasmIncludeFullIcuData>false</WasmIncludeFullIcuData>
+    <WasmIncludeTimeZoneData>false</WasmIncludeTimeZoneData>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
+  </ItemGroup>
+</Project>
