@@ -13,25 +13,38 @@ public sealed class LaunchIdentityTests
     [Fact]
     public async Task ARealProcessReceivesItsOwnIdentitiesButNotTheHostBearer()
     {
-        var ct=TestContext.Current.CancellationToken;
-        var factory=new CompositeTerminalTransportFactory([new PipeTerminalTransportProvider()]);
-        await using var broker=new MultiplexerBroker(factory);
-        var session=broker.CreateSession("identity"); var win=broker.CreateWindow(session.Id,"destination");
-        var old=new Dictionary<string,string> { ["ROYALTERMINAL_MUX_BLOCK"]="spoofed", ["ROYALTERMINAL_MUX_TOKEN"]="not-a-credential" };
-        TerminalCommandSpec cmd=OperatingSystem.IsWindows()
-            ? new("cmd.exe",["/d","/q","/c","set ROYALTERMINAL_MUX_"])
-            : new("/bin/sh",["-c","env | grep '^ROYALTERMINAL_MUX_' "]);
-        var block=await broker.AddBlockAsync(session.Id,win.Id,"print",new PipeTransportOptions(cmd,null,old,true,new(100,12,0,0)),ct);
-        using var observer=broker.Attach(session.Id,block.Id);
-        using var timeout=CancellationTokenSource.CreateLinkedTokenSource(ct);timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        using var output=new MemoryStream();
-        await foreach(var e in observer.Events.ReadAllAsync(timeout.Token))if(e.Data is {} d)output.Write(d);
-        var text=Encoding.UTF8.GetString(output.ToArray());
-        Assert.Contains($"ROYALTERMINAL_MUX_SESSION={session.Id:D}",text,StringComparison.OrdinalIgnoreCase);
-        Assert.Contains($"ROYALTERMINAL_MUX_BLOCK={block.Id:D}",text,StringComparison.OrdinalIgnoreCase);
-        Assert.Contains($"ROYALTERMINAL_MUX_WINDOW={win.Id:D}",text,StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("not-a-credential",text,StringComparison.Ordinal);
-        Assert.DoesNotContain("spoofed",text,StringComparison.Ordinal);
-        Assert.Equal("spoofed",old["ROYALTERMINAL_MUX_BLOCK"]);
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(15));
+        var factory = new CompositeTerminalTransportFactory([new PipeTerminalTransportProvider()]);
+        await using var broker = new MultiplexerBroker(factory);
+        var session = broker.CreateSession("identity");
+        var window = broker.CreateWindow(session.Id, "destination");
+        var original = new Dictionary<string, string>
+        {
+            ["ROYALTERMINAL_MUX_BLOCK"] = "spoofed",
+            ["ROYALTERMINAL_MUX_TOKEN"] = "not-a-credential",
+        };
+        // Keep the process alive until the reader has seen its output. Startup and pipe exit
+        // are independently scheduled, so this test does not rely on fast-child exit ordering.
+        TerminalCommandSpec command = OperatingSystem.IsWindows()
+            ? new("cmd.exe", ["/d", "/q"])
+            : new("/bin/sh", ["-c", "env | grep '^ROYALTERMINAL_MUX_'; echo IDENTITY_END; read -r line"]);
+        var block = await broker.AddBlockAsync(session.Id, window.Id, "identity",
+            new PipeTransportOptions(command, null, original, true, new(100, 12, 0, 0)), deadline.Token);
+        using var attachment = broker.Attach(session.Id, block.Id, MultiplexerRole.Controller);
+        if (OperatingSystem.IsWindows()) attachment.SendInput("set ROYALTERMINAL_MUX_\r\necho IDENTITY_END\r\n"u8);
+        var output = new StringBuilder();
+        while (await attachment.Events.WaitToReadAsync(deadline.Token))
+        {
+            while (attachment.Events.TryRead(out var item))
+                if (item.Data is { } bytes) output.Append(Encoding.UTF8.GetString(bytes));
+            if (output.ToString().Contains("IDENTITY_END", StringComparison.Ordinal)) break;
+        }
+        string text = output.ToString();
+        Assert.Contains($"ROYALTERMINAL_MUX_SESSION={session.Id:D}", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"ROYALTERMINAL_MUX_BLOCK={block.Id:D}", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"ROYALTERMINAL_MUX_WINDOW={window.Id:D}", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("not-a-credential", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("spoofed", text, StringComparison.Ordinal);
+        Assert.Equal("spoofed", original["ROYALTERMINAL_MUX_BLOCK"]);
     }
 }
