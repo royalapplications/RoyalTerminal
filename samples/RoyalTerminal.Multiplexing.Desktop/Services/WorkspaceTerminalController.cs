@@ -82,16 +82,13 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
         if (!HasControl || _transport is null) throw new InvalidOperationException("Attach as controller before changing the shared grid.");
         _transport.Resize(dimensions);
     }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        _disposed = true;
-        await DetachAsync();
+        _disposed = true; await DetachAsync();
         _control.RemoteFactory.Created -= OnTransportCreated;
         _control.RemoteSession.InputFailed -= OnInputFailed;
     }
-
     private void OnTransportCreated(MultiplexingTerminalTransport transport)
     {
         _transport = transport;
@@ -106,9 +103,9 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
         else Dispatcher.UIThread.InvokeAsync(Apply).GetAwaiter().GetResult();
     }
 
-    // An orderly close may be an administrator disconnect. Do not undo it automatically.
-    // Likewise do not retry missing history, lease conflicts, malformed frames or rejected credentials.
-    private static bool Retryable(Exception? error) => error is not MultiplexingProtocolException && error is IOException or WebSocketException or TimeoutException or OperationCanceledException;
+    // A normal close may be an administrator disconnect. Never automatically reclaim a released lease.
+    private static bool Retryable(Exception? error) => error is not MultiplexingProtocolException &&
+        error is (IOException or WebSocketException or TimeoutException or OperationCanceledException);
 
     private void OnConnectionLost(Exception? error)
     {
@@ -124,7 +121,6 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
             _recovery = RecoverAsync(source, _options, generation, _attachment.Token);
         });
     }
-
     private async Task RecoverAsync(MultiplexingTerminalTransport transport, MultiplexingTransportOptions options, int generation, CancellationToken cancellation)
     {
         const int attempts = 6;
@@ -135,20 +131,16 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
                 if (_generation != generation || _exited) return;
                 StatusChanged?.Invoke($"Connection lost · reconnecting {attempt + 1}/{attempts}");
                 await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(4000, 200 << attempt)), cancellation);
-                await transport.StopAsync();
-                cancellation.ThrowIfCancellationRequested();
+                await transport.StopAsync(); cancellation.ThrowIfCancellationRequested();
                 if (_exited || generation != _generation) return;
-                // Transport LastSequence means the host callback took ownership of the bytes, not
-                // necessarily that Avalonia already parsed them. Finish that exact prefix first.
+                // LastSequence means the control accepted the bytes, not that its dispatcher parsed them.
                 _control.FlushPendingTransportOutput();
                 long cursor = transport.LastSequence;
                 try
                 {
-                    // Preserve control, service, parser and event subscriptions. No StartPty/reset,
-                    // no input retry, no use of the possibly edited endpoint/token in the view model.
+                    // No parser reset or input retry. Use the original connection identity, not editable view fields.
                     await transport.StartAsync(options with { AfterSequence = cursor }, cancellation);
-                    cancellation.ThrowIfCancellationRequested();
-                    _control.FlushPendingTransportOutput();
+                    cancellation.ThrowIfCancellationRequested(); _control.FlushPendingTransportOutput();
                     if (!_exited) StatusChanged?.Invoke(HasControl ? "Reconnected · controller" : "Reconnected · observer");
                     return;
                 }
@@ -156,13 +148,20 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception error) { if (!_detaching && _generation == generation && !_exited) StatusChanged?.Invoke("Reconnect stopped · " + error.Message); }
+        catch (Exception error)
+        {
+            if (!_detaching && _generation == generation && !_exited)
+            {
+                // A failed handshake can queue another UI ConnectionLost notification. Once exhausted
+                // or denied, only a new explicit attachment may start a new retry budget.
+                _initialReady = false;
+                StatusChanged?.Invoke("Reconnect stopped · " + error.Message);
+            }
+        }
     }
-
     private void OnProcessExited(int code)
     {
-        _exited = true;
-        MultiplexingTerminalTransport? source = _transport;
+        _exited = true; MultiplexingTerminalTransport? source = _transport;
         Dispatcher.UIThread.Post(() => { if (!_detaching && ReferenceEquals(source, _transport)) StatusChanged?.Invoke($"Process exited · code {code}"); });
     }
     private void OnInputFailed(Exception error)

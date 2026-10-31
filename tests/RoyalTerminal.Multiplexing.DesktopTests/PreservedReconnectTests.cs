@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using RoyalTerminal.Multiplexing.ClientTests;
@@ -15,7 +16,8 @@ public sealed class PreservedReconnectTests
     [AvaloniaFact]
     public async Task RetriesFromAppliedCursorAndFinishesEscapeSequenceInOriginalParser()
     {
-        TestWebSocket first = new(), second = new(); Begin(first); first.Queue(Output(2,"A\u001b[")); first.Queue(Ready(2));
+        TestWebSocket first = new(), second = new();
+        Begin(first); first.Queue(Output(2,"A\u001b[")); first.Queue(Ready(2));
         second.Queue(Attached()); second.Queue(Output(3,"2;3HZ")); second.Queue(Ready(3));
         SequentialConnector connector = new(first,second);
         RemoteTerminalControl control = new(connector); Window window = new(){ Width=600, Height=300, Content=control }; window.Show();
@@ -71,10 +73,23 @@ public sealed class PreservedReconnectTests
         }
         finally {await controller.DetachAsync();window.Close();}
     }
-    private static void Begin(TestWebSocket s){s.Queue(Attached());s.Queue("""{"sequence":1,"kind":"resize","dimensions":{"columns":12,"rows":3,"widthPixels":0,"heightPixels":0}}""");}
+    private static void Begin(TestWebSocket socket)
+    {
+        socket.Queue(Attached());
+        socket.Queue("""{"sequence":1,"kind":"resize","dimensions":{"columns":12,"rows":3,"widthPixels":0,"heightPixels":0}}""");
+    }
     private static string Attached()=>$$"""{"type":"attached","attachmentId":"{{Guid.NewGuid()}}","hasControl":true}""";
     private static string Ready(long n)=>$$"""{"type":"ready","sequence":{{n}}}""";
-    private static string Output(long n,string s)=>$$"""{"sequence":{{n}},"kind":"output","data":"{{Convert.ToBase64String(Encoding.UTF8.GetBytes(s))}}""";
+    private static string Output(long n,string s)
+    {
+        using MemoryStream stream=new();
+        using(Utf8JsonWriter writer=new(stream))
+        {
+            writer.WriteStartObject();writer.WriteNumber("sequence",n);writer.WriteString("kind","output");
+            writer.WriteBase64String("data",Encoding.UTF8.GetBytes(s));writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
     private static MultiplexingTransportOptions Options()=>new(new Uri("https://example.test/"),"secret",Guid.NewGuid(),Guid.NewGuid(),new(12,3,0,0));
     private sealed class SequentialConnector(params TestWebSocket[] sockets):IMultiplexingSocketConnector
     {
