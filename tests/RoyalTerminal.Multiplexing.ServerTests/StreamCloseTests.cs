@@ -15,8 +15,7 @@ public sealed class StreamCloseTests
     public async Task ObserverReceivesChildExitAndNormalCloseWithoutSendingInput()
     {
         const string token = "raw-websocket-close-test-0123456789abcdef";
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var host = ServerHost.Build(["--Logging:LogLevel:Default=None"], administratorToken: token, listenUrl: "http://127.0.0.1:0");
         await host.StartAsync(deadline.Token);
         try
