@@ -12,7 +12,7 @@ using RoyalTerminal.Terminal;
 namespace RoyalTerminal.Multiplexing.Server;
 
 /// <summary>One explicit method registry drives discovery, HTTP, CLI, and custom actions.</summary>
-internal sealed class ApiCatalog
+internal sealed partial class ApiCatalog
 {
     private sealed record Entry(MethodDescription Description, string[] Properties, JsonElement ActionSchema,
         Func<ApiArguments, AccessGrant, CancellationToken, ValueTask<JsonElement>> Invoke);
@@ -27,6 +27,7 @@ internal sealed class ApiCatalog
         _tokens = tokens;
         _clients = clients;
         RegisterMethods();
+        RegisterWorkspaceMethods();
     }
 
     public MethodList Describe() => new(_methods.Values.Select(x => x.Description).ToArray());
@@ -55,14 +56,14 @@ internal sealed class ApiCatalog
             _ => throw new ArgumentException("Capture format must be text, html, or vt."),
         };
         string content = inspection.Capture(kind);
-        if (content.Length > 4 * 1024 * 1024) throw new ApiException(413, "capture_limit", "The capture exceeds the 4 MiB response budget.");
+        if (content.Length > 4 * 1024 * 1024) throw new ApiException(413, "capture_limit", "The capture exceeds the response budget.");
         return new(format, content, inspection.Title, inspection.WorkingDirectory);
     }
 
     private void RegisterMethods()
     {
         Add("server.version", "Describe this independent experimental protocol and its durability boundary.", [],
-            (_, _, _) => Done(new ServerVersion("RoyalTerminal Multiplexer", "0.1.0-experimental", 1,
+            (_, _, _) => Done(new ServerVersion("RoyalTerminal Multiplexer", "0.2.0-experimental", 1,
                 "Processes survive client disconnects while this server remains running."), ServerJsonContext.Default.ServerVersion));
         Add("session.list", "List sessions visible to this capability.", [], (_, grant, _) =>
             Done(new SessionList(_workspaces.Broker.ListSessions().Where(x => grant.CanRead(x.Id)).ToArray()), ServerJsonContext.Default.SessionList));
@@ -72,10 +73,7 @@ internal sealed class ApiCatalog
             return Done(_workspaces.Broker.CreateSession(args.String("label")), ServerJsonContext.Default.MultiplexerSessionDescriptor);
         });
         Add("session.view", "Read a session, revision, windows, layouts, and block lifecycle.", ["sessionId:string!"], (args, grant, _) =>
-        {
-            Guid id = Session(args, grant);
-            return Done(_workspaces.Broker.GetSession(id), ServerJsonContext.Default.MultiplexerSessionDescriptor);
-        });
+            Done(_workspaces.Broker.GetSession(Session(args, grant)), ServerJsonContext.Default.MultiplexerSessionDescriptor));
         Add("session.set_label", "Rename a session with optional optimistic revision checking.",
             ["sessionId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
         {
@@ -84,60 +82,47 @@ internal sealed class ApiCatalog
         });
         Add("session.close", "Explicitly terminate every process and remove the session.", ["sessionId:string!"], async (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            await _workspaces.CloseSessionAsync(args.Id("sessionId"));
-            return Success();
+            ServerHttp.RequireAdministrator(grant); await _workspaces.CloseSessionAsync(args.Id("sessionId")); return Success();
         });
-        Add("session.new_window", "Create an empty tab in a session.",
-            ["sessionId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
+        Add("session.new_window", "Create an empty tab in a session.", ["sessionId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
         {
             ServerHttp.RequireAdministrator(grant);
             return Done(_workspaces.Broker.CreateWindow(args.Id("sessionId"), args.String("label"), args.Revision()), ServerJsonContext.Default.MultiplexerWindowDescriptor);
         });
-        Add("session.set_window_label", "Rename a window.",
-            ["sessionId:string!", "windowId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
+        Add("session.set_window_label", "Rename a window.", ["sessionId:string!", "windowId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
         {
             ServerHttp.RequireAdministrator(grant);
             return Done(_workspaces.Broker.RenameWindow(args.Id("sessionId"), args.Id("windowId"), args.String("label"), args.Revision()), ServerJsonContext.Default.MultiplexerWindowDescriptor);
         });
-        Add("session.set_block_label", "Rename a block without replacing its process.",
-            ["sessionId:string!", "blockId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
+        Add("session.set_block_label", "Rename a block without replacing its process.", ["sessionId:string!", "blockId:string!", "label:string!", "expectedRevision:integer"], (args, grant, _) =>
         {
             ServerHttp.RequireAdministrator(grant);
             return Done(_workspaces.Broker.RenameBlock(args.Id("sessionId"), args.Id("blockId"), args.String("label"), args.Revision()), ServerJsonContext.Default.MultiplexerBlockDescriptor);
         });
-        Add("session.set_layout", "Replace a binary split tree containing each block assigned to the window exactly once.",
+        Add("session.set_layout", "Replace a binary split tree containing each tiled block in this window exactly once.",
             ["sessionId:string!", "windowId:string!", "layout:object!", "expectedRevision:integer"], (args, grant, _) =>
         {
             ServerHttp.RequireAdministrator(grant);
-            MultiplexerLayoutNode layout = JsonSerializer.Deserialize(args.Object("layout"), ServerJsonContext.Default.MultiplexerLayoutNode)
-                ?? throw new ArgumentException("A layout is required.");
+            MultiplexerLayoutNode layout = JsonSerializer.Deserialize(args.Object("layout"), ServerJsonContext.Default.MultiplexerLayoutNode) ?? throw new ArgumentException("A layout is required.");
             return Done(_workspaces.Broker.SetWindowLayout(args.Id("sessionId"), args.Id("windowId"), layout, args.Revision()), ServerJsonContext.Default.MultiplexerWindowDescriptor);
         });
-        Add("block.create", "Start a PTY or pipe process in a window, optionally splitting an existing block.",
-            ["sessionId:string!", "block:object!"], async (args, grant, cancellationToken) =>
+        Add("block.create", "Start a PTY or pipe process in a window, optionally splitting an existing block.", ["sessionId:string!", "block:object!"], async (args, grant, cancellationToken) =>
         {
             ServerHttp.RequireAdministrator(grant);
-            NewBlock request = JsonSerializer.Deserialize(args.Object("block"), ServerJsonContext.Default.NewBlock)
-                ?? throw new ArgumentException("A block definition is required.");
+            NewBlock request = JsonSerializer.Deserialize(args.Object("block"), ServerJsonContext.Default.NewBlock) ?? throw new ArgumentException("A block definition is required.");
             return Element(await _workspaces.CreateBlockAsync(args.Id("sessionId"), request, cancellationToken), ServerJsonContext.Default.MultiplexerBlockDescriptor);
         });
-        Add("block.close", "Terminate one process and remove its layout leaf.", ["sessionId:string!", "blockId:string!"], async (args, grant, _) =>
+        Add("block.close", "Terminate one process and remove its placement.", ["sessionId:string!", "blockId:string!"], async (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            await _workspaces.CloseBlockAsync(args.Id("sessionId"), args.Id("blockId"));
-            return Success();
+            ServerHttp.RequireAdministrator(grant); await _workspaces.CloseBlockAsync(args.Id("sessionId"), args.Id("blockId")); return Success();
         });
-        Add("block.input", "Send base64-encoded input exactly once, acquiring temporary exclusive control.",
-            ["sessionId:string!", "blockId:string!", "data:string!"], (args, grant, _) =>
+        Add("block.input", "Send base64-encoded input once, acquiring temporary exclusive control.", ["sessionId:string!", "blockId:string!", "data:string!"], (args, grant, _) =>
         {
             Guid sessionId = Session(args, grant);
             if (!grant.CanControl) throw new ApiException(403, "forbidden", "This capability is read only.");
-            _workspaces.Input(sessionId, args.Id("blockId"), args.String("data"));
-            return new(Success());
+            _workspaces.Input(sessionId, args.Id("blockId"), args.String("data")); return new(Success());
         });
-        Add("terminal.format", "Capture text, HTML, or styled VT from the server's authoritative terminal.",
-            ["sessionId:string!", "blockId:string!", "format:string"], (args, grant, _) =>
+        Add("terminal.format", "Capture text, HTML, or styled VT from the server's authoritative terminal.", ["sessionId:string!", "blockId:string!", "format:string"], (args, grant, _) =>
             Done(Capture(Session(args, grant), args.Id("blockId"), args.String("format", "text")), ServerJsonContext.Default.ScreenCapture));
         Add("terminal.status", "Read bounded OSC 7501 program-status records.", ["sessionId:string!", "blockId:string!"], (args, grant, _) =>
             Done(_workspaces.Inspection(Session(args, grant), args.Id("blockId")).ProgramStatuses.ToArray(), ServerJsonContext.Default.TerminalProgramStatusArray));
@@ -148,37 +133,27 @@ internal sealed class ApiCatalog
         Add("client.list", "List currently attached clients visible to this capability.", [], (_, grant, _) => Done(_clients.List(grant), ServerJsonContext.Default.ClientList));
         Add("client.disconnect", "Detach a client without terminating its process.", ["clientId:string!"], (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            return Done(new ApiSuccess(_clients.Disconnect(args.Id("clientId"))), ServerJsonContext.Default.ApiSuccess);
+            ServerHttp.RequireAdministrator(grant); return Done(new ApiSuccess(_clients.Disconnect(args.Id("clientId"))), ServerJsonContext.Default.ApiSuccess);
         });
-        Add("share.create", "Mint a scoped, expiring observer or controller capability. Token is returned once.",
-            ["sessionId:string!", "role:string", "lifetimeMinutes:integer"], (args, grant, _) =>
+        Add("share.create", "Mint a scoped, expiring observer or controller capability. Token is returned once.", ["sessionId:string!", "role:string", "lifetimeMinutes:integer"], (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            Guid id = args.Id("sessionId");
-            _workspaces.Broker.GetSession(id);
+            ServerHttp.RequireAdministrator(grant); Guid id = args.Id("sessionId"); _workspaces.Broker.GetSession(id);
             return Done(_tokens.Create(id, new(args.String("role", "observer"), args.Integer("lifetimeMinutes", 60))), ServerJsonContext.Default.ShareCreated);
         });
         Add("share.list", "List capability metadata without disclosing tokens.", ["sessionId:string!"], (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            return Done(_tokens.List(args.Id("sessionId")), ServerJsonContext.Default.ShareList);
+            ServerHttp.RequireAdministrator(grant); return Done(_tokens.List(args.Id("sessionId")), ServerJsonContext.Default.ShareList);
         });
         Add("share.revoke", "Revoke a capability and detach its live clients.", ["sessionId:string!", "shareId:string!"], (args, grant, _) =>
         {
-            ServerHttp.RequireAdministrator(grant);
-            Guid id = args.Id("shareId");
-            bool revoked = _tokens.Revoke(args.Id("sessionId"), id);
-            if (revoked) _clients.Revoke(id);
-            return Done(new ApiSuccess(revoked), ServerJsonContext.Default.ApiSuccess);
+            ServerHttp.RequireAdministrator(grant); Guid id = args.Id("shareId"); bool revoked = _tokens.Revoke(args.Id("sessionId"), id);
+            if (revoked) _clients.Revoke(id); return Done(new ApiSuccess(revoked), ServerJsonContext.Default.ApiSuccess);
         });
     }
 
     private static Guid Session(ApiArguments arguments, AccessGrant grant)
     {
-        Guid id = arguments.Id("sessionId");
-        ServerHttp.RequireSession(grant, id);
-        return id;
+        Guid id = arguments.Id("sessionId"); ServerHttp.RequireSession(grant, id); return id;
     }
 
     private void Add(string name, string description, string[] fields,
@@ -186,20 +161,17 @@ internal sealed class ApiCatalog
     {
         string[] names = fields.Select(x => x[..x.IndexOf(':')]).ToArray();
         JsonElement input = Schema(name, fields);
-        _methods.Add(name, new(new(name, description, input, OutputSchema(name),
-            ValidationNotes: "Unknown and duplicate top-level arguments are rejected. Nested contracts reject unknown fields. Session IDs are UUIDs. Layout tree invariants and process options are validated by the server. Action preflight uses a bounded schema projection; recursive descendants are validated during invocation. Mutations require an administrator except block.input."),
-            names, ApiInputSchemas.ForActions(input), handler));
+        _methods.Add(name, new(new(name, description, input, OutputSchema(name), RequestExample: WorkspaceExample(name),
+            ValidationNotes: "Unknown and duplicate top-level arguments are rejected. Nested contracts reject unknown fields. Session IDs are UUIDs. Layout tree invariants and process options are validated by the server. Action preflight uses a bounded schema projection; recursive descendants are validated during invocation. Mutations require an administrator except block.input."), names, ApiInputSchemas.ForActions(input), handler));
     }
 
     private static JsonElement OutputSchema(string method)
     {
-        // Export the actual source-generated contract, so discovery cannot drift
-        // from response property names, enum values, or recursive layout shapes.
         JsonTypeInfo type = method switch
         {
             "server.version" => ServerJsonContext.Default.ServerVersion,
             "session.list" => ServerJsonContext.Default.SessionList,
-            "session.create" or "session.view" or "session.set_label" => ServerJsonContext.Default.MultiplexerSessionDescriptor,
+            "session.create" or "session.view" or "session.set_label" or "block.place" or "block.swap" or "session.move_window" or "session.close_window" or "session.wait_change" => ServerJsonContext.Default.MultiplexerSessionDescriptor,
             "session.new_window" or "session.set_window_label" or "session.set_layout" => ServerJsonContext.Default.MultiplexerWindowDescriptor,
             "session.set_block_label" or "block.create" => ServerJsonContext.Default.MultiplexerBlockDescriptor,
             "terminal.format" => ServerJsonContext.Default.ScreenCapture,
@@ -212,8 +184,7 @@ internal sealed class ApiCatalog
         };
         ArrayBufferWriter<byte> buffer = new();
         using (Utf8JsonWriter writer = new(buffer)) type.GetJsonSchemaAsNode().WriteTo(writer);
-        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory);
-        return document.RootElement.Clone();
+        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory); return document.RootElement.Clone();
     }
 
     private static JsonElement Schema(string method, string[] fields)
@@ -225,21 +196,18 @@ internal sealed class ApiCatalog
             writer.WriteStartObject("properties");
             foreach (string field in fields)
             {
-                int colon = field.IndexOf(':');
-                string property = field[..colon];
+                int colon = field.IndexOf(':'); string property = field[..colon];
                 if (ApiInputSchemas.Nested(method, property) is { } nested)
-                {
-                    writer.WritePropertyName(property); nested.WriteTo(writer);
-                }
+                { writer.WritePropertyName(property); nested.WriteTo(writer); }
                 else
                 {
                     writer.WriteStartObject(property);
                     if (property == "expectedRevision")
                     {
-                        writer.WriteStartArray("type"); writer.WriteStringValue("integer"); writer.WriteStringValue("null"); writer.WriteEndArray();
-                        writer.WriteNumber("minimum", 0);
+                        writer.WriteStartArray("type"); writer.WriteStringValue("integer"); writer.WriteStringValue("null"); writer.WriteEndArray(); writer.WriteNumber("minimum", 0);
                     }
                     else writer.WriteString("type", field[(colon + 1)..].TrimEnd('!'));
+                    WriteWorkspaceConstraint(writer, method, property);
                     writer.WriteEndObject();
                 }
             }
@@ -247,8 +215,7 @@ internal sealed class ApiCatalog
             foreach (string field in fields) if (field.EndsWith('!')) writer.WriteStringValue(field[..field.IndexOf(':')]);
             writer.WriteEndArray(); writer.WriteEndObject();
         }
-        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory);
-        return document.RootElement.Clone();
+        using JsonDocument document = JsonDocument.Parse(buffer.WrittenMemory); return document.RootElement.Clone();
     }
 
     private static ValueTask<JsonElement> Done<T>(T value, JsonTypeInfo<T> type) => new(Element(value, type));
