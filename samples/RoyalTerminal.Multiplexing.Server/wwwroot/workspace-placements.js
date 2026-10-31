@@ -1,4 +1,5 @@
 import { placementActions as layoutActions } from './workspace-placement-commands.js';
+import { alertActions } from './workspace-alerts.js';
 export { deferPlacement, dragBounds, floatFrame, windowPlanes } from './workspace-placement-commands.js';
 
 // Render only known enums, counts, and plain-text labels. Terminal programs cannot inject markup.
@@ -21,7 +22,7 @@ export function formatAttention(summary) {
 }
 
 export function placementActions(ctx) {
-  return [...layoutActions(ctx), {
+  return [...layoutActions(ctx), ...alertActions(ctx), {
     title: 'Inspect workspace attention', hint: 'Program status', session: true,
     run: async () => {
       const session = ctx.session(); if (!session) return;
