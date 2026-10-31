@@ -1,6 +1,4 @@
-// Copyright (c) Royal Apps. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for details.
-
+// Copyright (c) Royal Apps. Licensed under the MIT license.
 using RoyalTerminal.Multiplexing.Cli;
 
 using CancellationTokenSource cancellation = new();
@@ -25,6 +23,7 @@ int command = args.Length >= 2 && args[0] == "--endpoint" ? 2 : 0;
 string? target = command == 2 ? args[1] : endpoint;
 switch (args.ElementAtOrDefault(command))
 {
+    case "archive": return await ArchiveCommand.RunAsync(args[(command+1)..],target,token,http,Console.Out,Console.Error,cancellation.Token);
     case "lua": return await LuaScriptCli.RunAsync(args[(command+1)..],target,token,http,Console.Error,cancellation.Token);
     case "do":
         var rest=args[(command+1)..];
@@ -44,5 +43,6 @@ if (args.ElementAtOrDefault(command) is null or "-h" or "--help" or "help")
     Console.WriteLine("  skill show|setup|status|remove      Read or install the workspace agent guide and local startup hooks.");
     Console.WriteLine("  --socket /ABSOLUTE/PATH COMMAND    Use HTTP over a private Unix socket; no TCP fallback.");
     Console.WriteLine("  mirror SESSION BLOCK [--wait]      Restore a managed checkpoint; optionally follow as observer through process exit.");
+    Console.WriteLine("  "+ArchiveCommand.Usage);
 }
 return result;

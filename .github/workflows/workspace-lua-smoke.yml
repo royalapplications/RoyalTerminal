@@ -37,3 +37,5 @@ jobs:
         run: bash scripts/workspace/smoke-lua.sh
       - name: Validate server Lua publication, invocation, authorization and rollback
         run: bash scripts/workspace/smoke-server-lua.sh
+      - name: Recover a complete offline workspace after its broker stops
+        run: bash scripts/workspace/smoke-archive.sh
