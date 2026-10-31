@@ -79,7 +79,7 @@ public sealed record MultiplexerLayoutNode(Guid? BlockId = null,
         => new(Orientation: orientation, Ratio: ratio, First: first, Second: second);
 }
 
-/// <summary>An immutable window snapshot. Null layout means an empty window.</summary>
+/// <summary>An immutable window snapshot. A null layout means there are no tiled blocks.</summary>
 /// <param name="Id">Window identity.</param>
 /// <param name="Label">Human-readable label.</param>
 /// <param name="Layout">Binary split tree.</param>
@@ -88,7 +88,7 @@ public sealed record MultiplexerWindowDescriptor(Guid Id, string Label, Multiple
 /// <summary>An immutable block snapshot; its dimensions are shared by all viewers.</summary>
 /// <param name="Id">Block identity.</param>
 /// <param name="SessionId">Owning session.</param>
-/// <param name="WindowId">Owning window.</param>
+/// <param name="WindowId">Home window, including for an unplaced block.</param>
 /// <param name="Label">Human-readable label.</param>
 /// <param name="State">Current lifecycle.</param>
 /// <param name="Dimensions">Authoritative grid and pixel size.</param>
@@ -100,7 +100,13 @@ public sealed record MultiplexerWindowDescriptor(Guid Id, string Label, Multiple
 public sealed record MultiplexerBlockDescriptor(Guid Id, Guid SessionId, Guid WindowId,
     string Label, MultiplexerBlockState State, TerminalSessionDimensions Dimensions,
     int? ExitCode, long LastSequence, long FirstRetainedSequence, int AttachmentCount,
-    Guid? ControllerId);
+    Guid? ControllerId)
+{
+    /// <summary>Current position independent of the lifetime of the underlying process.</summary>
+    public MultiplexerPaneKind Placement { get; init; }
+    /// <summary>Normalized window coordinates for a floating block; null for other placements.</summary>
+    public MultiplexerFloatBounds? FloatingBounds { get; init; }
+}
 
 /// <summary>An immutable session snapshot. Revision tracks structural and label changes.</summary>
 /// <param name="Id">Session identity.</param>
@@ -135,7 +141,6 @@ public sealed class MultiplexerException : InvalidOperationException
 {
     /// <summary>Creates an operation error with a stable category.</summary>
     public MultiplexerException(MultiplexerErrorCode code, string message) : base(message) => Code = code;
-
     /// <summary>Gets the error category.</summary>
-    public MultiplexerErrorCode Code { get; }
+    public MultiplexerErrorCode Code { get; } = code;
 }
