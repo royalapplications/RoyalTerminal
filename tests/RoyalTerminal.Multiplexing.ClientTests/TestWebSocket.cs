@@ -14,6 +14,8 @@ internal sealed class TestWebSocket : WebSocket
     public IReadOnlyList<byte[]> Sent { get { lock (_sent) { return _sent.ToArray(); } } }
     public bool Disposed { get; private set; }
     public TaskCompletionSource? SendGate { get; set; }
+    public bool HoldCloseReply { get; init; }
+    public TaskCompletionSource CloseSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public override WebSocketCloseStatus? CloseStatus => null;
     public override string? CloseStatusDescription => null;
     public override string? SubProtocol => null;
@@ -28,7 +30,12 @@ internal sealed class TestWebSocket : WebSocket
     public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
     { _state = WebSocketState.Closed; return Task.CompletedTask; }
     public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
-    { _state = WebSocketState.CloseSent; return Task.CompletedTask; }
+    {
+        _state = WebSocketState.CloseSent;
+        CloseSent.TrySetResult();
+        if (!HoldCloseReply) RemoteClose();
+        return Task.CompletedTask;
+    }
     public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
     {
         if (!await _incoming.Reader.WaitToReadAsync(cancellationToken)) return new WebSocketReceiveResult(0, WebSocketMessageType.Close, true);

@@ -52,7 +52,8 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
         && connection.Ready.Task.IsCompletedSuccessfully;
 
     /// <summary>Gets whether this attachment owns input and resize privileges.</summary>
-    public bool HasControl => IsRunning && _connection is { HasControl: true };
+    public bool HasControl => _connection is { HasControl: true } connection && !connection.Lifetime.IsCancellationRequested
+        && connection.Ready.Task.IsCompletedSuccessfully;
 
     /// <summary>Gets the last event applied to the terminal, suitable for resuming preserved VT state.</summary>
     public long LastSequence => Interlocked.Read(ref _lastSequence);
@@ -96,7 +97,7 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
             if (connection is not null)
             {
                 _connection = null;
-                await StopConnectionAsync(connection).ConfigureAwait(false);
+                await StopConnectionAsync(connection, graceful: false).ConfigureAwait(false);
             }
 
             throw;
@@ -110,12 +111,12 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
     /// <inheritdoc />
     public void SendInput(ReadOnlySpan<byte> utf8)
     {
-        if (utf8.IsEmpty || !IsRunning)
+        Connection? connection = _connection;
+        if (utf8.IsEmpty || connection is null || connection.Lifetime.IsCancellationRequested || !connection.Ready.Task.IsCompletedSuccessfully)
         {
             return;
         }
 
-        Connection connection = _connection!;
         EnsureController(connection);
         if (utf8.Length > connection.Options.MaximumInputBytes)
         {
@@ -128,13 +129,13 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
     /// <inheritdoc />
     public void Resize(TerminalSessionDimensions dimensions)
     {
-        if (!IsRunning)
+        Connection? connection = _connection;
+        if (connection is null || connection.Lifetime.IsCancellationRequested || !connection.Ready.Task.IsCompletedSuccessfully)
         {
             return;
         }
 
         ValidateDimensions(dimensions);
-        Connection connection = _connection!;
         EnsureController(connection);
         Enqueue(connection, new MultiplexingClientMessage("resize", Columns: dimensions.Columns,
             Rows: dimensions.Rows, WidthPixels: dimensions.WidthPixels, HeightPixels: dimensions.HeightPixels));
@@ -145,7 +146,7 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
     public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
     {
         Connection? connection = _connection;
-        if (connection is null || !IsRunning)
+        if (connection is null || connection.Lifetime.IsCancellationRequested || !connection.Ready.Task.IsCompletedSuccessfully)
         {
             return;
         }
@@ -159,7 +160,8 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
         await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Detaches this client and releases its control lease without closing the block.</summary>
+    /// <summary>Detaches without closing the block. An orderly host close acknowledges lease release;
+    /// network failure or a two-second close deadline falls back to local cancellation.</summary>
     public async ValueTask StopAsync()
     {
         await _lifecycle.WaitAsync().ConfigureAwait(false);
@@ -169,7 +171,7 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
             _connection = null;
             if (connection is not null)
             {
-                await StopConnectionAsync(connection).ConfigureAwait(false);
+                await StopConnectionAsync(connection, graceful: true).ConfigureAwait(false);
             }
         }
         finally
@@ -402,20 +404,31 @@ public sealed class MultiplexingTerminalTransport : ITerminalTransport, IAsyncDi
         }
     }
 
-    private static async ValueTask StopConnectionAsync(Connection connection)
+    private static async ValueTask StopConnectionAsync(Connection connection, bool graceful)
     {
         connection.ExplicitStop = true;
         connection.Outbound.Writer.TryComplete();
-        connection.Lifetime.Cancel();
-        connection.Socket.Abort();
         try
         {
-            await Task.WhenAll(connection.ReaderTask, connection.WriterTask).ConfigureAwait(false);
+            if (graceful && !connection.Lifetime.IsCancellationRequested && connection.Ready.Task.IsCompletedSuccessfully
+                && connection.Socket.State == WebSocketState.Open)
+            {
+                // Finish accepted sends before sending the WebSocket close. ReadLoop owns receive: do
+                // not call CloseAsync here and race it for the peer's close frame. The server releases
+                // its broker lease before sending that frame. Abort only if the peer goes away or stalls.
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await connection.WriterTask.WaitAsync(deadline.Token).ConfigureAwait(false);
+                await connection.Socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Detach", deadline.Token).ConfigureAwait(false);
+                await connection.ReaderTask.WaitAsync(deadline.Token).ConfigureAwait(false);
+            }
         }
+        catch (Exception error) when (error is OperationCanceledException or WebSocketException or ObjectDisposedException) { }
         finally
         {
-            connection.Socket.Dispose();
-            connection.Lifetime.Dispose();
+            connection.Lifetime.Cancel();
+            connection.Socket.Abort();
+            try { await Task.WhenAll(connection.ReaderTask, connection.WriterTask).ConfigureAwait(false); }
+            finally { connection.Socket.Dispose(); connection.Lifetime.Dispose(); }
         }
     }
 
