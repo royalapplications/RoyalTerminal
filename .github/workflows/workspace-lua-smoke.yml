@@ -1,8 +1,8 @@
 name: Workspace Lua and process smoke
 on:
   workflow_dispatch:
-  pull_request:
-    paths: ['.github/workflows/workspace-lua-smoke.yml','src/**','samples/RoyalTerminal.Multiplexing.*/**','scripts/workspace/**','Directory.*','global.json']
+  push:
+    tags: ['workspace-ci/lua/*']
 permissions: {contents: read}
 concurrency: {group: 'workspace-lua-${{ github.ref }}', cancel-in-progress: true}
 jobs:
@@ -13,33 +13,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with: {dotnet-version: '10.0.x'}
-      - name: Install Lua 5.1 and JSON module
-        run: sudo apt-get update && sudo apt-get install -y lua5.1 lua-dkjson
-      - name: Build host and CLI
-        run: |
+      - run: sudo apt-get update -qq && sudo apt-get install -y lua5.1 lua-dkjson
+      - run: |
           dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
           dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
-      - name: Validate local, nested and remote action contracts before effects
-        run: bash scripts/workspace/smoke-action-contracts.sh
-      - name: Verify scoped UI delivery, focused launches and nested Lua rollback
-        run: python3 scripts/workspace/smoke-remote-views.py
-      - name: Exercise trusted action subprocesses, detachment and shutdown with real kernel processes
-        run: python3 scripts/workspace/smoke-server-exec.py
-      - name: Validate immutable operator module generations and rollback
-        run: bash scripts/workspace/smoke-config-modules.sh
-      - name: Validate agent setup and removal
-        run: bash scripts/workspace/test-agent-skill.sh
-      - name: Verify local process scopes
-        run: bash scripts/workspace/test-script-processes.sh
-      - name: Run real scripts and mirror to child exit
-        run: bash scripts/workspace/smoke-lua.sh
-      - name: Validate trusted Lua publication and rollback
-        run: bash scripts/workspace/smoke-server-lua.sh
-      - name: Launch nested PTY layouts
-        run: bash scripts/workspace/smoke-layout-templates.sh
-      - name: Verify named keyboard encoding and NDJSON with a real child
-        run: bash scripts/workspace/smoke-terminal-tools.sh
-      - name: Bind and remove modal shortcuts and execute versioned callback chains
-        run: bash scripts/workspace/smoke-keymap.sh
-      - name: Recover an offline workspace after its broker stops
-        run: bash scripts/workspace/smoke-archive.sh
+      - name: Real process, action, remote view, archive and configuration scenarios
+        working-directory: scripts/workspace
+        run: |
+          set -euo pipefail
+          bash smoke-action-contracts.sh
+          python3 smoke-remote-views.py
+          python3 smoke-server-exec.py
+          bash smoke-config-modules.sh
+          bash test-agent-skill.sh
+          bash test-script-processes.sh
+          bash smoke-lua.sh
+          bash smoke-server-lua.sh
+          bash smoke-layout-templates.sh
+          bash smoke-terminal-tools.sh
+          bash smoke-keymap.sh
+          bash smoke-archive.sh

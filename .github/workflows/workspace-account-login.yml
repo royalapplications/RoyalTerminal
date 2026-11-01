@@ -1,13 +1,9 @@
 name: Workspace OS account isolation
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'deploy/account-login/**'
-      - 'samples/RoyalTerminal.Multiplexing.Server/**'
-      - '.github/workflows/workspace-account-login.yml'
-permissions:
-  contents: read
+  push:
+    tags: ['workspace-ci/account-login/*']
+permissions: {contents: read}
 jobs:
   account-login:
     runs-on: ubuntu-24.04
@@ -15,16 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
-      - name: Build a framework-dependent host for account startup
-        run: dotnet publish samples/RoyalTerminal.Multiplexing.Server -c Release -o "$RUNNER_TEMP/workspace-account-server"
+        with: {dotnet-version: '10.0.x'}
+      - run: dotnet publish samples/RoyalTerminal.Multiplexing.Server -c Release -o "$RUNNER_TEMP/workspace-account-server"
       - name: Exercise kernel, systemd, PAM and real account-owned processes
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y acl
           sudo env ROYALTERMINAL_DISPOSABLE_CI=github-hosted bash deploy/account-login/ci.sh "$RUNNER_TEMP/workspace-account-server"
-      - name: Diagnose service ordering and account admission without printing credentials
+      - name: Diagnose service ordering without printing credentials
         if: failure()
         run: |
           for name in rtworkalpha rtworkbeta; do

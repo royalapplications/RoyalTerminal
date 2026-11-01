@@ -1,11 +1,10 @@
 name: Workspace bundle and signature acceptance
 on:
   workflow_dispatch:
-  pull_request:
-    paths: ['deploy/macos/**','deploy/signing/**','samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Terminal.Transport.Multiplexing/**','.github/workflows/workspace-signing.yml']
-# No distribution secrets, uploads to notary services, repository writes or permanent trust in any PR job.
-permissions: { contents: read }
-concurrency: { group: 'workspace-sign-${{ github.ref }}', cancel-in-progress: true }
+  push:
+    tags: ['workspace-ci/signing/*']
+permissions: {contents: read}
+concurrency: {group: 'workspace-sign-${{ github.ref }}', cancel-in-progress: true}
 jobs:
   macos:
     runs-on: macos-26
@@ -14,8 +13,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with: {dotnet-version: '10.0.x'}
-      - name: Package and verify the self-contained personal app on macOS
-        run: bash deploy/macos/ci.sh
+      - run: bash deploy/macos/ci.sh
       - uses: actions/upload-artifact@v7
         with:
           name: personal-macos-adhoc-preview
@@ -31,7 +29,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with: {dotnet-version: '10.0.x'}
-      - name: Verify in disposable runner with ephemeral certificate; reject modified DLLs
+      - name: Verify with an ephemeral certificate and reject tampering
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -49,8 +47,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - name: Pin revision, name and archive bytes to an independent Ed25519 verification key
-        shell: bash
+      - name: Verify detached signature, revision binding and corruption detection
         run: |
           set -euo pipefail; umask 077; src=$PWD; cd "$RUNNER_TEMP"; git -C "$src" archive --format=tar.gz -o "$PWD/workspace.tar.gz" HEAD
           openssl genpkey -algorithm Ed25519 -out key; openssl pkey -in key -pubout -out verification.pem
