@@ -2,7 +2,7 @@ name: Workspace mobile clients
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['samples/RoyalTerminal.Multiplexing.Mobile*/**','tests/RoyalTerminal.Multiplexing.MobileTests/**','samples/RoyalTerminal.Multiplexing.Desktop/**','src/**','.github/workflows/workspace-mobile.yml','Directory.*','global.json']
+    paths: ['samples/RoyalTerminal.Multiplexing.Mobile*/**','tests/RoyalTerminal.Multiplexing.MobileTests/**','samples/RoyalTerminal.Multiplexing.Desktop/**','src/**','scripts/workspace/mobile-*.sh','.github/workflows/workspace-mobile.yml','Directory.*','global.json']
 permissions: {contents: read}
 concurrency: {group: 'workspace-mobile-${{ github.ref }}', cancel-in-progress: true}
 jobs:
@@ -26,8 +26,10 @@ jobs:
           dotnet workload install android
           dotnet build samples/RoyalTerminal.Multiplexing.Mobile.Android -c Debug -p:AndroidPackageFormats=apk -p:EmbedAssembliesIntoApk=true
           mkdir -p out; cp samples/RoyalTerminal.Multiplexing.Mobile.Android/bin/Debug/net10.0-android/*-Signed.apk out/workspace-debug.apk
+      - name: Launch installed native client on Android emulator
+        run: bash scripts/workspace/mobile-android.sh
       - uses: actions/upload-artifact@v7
-        with: {name: workspace-android-debug, path: out/workspace-debug.apk, if-no-files-found: error, retention-days: 7}
+        with: {name: workspace-android-debug, path: out/, if-no-files-found: error, retention-days: 7}
   ios:
     runs-on: macos-26
     timeout-minutes: 35
@@ -37,16 +39,7 @@ jobs:
         with: {dotnet-version: '10.0.x'}
       - name: Build and launch on an iPhone simulator
         run: |
-          set -euo pipefail
           dotnet workload install ios
-          dotnet build samples/RoyalTerminal.Multiplexing.Mobile.iOS -c Debug -r iossimulator-arm64
-          app=$(find samples/RoyalTerminal.Multiplexing.Mobile.iOS/bin/Debug -type d -name '*.app' | head -1); test -n "$app"
-          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for rt,ds in sorted(json.load(sys.stdin)["devices"].items(),reverse=True) if "iOS" in rt for d in ds if d["name"].startswith("iPhone")))')
-          xcrun simctl boot "$device" || xcrun simctl bootstatus "$device" -b
-          xcrun simctl bootstatus "$device" -b
-          xcrun simctl install "$device" "$app"
-          bundle=com.royalapplications.experimental.workspace
-          pid=$(xcrun simctl launch "$device" "$bundle" | awk '{print $NF}'); sleep 6; kill -0 "$pid"
-          mkdir -p out; xcrun simctl io "$device" screenshot out/ios-launch.png; ditto -c -k --keepParent "$app" out/workspace-ios-simulator.zip
+          bash scripts/workspace/mobile-ios.sh
       - uses: actions/upload-artifact@v7
         with: {name: workspace-ios-simulator, path: out/, if-no-files-found: error, retention-days: 7}
