@@ -9,6 +9,7 @@ namespace RoyalTerminal.Multiplexing.Desktop.Services;
 internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDisposable
 {
     private readonly RemoteTerminalControl _control;
+    private readonly bool _focusOnAttach;
     private MultiplexingTerminalTransport? _transport;
     private MultiplexingTransportOptions? _options;
     private CancellationTokenSource? _attachment;
@@ -17,9 +18,9 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
     private volatile bool _detaching, _exited;
     private bool _initialReady, _disposed;
 
-    public WorkspaceTerminalController(RemoteTerminalControl control, HttpClient? checkpointHttp = null)
+    public WorkspaceTerminalController(RemoteTerminalControl control, HttpClient? checkpointHttp = null, bool focusOnAttach = true)
     {
-        _control = control;
+        _control = control; _focusOnAttach = focusOnAttach;
         if (checkpointHttp is not null)
             control.RemoteSession.Recover = (options, ct) => NativeCheckpointRecovery.RecoverAsync(control, checkpointHttp, options, ct);
         control.RemoteFactory.Created += OnTransportCreated;
@@ -42,7 +43,8 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
         {
             await _control.StartSessionAsync(options with { AfterSequence = 0 }, false, startup.Token);
             if (_generation != generation) return;
-            _initialReady = true; _control.FlushPendingTransportOutput(); _control.Focus();
+            _initialReady = true; _control.FlushPendingTransportOutput();
+            if (_focusOnAttach) _control.Focus();
             if (!_exited) StatusChanged?.Invoke(HasControl ? "Attached · controller" : "Attached · observer");
         }
         catch { if (_generation == generation) await DetachAsync(); throw; }
@@ -127,8 +129,7 @@ internal sealed class WorkspaceTerminalController : IWorkspaceTerminal, IAsyncDi
                 try { await transport.StartAsync(options with { AfterSequence = transport.LastSequence }, ct); }
                 catch (MultiplexingProtocolException ex) when (ex.Code == "HistoryGap" && _control.RemoteSession.Recover is not null)
                 {
-                    // The previous reader is joined and its queued output is drained. Rebind both
-                    // rendering and input-mode sources before the replacement transport sees any suffix.
+                    // Rebind both rendering and input-mode sources before the replacement transport sees any suffix.
                     ct.ThrowIfCancellationRequested(); UnbindTransport(); _control.StopPty();
                     _control.RemoteSession.StartFromCheckpoint = true;
                     await _control.StartSessionAsync(options, false, ct);

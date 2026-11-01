@@ -10,7 +10,7 @@ using RoyalTerminal.Terminal.Transport.Multiplexing;
 
 namespace RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview;
 
-/// <summary>Read-only live view of the server's tiled and floating terminals.</summary>
+/// <summary>Live, independently navigable observer surfaces for a window's tiled and floating terminals.</summary>
 public sealed partial class OverviewWindow : Window
 {
     private sealed record Choice(Guid Id, string Label) { public override string ToString() => Label; }
@@ -29,7 +29,7 @@ public sealed partial class OverviewWindow : Window
             Terminal.TerminalFontSize = 12;
             var layout = new DockPanel(); DockPanel.SetDock(Caption, Dock.Top); layout.Children.Add(Caption);
             layout.Children.Add(new ScrollViewer { Content = Terminal, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }); Root.Child = layout;
-            _controller = new(Terminal, http); _controller.StatusChanged += Updated;
+            _controller = new(Terminal, http, focusOnAttach: false); _controller.StatusChanged += Updated;
             _startup = AttachAsync(_controller, options, _life.Token);
         }
         internal void Refresh(string label) { _label = label; Caption.Text = $"{_label} · {_status}"; }
@@ -66,8 +66,7 @@ public sealed partial class OverviewWindow : Window
     internal OverviewWindow(HttpMessageHandler http, IMultiplexingSocketConnector? connector)
     {
         _http = new(http) { Timeout = TimeSpan.FromSeconds(35) };
-        _connector = connector;
-        InitializeComponent();
+        _connector = connector; InitializeComponent();
         WindowsList.SelectionChanged += async (_, _) =>
         {
             if (_binding || WindowsList.SelectedItem is not Choice choice) return;
@@ -115,7 +114,7 @@ public sealed partial class OverviewWindow : Window
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception e)
         {
-            _snapshot = null; _binding = true; WindowsList.ItemsSource = null; ShelfText.Text = string.Empty;
+            _viewConsent?.Cancel(); _snapshot = null; _binding = true; WindowsList.ItemsSource = null; ShelfText.Text = string.Empty;
             Title = "Workspace overview"; StatusText.Text = "Workspace subscription stopped: " + e.Message;
             await ClearAsync();
         }

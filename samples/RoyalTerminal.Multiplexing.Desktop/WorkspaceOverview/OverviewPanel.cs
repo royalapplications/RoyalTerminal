@@ -2,6 +2,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 
 namespace RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview;
 
@@ -15,21 +16,24 @@ public sealed class OverviewPanel : Panel
     {
         _areas[child] = area;
         child.ZIndex = layer;
-        if (!Children.Contains(child)) { child.GotFocus += RememberFocus; Children.Add(child); }
+        if (!Children.Contains(child))
+        {
+            child.AddHandler(GotFocusEvent, RememberFocus, RoutingStrategies.Bubble, handledEventsToo: true);
+            Children.Add(child);
+        }
         InvalidateMeasure();
     }
 
-    private void RememberFocus(object? sender, GotFocusEventArgs args)
+    private void RememberFocus(object? sender, FocusChangedEventArgs args)
     {
         if (sender is Control pane && _areas.ContainsKey(pane)) LastFocusedPane = pane;
     }
 
     internal void RemovePane(Control child)
     {
-        child.GotFocus -= RememberFocus;
+        child.RemoveHandler(GotFocusEvent, RememberFocus);
         if (ReferenceEquals(child, LastFocusedPane)) LastFocusedPane = null;
-        _areas.Remove(child);
-        Children.Remove(child);
+        _areas.Remove(child); Children.Remove(child);
     }
 
     protected override Size MeasureOverride(Size availableSize)
