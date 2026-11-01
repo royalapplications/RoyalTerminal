@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal.Transport.Multiplexing;
 
 namespace RoyalTerminal.Multiplexing.Cli;
@@ -49,6 +50,7 @@ internal static class LuaScriptCli
     }
     private static async Task<string?> PumpAsync(Stream input,Stream output,MultiplexingApiClient? client,LuaLocalProcesses children,JsonObject? launch,CancellationToken token)
     {
+        var contracts=new LuaActionContracts();
         var clock=Stopwatch.StartNew();byte[] chunk=new byte[8192];using MemoryStream line=new();int messages=0;string? result=null;
         for(;;)
         {
@@ -67,6 +69,7 @@ internal static class LuaScriptCli
                     {
                         switch(op.GetString())
                         {
+                            case "contract":contracts.Process(f);w.WriteBoolean("value",true);break;
                             case "setup": w.WritePropertyName("value");if(launch is null)w.WriteBooleanValue(false);else launch.WriteTo(w);break;
                             case "result": if(launch is null||result is not null)throw new ArgumentException("Unexpected script result.");result=f.GetProperty("value").GetRawText();w.WriteBoolean("value",true);break;
                             case "clock":w.WriteNumber("value",clock.Elapsed.TotalSeconds);break;

@@ -2,6 +2,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
+using RoyalTerminal.Multiplexing.Automation;
 namespace RoyalTerminal.Multiplexing.Server;
 
 internal sealed partial class TrustedLuaProgram
@@ -9,6 +10,7 @@ internal sealed partial class TrustedLuaProgram
     private readonly DetachedConfigJobs _detached = new();
     internal bool AllowExec { get; init; }
     internal Task StopJobsAsync(CancellationToken ct) => _detached.StopAsync(ct);
+    private static readonly JsonElement ContractAccepted = JsonDocument.Parse("true").RootElement.Clone();
 
     private async Task<JsonElement> ExecuteAsync(LuaRun request,Func<string,JsonElement,CancellationToken,ValueTask<JsonElement>>? invoke,CancellationToken caller)
     {
@@ -22,6 +24,7 @@ internal sealed partial class TrustedLuaProgram
         var drain=child.StandardError.BaseStream.CopyToAsync(Stream.Null,ct);
         try
         {
+            var contracts=new LuaActionContracts();int contractCalls=0;
             var output=new FramedReader(child.StandardOutput.BaseStream);await WriteAsync(child.StandardInput.BaseStream,JsonSerializer.SerializeToUtf8Bytes(request,LuaWire.Default.LuaRun),ct);
             int calls=0,jobCalls=0;bool originRead=false;
             while(true)
@@ -34,6 +37,10 @@ internal sealed partial class TrustedLuaProgram
                         throw new ApiException(422,"lua_failed","Configured Lua program failed"+where+".");
                     case "done":
                         var value=obj.GetProperty("value").Clone();child.StandardInput.Close();await child.WaitForExitAsync(ct);if(child.ExitCode!=0)throw new IOException("Lua exited unsuccessfully.");return value;
+                    case "contract" when ++contractCalls<=4096:
+                        try { contracts.Process(obj);reply=new(true,ContractAccepted); }
+                        catch(Exception ex) when(ex is ArgumentException or MultiplexerAutomationException){reply=new(false,null,ex.Message);}
+                        break;
                     case "job" when invoke is not null && ++jobCalls<=1024:
                         reply=await jobs.DispatchAsync(obj.GetProperty("frame"),ct);break;
                     case "call" when invoke is not null:

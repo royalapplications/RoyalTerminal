@@ -1,9 +1,10 @@
 // Copyright (c) Royal Apps. Licensed under the MIT license.
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RoyalTerminal.Multiplexing.Automation;
 namespace RoyalTerminal.Multiplexing.Server;
 
-internal sealed record LuaManifest(string Generation, string[] Actions, JsonElement Keymap, WorkspacePeers Peers);
+internal sealed record LuaManifest(string Generation, string[] Actions, JsonElement Keymap, WorkspacePeers Peers, JsonElement ActionDetails, IReadOnlyList<string> BindingWarnings);
 internal sealed record LuaRun(string Mode, string Source, string? Name, ActionContext Context, JsonElement Arguments, Dictionary<string,string>? Modules = null);
 internal sealed record LuaReply(bool Ok, JsonElement? Value, string? Error = null);
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase,DefaultIgnoreCondition=JsonIgnoreCondition.WhenWritingNull)]
@@ -16,7 +17,6 @@ internal sealed partial class TrustedLuaProgram
     private static readonly JsonElement Empty = JsonSerializer.SerializeToElement(new Dictionary<string,string>(), EmptyMapJson.Default.DictionaryStringString);
     private readonly SemaphoreSlim _reload = new(1), _workers = new(4);
     private readonly string _file, _exe;
-    // This is host-local configuration, never a path provided by a client or a Lua action.
     private readonly string? _moduleRoot = Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_LUA_MODULES");
     private Generation? _current;
     internal Action<LuaManifest,bool>? Published { get; init; }
@@ -35,10 +35,17 @@ internal sealed partial class TrustedLuaProgram
         {
             var sources = await LuaSourceSet.ReadAsync(_file,_moduleRoot,ct);
             var result = await ExecuteAsync(new("validate",sources.Main,null,new(),Empty,sources.Modules),null,ct);
-            var declared=result.GetProperty("actions"); var keys=result.GetProperty("keymap");
-            if(declared.ValueKind!=JsonValueKind.Array || declared.GetArrayLength()>256 || keys.GetProperty("bindings").GetArrayLength()>2048 || keys.GetProperty("modes").GetArrayLength()>128)throw new InvalidDataException("Invalid Lua manifest.");
+            var declared=result.GetProperty("actions"); var keys=result.GetProperty("keymap");var details=result.GetProperty("actionDetails");
+            if(declared.ValueKind!=JsonValueKind.Array || declared.GetArrayLength()>256 || keys.GetProperty("bindings").GetArrayLength()>2048 || keys.GetProperty("modes").GetArrayLength()>128 || details.ValueKind!=JsonValueKind.Object)throw new InvalidDataException("Invalid Lua manifest.");
             var names=declared.EnumerateArray().Select(n=>n.GetString()??throw new InvalidDataException("Invalid action name.")).ToArray();
-            var manifest=new LuaManifest(sources.Digest,names,keys.Clone(),WorkspacePeers.Parse(result.GetProperty("hosts")));
+            var warnings=new List<string>();
+            foreach(var b in keys.GetProperty("bindings").EnumerateArray())
+            {
+                if(!b.TryGetProperty("action",out var a) || a.GetString() is not string name || !details.TryGetProperty(name,out var d) || !d.TryGetProperty("inputSchema",out var schema))continue;
+                try{MultiplexerArgumentValidator.Validate(b.GetProperty("args"),schema);}
+                catch(MultiplexerAutomationException){warnings.Add($"{b.GetProperty("mode").GetString()}/{b.GetProperty("sequence").GetString()}: invalid arguments for {name}.");}
+            }
+            var manifest=new LuaManifest(sources.Digest,names,keys.Clone(),WorkspacePeers.Parse(result.GetProperty("hosts")),details.Clone(),warnings);
             ct.ThrowIfCancellationRequested();
             if(publish)
             {
@@ -58,7 +65,15 @@ internal sealed partial class TrustedLuaProgram
         {
             if(expectedGeneration==null || !int.TryParse(name,out var id) || !gen.Manifest.Keymap.GetProperty("bindings").EnumerateArray().Any(b=>b.TryGetProperty("callback",out var c)&&c.GetInt32()==id))throw new ApiException(404,"binding_not_found","Unknown Lua callback.");
         }
-        else if(!gen.Manifest.Actions.Contains(name,StringComparer.Ordinal))throw new ApiException(404,"lua_action_not_found","Unknown configured action.");
+        else
+        {
+            if(!gen.Manifest.ActionDetails.TryGetProperty(name,out var descriptor))throw new ApiException(404,"lua_action_not_found","Unknown configured action.");
+            if(descriptor.TryGetProperty("inputSchema",out var schema))
+            {
+                try{MultiplexerArgumentValidator.Validate(args,schema);}
+                catch(MultiplexerAutomationException e){throw new ApiException(400,"invalid_action_arguments",e.Message);}
+            }
+        }
         if(!await _workers.WaitAsync(0,ct))throw new ApiException(429,"lua_busy","All Lua workers are busy.");
         try{return await ExecuteAsync(new(binding?"binding":"invoke",gen.Sources.Main,name,context,args,gen.Sources.Modules),invoke,ct);}finally{_workers.Release();}
     }

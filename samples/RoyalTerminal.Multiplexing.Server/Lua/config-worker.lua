@@ -12,11 +12,13 @@ local function run()
   local spec=receive();local defs,names,loading={},array{},true
   local rex={session={},json={null=json.null,object=object,array=array,encode=json.encode}}
   rex.json.decode=function(s)local v,p,e=json.decode(s,1,json.null);if e or s:sub(p):match('%S') then return nil,e or 'trailing JSON' end;return v end
-  function rex.action(d)
-    assert(loading and type(d)=='table' and type(d.name)=='string' and #d.name<=80 and d.name:match('^[A-Za-z_][A-Za-z0-9_.%-]*$') and type(d.run)=='function','invalid action declaration');assert(not defs[d.name] and #names<256,'duplicate action or quota');defs[d.name]=d.run;names[#names+1]=d.name
-  end
   local function request(frame)
     send(frame);local r=receive();if not r.ok then return nil,r.error end;if r.value~=json.null then return r.value end
+  end
+  local declare,validate,details=module('action-contracts')(request)
+  function rex.action(d)
+    assert(loading and type(d)=='table' and type(d.name)=='string' and #d.name<=80 and d.name:match('^[A-Za-z_][A-Za-z0-9_.%-]*$') and type(d.run)=='function','invalid action declaration');assert(not defs[d.name] and #names<256,'duplicate action or quota')
+    declare(d);defs[d.name]=d.run;names[#names+1]=d.name
   end
   function rex.call(method,args)
     assert(not loading,'no API calls at load time');assert(type(method)=='string' and type(args or {})=='table');return request{op='call',method=method,arguments=object(args)}
@@ -37,13 +39,14 @@ local function run()
   function rex.invoke(name,args)
     assert(not loading,'no invocations at load time');if type(name)~='string' or not defs[name] then return nil,'unknown action' end
     if type(args or {})~='table' then return nil,'expected argument table' end;if active[name] or depth>=16 then return nil,'recursive action or depth limit' end
+    local valid,why=validate(name,args);if not valid then return nil,why end
     active[name]=true;depth=depth+1;local ok,v,e=pcall(uiScope,processScope,defs[name],ctx,args or object{});active[name]=nil;depth=depth-1;if not ok then return nil,tostring(v) end;return v,e
   end
   local env={rex=rex,assert=assert,error=error,ipairs=ipairs,pairs=pairs,next=next,select=select,tonumber=tonumber,tostring=tostring,type=type,unpack=unpack,math=math,string=string,table=table,pcall=pcall,xpcall=xpcall,_VERSION=_VERSION}
   install_modules(env,spec.modules)
   assert(spec.source:byte(1)~=27,'bytecode is not allowed');local chunk,why=loadstring(spec.source,'@init.lua');if not chunk then error(why,0)end;setfenv(chunk,env);chunk();loading=false
   local result,err
-  if spec.mode=='validate' then table.sort(names);result={actions=names,keymap=export(),hosts=hosts()}
+  if spec.mode=='validate' then table.sort(names);result={actions=names,actionDetails=details,keymap=export(),hosts=hosts()}
   else
     ctx.client_id=rex.call('client.invocation_origin',{})
     if spec.mode=='binding' then result=uiScope(processScope,call_binding,tonumber(spec.name),ctx) else result,err=rex.invoke(spec.name,spec.arguments) end
