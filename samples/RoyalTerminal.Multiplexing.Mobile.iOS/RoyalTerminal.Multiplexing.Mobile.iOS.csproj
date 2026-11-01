@@ -1,4 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0-ios26.0</TargetFramework><OutputType>Exe</OutputType><SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion><ApplicationId>com.royalapplications.experimental.workspace</ApplicationId><ApplicationTitle>RoyalTerminal Workspace</ApplicationTitle><ApplicationDisplayVersion>0.1</ApplicationDisplayVersion><ApplicationVersion>1</ApplicationVersion><IsPackable>false</IsPackable></PropertyGroup>
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios26.0</TargetFramework><OutputType>Exe</OutputType><SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <ApplicationId>com.royalapplications.experimental.workspace</ApplicationId><ApplicationTitle>RoyalTerminal Workspace</ApplicationTitle>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion><ApplicationVersion>1</ApplicationVersion><IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <!-- Debug simulator is not a distribution build. Do not trim reflection-based optional desktop transports into a broken assembly. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and $(RuntimeIdentifier.StartsWith('iossimulator-'))"><TrimMode>copy</TrimMode><UseInterpreter>true</UseInterpreter></PropertyGroup>
   <ItemGroup><ProjectReference Include="../RoyalTerminal.Multiplexing.Mobile/RoyalTerminal.Multiplexing.Mobile.csproj" /><PackageReference Include="Avalonia.iOS" VersionOverride="12.1.3" /></ItemGroup>
 </Project>

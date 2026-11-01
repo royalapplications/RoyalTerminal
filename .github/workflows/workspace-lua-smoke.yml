@@ -2,18 +2,9 @@ name: Workspace Lua and process smoke
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - '.github/workflows/workspace-lua-smoke.yml'
-      - 'src/**'
-      - 'samples/RoyalTerminal.Multiplexing.*/**'
-      - 'scripts/workspace/**'
-      - 'Directory.*'
-      - 'global.json'
-permissions:
-  contents: read
-concurrency:
-  group: workspace-lua-${{ github.ref }}
-  cancel-in-progress: true
+    paths: ['.github/workflows/workspace-lua-smoke.yml','src/**','samples/RoyalTerminal.Multiplexing.*/**','scripts/workspace/**','Directory.*','global.json']
+permissions: {contents: read}
+concurrency: {group: 'workspace-lua-${{ github.ref }}', cancel-in-progress: true}
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -21,23 +12,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.0.x'
+        with: {dotnet-version: '10.0.x'}
       - name: Install Lua 5.1 and JSON module
         run: sudo apt-get update && sudo apt-get install -y lua5.1 lua-dkjson
-      - name: Build independently runnable host and CLI
+      - name: Build host and CLI
         run: |
           dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
           dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
-      - name: Validate agent setup and removal in a disposable project
+      - name: Validate agent setup and removal
         run: bash scripts/workspace/test-agent-skill.sh
-      - name: Exercise script and action entry points and real CLI-owned processes
+      - name: Verify local process scopes
         run: bash scripts/workspace/test-script-processes.sh
-      - name: Run a real script and propagate a real workspace child process exit
+      - name: Run real scripts and mirror to actual child exit
         run: bash scripts/workspace/smoke-lua.sh
-      - name: Validate server Lua publication, invocation, authorization and rollback
+      - name: Validate trusted Lua publication and rollback
         run: bash scripts/workspace/smoke-server-lua.sh
       - name: Launch nested PTY layouts from config and script
         run: bash scripts/workspace/smoke-layout-templates.sh
-      - name: Recover a complete offline workspace after its broker stops
+      - name: Verify named keyboard encoding and NDJSON with a real child process
+        run: bash scripts/workspace/smoke-terminal-tools.sh
+      - name: Recover an offline workspace after its broker stops
         run: bash scripts/workspace/smoke-archive.sh
