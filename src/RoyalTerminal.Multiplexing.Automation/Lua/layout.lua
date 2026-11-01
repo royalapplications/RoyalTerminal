@@ -4,8 +4,8 @@ local json=assert(loadfile(src..'public-json.lua'))()
 local methods=assert(loadfile(src..'layout-methods.lua'))()
 return function(rex,context)
   json(rex.json); methods(rex,context)
-  local aliases={session_id='sessionId',block_id='blockId',target_id='targetId',first_id='firstId',second_id='secondId',expected_revision='expectedRevision'}
-  for _,key in ipairs{'help','list_blocks','list_clients','describe_block','move_block','swap_blocks','resize_pane','resize_layer'} do
+  local aliases={session_id='sessionId',block_id='blockId',target_id='targetId',first_id='firstId',second_id='secondId',window_id='windowId',to_edge='toEdge',expected_revision='expectedRevision'}
+  for _,key in ipairs{'help','list_blocks','list_clients','describe_block','move_block','swap_blocks','resize_pane','resize_layer','raise_layer','lower_layer','set_layer_order'} do
     local name=key
     rex.session[name]=function(args)
       if args~=nil and type(args)~='table' then return nil,'expected session arguments' end
