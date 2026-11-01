@@ -24,7 +24,7 @@ internal static class ViewActions
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(ViewLease)), JsonSerializable(typeof(ViewIdentity[])), JsonSerializable(typeof(ViewDelivery)), JsonSerializable(typeof(ViewReceipt)), JsonSerializable(typeof(ViewActionCatalog))]
+[JsonSerializable(typeof(ViewLease)), JsonSerializable(typeof(ViewIdentity[])), JsonSerializable(typeof(ViewDelivery)), JsonSerializable(typeof(ViewReceipt)), JsonSerializable(typeof(ViewActionCatalog)), JsonSerializable(typeof(ViewOutcome))]
 internal partial class RemoteViewJson : JsonSerializerContext;
 
 internal sealed partial class ApiCatalog
@@ -32,29 +32,38 @@ internal sealed partial class ApiCatalog
     private void RegisterRemoteViews()
     {
         var hub = new ViewMailbox(TimeProvider.System,_tokens.IsActive); var wire = RemoteViewJson.Default;
-        Define("client.open_view","Opt in one UI for a single session using its original presentation profile.",["sessionId:string!","label:string!","kind:string!"],wire.ViewLease,(a,g,_) => {
+        Define("client.open_view","Opt in one UI using its original presentation profile.",["sessionId:string!","label:string!","kind:string!"],wire.ViewLease,(a,g,_) => {
             var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Open(s.Id,a.String("label"),a.String("kind"),g),wire.ViewLease);
         },"Session-scoped receiver; distinct from a terminal control lease.");
-        Define("client.open_navigator","Opt in a desktop overview that implements spatial, cyclic and tab navigation.",["sessionId:string!","label:string!"],wire.ViewLease,(a,g,_) => {
+        Define("client.open_navigator","Register a legacy desktop navigator.",["sessionId:string!","label:string!"],wire.ViewLease,(a,g,_) => {
             var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Open(s.Id,a.String("label"),"native",g,2),wire.ViewLease);
-        },"Never use the extended profile for legacy or mobile receivers.");
+        },"Desktop-only fallback; handheld clients must not claim this identity.");
         Define("client.negotiate_view","Register a consenting view at the highest mutually supported presentation version.",["sessionId:string!","label:string!","kind:string!","maxVersion:integer!"],wire.ViewLease,(a,g,_) => {
             var s = _workspaces.Broker.GetSession(Session(a,g)); var kind=a.String("kind");
             return Done(hub.Open(s.Id,a.String("label"),kind,g,ViewCapabilities.Negotiate(kind,a.Integer("maxVersion",0))),wire.ViewLease);
-        },"A receiver implements every version from one through its offer. No input or mutation rights are granted.");
-        Define("client.views","List remote-control-enabled interfaces. Does not expose receiver secrets.",["sessionId:string!"],wire.ViewIdentityArray,(a,g,_) => { ServerHttp.RequireAdministrator(g); return Done(hub.List(Session(a,g)),wire.ViewIdentityArray); });
-        Define("client.actions","Describe the presentation commands accepted by one active view. Each form accepts exactly the indicated argument, or none.",["sessionId:string!","clientId:string!"],wire.ViewActionCatalog,(a,g,_) => {
+        },"Negotiation grants neither input nor mutation rights.");
+        Define("client.views","List opted-in interfaces without receiver secrets.",["sessionId:string!"],wire.ViewIdentityArray,(a,g,_) => { ServerHttp.RequireAdministrator(g); return Done(hub.List(Session(a,g)),wire.ViewIdentityArray); });
+        Define("client.actions","Describe action forms for one active view.",["sessionId:string!","clientId:string!"],wire.ViewActionCatalog,(a,g,_) => {
             ServerHttp.RequireAdministrator(g); var session = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Describe(session.Id,a.Id("clientId")),wire.ViewActionCatalog);
         },"Reading the catalog does not acknowledge, queue, or extend a receiver lease.");
-        Define("client.queue","Validate and enqueue one ordered presentation-only batch for an explicit client.",["sessionId:string!","clientId:string!","actions:array!"],wire.ViewReceipt,(a,g,t) => {
+        Define("client.queue","Validate and enqueue one presentation-only batch. Admission is not application.",["sessionId:string!","clientId:string!","actions:array!"],wire.ViewReceipt,(a,g,t) => {
             ServerHttp.RequireAdministrator(g); t.ThrowIfCancellationRequested(); var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Publish(s.Id,a.Id("clientId"),ViewActions.Parse(a.Value,s)),wire.ViewReceipt);
         });
-        Define("client.read_view","Read up to eight batches; after acknowledges the last handled sequence.",["sessionId:string!","clientId:string!","readerKey:string!","after:integer!","timeoutMs:integer"],wire.ViewDelivery,async(a,g,t) => {
-            var sid=Session(a,g); if (!a.Value.TryGetProperty("after",out var n)||n.ValueKind!=JsonValueKind.Number||!n.TryGetInt64(out var after)) throw new ArgumentException("Supply an integral cursor.");
-            var page=await hub.ReadAsync(sid,a.Id("clientId"),a.String("readerKey"),g,after,a.Integer("timeoutMs",15000),t);
-            if (!_tokens.IsActive(g)) throw new ApiException(403,"expired","Receiver capability revoked.");
-            _ = _workspaces.Broker.GetSession(sid); return Element(page,wire.ViewDelivery);
-        },"Requires the same active capability and private reader key; one outstanding poll per receiver.");
+        Define("client.read_view","Read up to eight batches; after acknowledges delivery, not success.",["sessionId:string!","clientId:string!","readerKey:string!","after:integer!","timeoutMs:integer"],wire.ViewDelivery,async(a,g,t) => {
+            var sid=Session(a,g); var page=await hub.ReadAsync(sid,a.Id("clientId"),a.String("readerKey"),Cursor(a,"after"),a.Integer("timeoutMs",15000),t);
+            EnsureLive(sid,g); return Element(page,wire.ViewDelivery);
+        },"Requires the original capability and private reader key.");
+        Define("client.finish_view","Report how many consecutive actions the receiver applied. A short prefix means it declined the next action.",["sessionId:string!","clientId:string!","readerKey:string!","sequence:integer!","applied:integer!"],wire.ViewOutcome,(a,g,t)=>{
+            t.ThrowIfCancellationRequested();var sid=Session(a,g);EnsureLive(sid,g);
+            return Done(hub.Finish(sid,a.Id("clientId"),a.String("readerKey"),g,Cursor(a,"sequence"),a.Integer("applied",-1)),wire.ViewOutcome);
+        },"Only this receiver can report; duplicate identical reports are safe.");
+        Define("client.view_result","Inspect or wait for the disposition of a queued presentation batch.",["sessionId:string!","clientId:string!","sequence:integer!","timeoutMs:integer"],wire.ViewOutcome,async(a,g,t)=>{
+            ServerHttp.RequireAdministrator(g);var sid=Session(a,g);EnsureLive(sid,g);
+            var outcome=await hub.ResultAsync(sid,a.Id("clientId"),Cursor(a,"sequence"),a.Integer("timeoutMs",0),t);EnsureLive(sid,g);return Element(outcome,wire.ViewOutcome);
+        },"A timeout returns current state. A legacy delivery acknowledgement is unreported, not applied.");
         Define("client.close_view","Withdraw consent and discard undelivered actions.",["sessionId:string!","clientId:string!","readerKey:string!"],ServerJsonContext.Default.ApiSuccess,(a,g,_) => {hub.Close(Session(a,g),a.Id("clientId"),a.String("readerKey"),g);return new(Success());},"Requires the receiver proof.");
+
+        static long Cursor(ApiArguments a,string name)=>a.Value.TryGetProperty(name,out var n)&&n.ValueKind==JsonValueKind.Number&&n.TryGetInt64(out long value)?value:throw new ArgumentException($"Supply an integral {name}.");
+        void EnsureLive(Guid session,AccessGrant grant){if(!_tokens.IsActive(grant))throw new ApiException(403,"expired","Receiver capability revoked.");_= _workspaces.Broker.GetSession(session);}
     }
 }
