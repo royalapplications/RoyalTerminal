@@ -3,13 +3,12 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using RoyalTerminal.Multiplexing.Automation;
 using RoyalTerminal.Terminal.Transport.Multiplexing;
-
 namespace RoyalTerminal.Multiplexing.Cli;
 
 internal static class RemoteViewCommand
 {
     internal const string Usage="views -s SESSION | focus -s SESSION [-C CLIENT] (-b BLOCK | -w WINDOW | --direction DIRECTION) | ui -s SESSION [-C CLIENT] ACTION | run/split -s SESSION -C CLIENT --focus=true [--wait] -- EXE ARGS";
-    internal static bool Handles(string verb,string[] args) => verb is "views" or "focus" or "ui" || verb is "run" or "split" && args.TakeWhile(x=>x!="--").Any(x=>x is "-C" or "--client" or "--focus=true" || x.StartsWith("--client=",StringComparison.Ordinal) || x=="--focus");
+    internal static bool Handles(string verb,string[] args) => verb is "views" or "focus" or "ui" || verb is "run" or "split" && args.TakeWhile(x=>x!="--").Any(x=>x is "-C" or "--client" or "--focus=true" or "--focus" || x.StartsWith("--client=",StringComparison.Ordinal));
     internal static async Task<int> RunAsync(string verb,string[] argv,string? endpoint,string? token,CliCurrentContext context,HttpClient http,TextWriter output,TextWriter error,CancellationToken ct)
     {
         if(argv is ["-h" or "--help"]){await output.WriteLineAsync(Usage);return 0;}
@@ -29,7 +28,6 @@ internal static class RemoteViewCommand
             if(launching){
                 var c=ShellSyntax.Parse(verb,[..rest]);if(focus==false || focus is null && client is null)return await ShellWorkflow.RunAsync(verb,[..rest],endpoint,token,context,http,Stream.Null,output,error,ct);
                 var workspace=await ShellWorkspace.OpenAsync(api,c.Get("--session")??context.Session,ct);var receiver=await ResolveAsync(workspace,client,ct);
-                // Preflight selection before launching. Only the original returned IDs may be queued; never launch a second time after an uncertain outcome.
                 List<string> launch=["-s",workspace.Id.ToString(),"--json"];
                 foreach(var (k,v) in c.Options){if(k is "--json" or "--session" or "--wait" or "--for")continue;launch.Add(k);if(k!="--keep-open")launch.Add(v);}
                 if(c.Tail.Length>0){launch.Add("--");launch.AddRange(c.Tail);}
@@ -50,7 +48,7 @@ internal static class RemoteViewCommand
             var ws=await ShellWorkspace.OpenAsync(api,s??context.Session,ct);
             if(verb=="views"){await output.WriteLineAsync((await ws.CallAsync("client.views",new(),ct)).GetRawText());return 0;}
             var dest=await ResolveAsync(ws,client,ct);var command=new JsonObject{["name"]=action??(w is null?"pane.focus":"window.focus")};
-            if(b is not null)command["blockId"]=ws.Block(b,null,null,false)!.Value.ToString();if(w is not null)command["windowId"]=ws.Window(w)!.Value.ToString();if(d is not null)command["direction"]=d;
+            if(b is not null)command["blockId"]=ws.Block(b,null,null,false).ToString("D");if(w is not null)command["windowId"]=ws.Window(w)!.Value.ToString("D");if(d is not null)command["direction"]=d;
             await output.WriteLineAsync((await Queue(ws,dest,command,ct)).GetRawText());return 0;
         }
         catch(OperationCanceledException)when(ct.IsCancellationRequested){return 130;}

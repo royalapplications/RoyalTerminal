@@ -26,11 +26,17 @@ internal sealed partial class ApiCatalog
         Define("lua.actions","Read the active action and keyboard declaration generation.",[],LuaWire.Default.LuaManifest,(_,grant,_)=>{ServerHttp.RequireAdministrator(grant);return Done(program.Manifest,LuaWire.Default.LuaManifest);});
         Define("lua.check","Validate without publishing any host, action or keymap change.",[],LuaWire.Default.LuaManifest,async(_,grant,ct)=>{ServerHttp.RequireAdministrator(grant);return Element(await program.CheckAsync(ct),LuaWire.Default.LuaManifest);});
         Define("lua.reload","Atomically publish the validated operator configuration.",[],LuaWire.Default.LuaManifest,async(_,grant,ct)=>{ServerHttp.RequireAdministrator(grant);return Element(await program.ReloadAsync(ct),LuaWire.Default.LuaManifest);});
-        Define("lua.invoke","Invoke a configured action, optionally conditional on generation.",["name:string!","arguments:object","generation:string","sessionId:string","windowId:string","blockId:string"],ServerJsonContext.Default.JsonElement,async(a,grant,ct)=>{
+        Define("lua.invoke","Invoke a configured action, optionally conditional on generation.",["name:string!","arguments:object","generation:string","sessionId:string","windowId:string","blockId:string","clientId:string"],ServerJsonContext.Default.JsonElement,async(a,grant,ct)=>{
             ServerHttp.RequireAdministrator(grant);var args=a.Value.TryGetProperty("arguments",out _)?a.Object("arguments"):EmptyArguments;var gen=a.Value.TryGetProperty("generation",out _)?a.String("generation"):null;
-            return await program.InvokeAsync(a.String("name"),Context(a),args,(m,i,t)=>InvokeAsync(m,i,grant,t),ct,gen);});
-        Define("lua.key","Invoke an anonymous keybinding callback against its originating generation.",["id:integer!","generation:string!","sessionId:string","windowId:string","blockId:string"],ServerJsonContext.Default.JsonElement,async(a,grant,ct)=>{
-            ServerHttp.RequireAdministrator(grant);return await program.InvokeAsync(a.Integer("id",-1).ToString(CultureInfo.InvariantCulture),Context(a),EmptyArguments,(m,i,t)=>InvokeAsync(m,i,grant,t),ct,a.String("generation"),binding:true);});
+            return await program.InvokeAsync(a.String("name"),Context(a),args,CallbackDispatch(a.OptionalId("clientId"),grant),ct,gen);});
+        Define("lua.key","Invoke an anonymous keybinding callback against its originating generation.",["id:integer!","generation:string!","sessionId:string","windowId:string","blockId:string","clientId:string"],ServerJsonContext.Default.JsonElement,async(a,grant,ct)=>{
+            ServerHttp.RequireAdministrator(grant);return await program.InvokeAsync(a.Integer("id",-1).ToString(CultureInfo.InvariantCulture),Context(a),EmptyArguments,CallbackDispatch(a.OptionalId("clientId"),grant),ct,a.String("generation"),binding:true);});
+    }
+    // Private invocation-local metadata, not discoverable as a general host method. Target scope/consent is revalidated on publication.
+    private Func<string,JsonElement,CancellationToken,ValueTask<JsonElement>> CallbackDispatch(Guid? client,AccessGrant grant)
+    {
+        using var doc=JsonDocument.Parse(client is Guid id?$"\"{id:D}\"":"null");var origin=doc.RootElement.Clone();
+        return (method,args,ct)=>method=="client.invocation_origin"?ValueTask.FromResult(origin):InvokeAsync(method,args,grant,ct);
     }
     private static ActionContext Context(ApiArguments a)=>new(a.OptionalId("sessionId"),a.OptionalId("blockId"),a.OptionalId("windowId"));
     private static readonly JsonElement EmptyArguments=JsonSerializer.SerializeToElement(new Dictionary<string,string>(),EmptyMapJson.Default.DictionaryStringString);
@@ -39,7 +45,6 @@ internal sealed partial class ApiCatalog
         var input=Schema(name,fields);using var output=JsonDocument.Parse(result.GetJsonSchemaAsNode().ToJsonString());
         _methods.Add(name,new(new(name,description,input,output.RootElement.Clone(),ValidationNotes:notes),fields.Select(f=>f[..f.IndexOf(':')]).ToArray(),ApiInputSchemas.ForActions(input),handler));
     }
-    // The container owns the router. Resolving it here ensures deterministic disposal, including startup failure.
     private sealed class LuaStartup(TrustedLuaProgram program,WorkspacePeerRouter router):IHostedService
     {
         public async Task StartAsync(CancellationToken ct){GC.KeepAlive(router);_=await program.ReloadAsync(ct);}

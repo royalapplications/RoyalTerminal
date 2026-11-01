@@ -4,7 +4,7 @@ async function palette(page,title){await page.keyboard.press('Control+k');await 
 test('an opted-in tab alone follows cross-window focus; no control lease is obtained',async({page,browser,request})=>{
   const api=(method,args,headers=admin)=>request.post('/api/call',{headers,data:{method,arguments:args}});
   const ok=async(m,a)=>{const r=await api(m,a);expect(r.ok(),await r.text()).toBe(true);return r.json();};
-  const s=await ok('session.create',{label:'Remote view test'}),sid={sessionId:s.id};const second=await browser.newPage({baseURL:process.env.ROYALTERMINAL_MUX_URL||'http://127.0.0.1:7331'});
+  const s=await ok('session.create',{label:'Remote view test'}),sid={sessionId:s.id};const second=await browser.newPage();
   try{
     const w=await ok('session.new_window',{...sid,label:'Target'});
     await ok('block.create',{...sid,block:{windowId:s.windows[0].id,label:'Left',transport:'pty'}});
@@ -23,7 +23,7 @@ test('an opted-in tab alone follows cross-window focus; no control lease is obta
     await expect(page.locator(`[data-block-id="${b.id}"] .xterm-helper-textarea`)).toBeFocused();
     await expect(page.locator(`[data-block-id="${b.id}"] .pane-state`)).toHaveText('view only');
     await expect(second.getByRole('tab',{name:'Target'})).toHaveAttribute('aria-selected','false');
-    expect((await ok('session.view',sid)).blocks.find(x=>x.id===b.id).controllerId).toBeNull();
+    expect((await ok('session.view',sid)).blocks.find(x=>x.id===b.id).controllerId??null).toBeNull();
     await palette(page,'Disable remote UI actions for this tab');await expect.poll(async()=>(await ok('client.views',sid)).length).toBe(0);
     expect((await api('client.queue',args)).status()).toBe(404);
   } finally {await second.close();await page.close();await request.delete(`/api/sessions/${s.id}`,{headers:admin});}
