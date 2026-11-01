@@ -37,5 +37,7 @@ jobs:
         run: bash scripts/workspace/smoke-lua.sh
       - name: Validate server Lua publication, invocation, authorization and rollback
         run: bash scripts/workspace/smoke-server-lua.sh
+      - name: Launch nested PTY layouts from config and script
+        run: bash scripts/workspace/smoke-layout-templates.sh
       - name: Recover a complete offline workspace after its broker stops
         run: bash scripts/workspace/smoke-archive.sh
