@@ -5,19 +5,27 @@ using UIKit;
 
 namespace RoyalTerminal.Multiplexing.Mobile.Apple;
 
+// UIKit must allocate a concrete, nongeneric Objective-C class. Keep Avalonia's
+// strongly typed bootstrap and scene selection on the managed side of that boundary.
 [Register("WorkspaceAppDelegate")]
-public sealed class AppDelegate : AvaloniaAppDelegate<MobileApp>
+public sealed class AppDelegate : UIResponder, IUIApplicationDelegate
 {
-    // Export from a concrete Objective-C class. A trampoline emitted for the open
-    // generic AvaloniaAppDelegate`1 cannot materialize the first managed receiver.
+    private AvaloniaAppDelegate<MobileApp>? _bootstrap;
+
+    [Export("window")]
+    public UIWindow? Window { get; set; }
+
     [Export("application:didFinishLaunchingWithOptions:")]
-    public new bool FinishedLaunching(UIApplication application, NSDictionary? options)
-        => base.FinishedLaunching(application, options);
+    public bool FinishedLaunching(UIApplication application, NSDictionary? options)
+    {
+        _bootstrap = new AvaloniaAppDelegate<MobileApp>();
+        return _bootstrap.FinishedLaunching(application, options);
+    }
 
     [Export("application:configurationForConnectingSceneSession:options:")]
-    public new UISceneConfiguration GetConfiguration(UIApplication application,
-        UISceneSession session, UISceneConnectionOptions options)
-        => base.GetConfiguration(application, session, options);
+    public UISceneConfiguration GetConfiguration(UIApplication app, UISceneSession session, UISceneConnectionOptions options)
+        => (_bootstrap ?? throw new InvalidOperationException("The workspace application has not started."))
+            .GetConfiguration(app, session, options);
 }
 
 internal static class Program
