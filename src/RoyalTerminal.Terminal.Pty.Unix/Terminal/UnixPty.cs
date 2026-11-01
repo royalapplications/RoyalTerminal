@@ -57,7 +57,7 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
     public bool IsRunning => _masterFd >= 0 && _childPid > 0 && !_disposed && !_readCompleted;
 
     /// <summary>The child process ID.</summary>
-    public int ChildPid => _childPid;
+    public int ChildPid => Volatile.Read(ref _childPid);
 
     /// <inheritdoc />
     public bool SupportsPasswordInputDetection => true;
@@ -219,15 +219,11 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
         // foreground process group; proactively signal it after window-size update.
         try
         {
-            int foregroundPgrp = Tcgetpgrp(_masterFd);
-            if (foregroundPgrp > 0)
+            lock (_childProcessSync)
             {
-                // Negative PID targets the entire process group.
-                _ = Kill(-foregroundPgrp, SIGWINCH);
-            }
-            else if (_childPid > 0)
-            {
-                _ = Kill(_childPid, SIGWINCH);
+                if (_disposed || _childPid <= 0) return;
+                int foregroundPgrp = Tcgetpgrp(_masterFd);
+                _ = Kill(foregroundPgrp > 0 ? -foregroundPgrp : _childPid, SIGWINCH);
             }
         }
         catch
@@ -247,14 +243,14 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
             // Reader thread must never crash the process on unexpected runtime/PInvoke errors.
         }
 
+        // A closed slave is an I/O event, not an exit receipt. A child can close all
+        // terminal descriptors and continue running. Always drain before publishing exit.
+        int? exitCode = WaitForChild();
         _readCompleted = true;
-        if (_disposed) return;
-
-        // Check child exit status
-        var exitCode = WaitForChild();
+        if (exitCode is not int code || _disposed) return;
         try
         {
-            ProcessExited?.Invoke(exitCode);
+            ProcessExited?.Invoke(code);
         }
         catch
         {
@@ -389,28 +385,45 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
         }
     }
 
-    private int WaitForChild()
+    private int? WaitForChild()
     {
         lock (_childProcessSync)
         {
-            if (_childPid <= 0) return -1;
-
-            try
+            int delay = 1;
+            while (!_disposed && _childPid > 0)
             {
-                int result = Waitpid(_childPid, out int status, WNOHANG);
-                if (result == _childPid)
+                int result = WaitUninterrupted(_childPid, out int status, WNOHANG);
+                if (result == 0)
                 {
-                    _childPid = -1;
-                    return (status >> 8) & 0xFF; // WEXITSTATUS
+                    // Usually one tick between HUP and a waitable status. Do not spin if
+                    // the process deliberately closed its terminal hours before exiting.
+                    Monitor.Wait(_childProcessSync, delay);
+                    delay = Math.Min(250, delay * 2);
+                    continue;
                 }
-            }
-            catch
-            {
-                // Best effort only; reader thread must not crash the process.
-            }
-        }
 
-        return -1;
+                if (result < 0)
+                {
+                    // In particular ECHILD: never signal this numeric PID again.
+                    _childPid = -1;
+                    return -1;
+                }
+
+                int signal = status & 0x7f;
+                if (signal == 0x7f) continue; // ptrace stop, not terminal status
+                _childPid = -1;
+                return signal == 0 ? (status >> 8) & 0xff : 128 + signal;
+            }
+            return null; // Explicit teardown owns the remaining wait, not a process exit event.
+        }
+    }
+
+    private static int WaitUninterrupted(int pid, out int status, int options)
+    {
+        int result;
+        do { result = Waitpid(pid, out status, options); }
+        while (result < 0 && Marshal.GetLastPInvokeError() == ErrnoInterrupted);
+        return result;
     }
 
     private void WriteLoop()
@@ -523,13 +536,13 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
         {
             _outputRing?.Stop();
             _poller?.SignalStop();
-            // Signal child to terminate first.
             lock (_childProcessSync)
             {
                 if (_childPid > 0)
                 {
                     try { Kill(_childPid, 1); } catch { } // SIGHUP
                 }
+                Monitor.PulseAll(_childProcessSync);
             }
         }
 
@@ -561,23 +574,16 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
 
         _poller?.Dispose();
 
-        // Reap child process (non-blocking to avoid hanging the UI thread)
         lock (_childProcessSync)
         {
             int pid = _childPid;
-            if (pid > 0)
+            _childPid = -1;
+            if (pid > 0 && WaitUninterrupted(pid, out _, WNOHANG) == 0)
             {
-                try
-                {
-                    int result = Waitpid(pid, out _, WNOHANG);
-                    if (result == 0) // Still running
-                    {
-                        Kill(pid, 9); // SIGKILL
-                        Waitpid(pid, out _, WNOHANG);
-                    }
-                }
-                catch { }
-                _childPid = -1;
+                Kill(pid, 9);
+                // A second WNOHANG can still return zero after SIGKILL. Transfer the
+                // final reap to a worker rather than blocking the UI or leaving a zombie.
+                ThreadPool.UnsafeQueueUserWorkItem(static (int child) => WaitUninterrupted(child, out _, 0), pid, preferLocal: false);
             }
         }
     }
@@ -721,7 +727,7 @@ public sealed class UnixPty : IPty, ITerminalOutputLeaseSource, ITerminalPasswor
     [DllImport("libc", EntryPoint = "ptsname")]
     private static extern nint PtsName(int fd);
 
-    [DllImport("libc", EntryPoint = "waitpid")]
+    [DllImport("libc", EntryPoint = "waitpid", SetLastError = true)]
     private static extern int Waitpid(int pid, out int status, int options);
 
     [DllImport("libc", EntryPoint = "kill")]
