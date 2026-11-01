@@ -36,15 +36,18 @@ public sealed class InspectingTerminalTransportFactory : ITerminalTransportFacto
             ITerminalTransport inner = _inner.Create(options);
             InspectingTerminalTransport transport;
             try { transport = new(inner, options.Dimensions, _options); } catch { inner.Dispose(); throw; }
-            transport.Disposed += () => Unregister(options, transport);
-            _transports.Add(options, transport);
-            if (transport.SupportsJobObservation)
-            {
-                _jobs = [.._jobs,transport];
-                _timer ??= new Timer(static state => ((InspectingTerminalTransportFactory)state!).Tick(),this,250,250);
-            }
+            transport.Disposed += () => Unregister(options,transport);
+            _transports.Add(options,transport);
+            if (transport.SupportsJobObservation) { _jobs=[.._jobs,transport]; _timer??=CreateTimer(); }
             return transport;
         }
+    }
+    private Timer CreateTimer()
+    {
+        // The first PTY may belong to a bearer-authenticated HTTP request. Never capture that request's execution context.
+        Timer Start() => new(static state=>((InspectingTerminalTransportFactory)state!).Tick(),this,250,250);
+        if (ExecutionContext.IsFlowSuppressed()) return Start();
+        using (ExecutionContext.SuppressFlow()) return Start();
     }
 
     /// <summary>Finds a live wrapper using reference equality, for binding inspection to a broker block after creation.</summary>
@@ -53,7 +56,6 @@ public sealed class InspectingTerminalTransportFactory : ITerminalTransportFacto
         ArgumentNullException.ThrowIfNull(options);
         lock (_gate) return _transports.TryGetValue(options,out inspection);
     }
-
     private void Tick()
     {
         if(Interlocked.Exchange(ref _sampling,1)!=0) return;
@@ -63,17 +65,17 @@ public sealed class InspectingTerminalTransportFactory : ITerminalTransportFacto
             lock(_gate)
             {
                 jobs=_jobs; if(jobs.Length==0)return;
-                start=_next%jobs.Length; count=Math.Min(MaxSamplesPerTick,jobs.Length); _next=(start+count)%jobs.Length;
+                start=_next%jobs.Length;count=Math.Min(MaxSamplesPerTick,jobs.Length);_next=(start+count)%jobs.Length;
             }
             for(int i=0;i<count;i++) jobs[(start+i)%jobs.Length].SampleForegroundJob();
         }
         finally { Volatile.Write(ref _sampling,0); }
     }
-    private void Unregister(ITerminalTransportOptions options, InspectingTerminalTransport transport)
+    private void Unregister(ITerminalTransportOptions options,InspectingTerminalTransport transport)
     {
         lock (_gate)
         {
-            if (!_transports.TryGetValue(options,out var current)||!ReferenceEquals(current,transport))return;
+            if(!_transports.TryGetValue(options,out var current)||!ReferenceEquals(current,transport))return;
             _transports.Remove(options);
             if(!transport.SupportsJobObservation)return;
             _jobs=Array.FindAll(_jobs,x=>!ReferenceEquals(x,transport));
