@@ -12,7 +12,7 @@ internal static class RestoreLayoutCommand
 
     internal static async Task<int> RunAsync(string[] args,string? endpoint,string? token,HttpClient http,TextWriter output,TextWriter error,CancellationToken ct)
     {
-        if (args is not ([_,"--plan"] or [_,_,"--fresh-shells"])) { await error.WriteLineAsync(Usage);return 2; }
+        if (args is not ([_ ,"--plan"] or [_,_,"--fresh-shells"])) { await error.WriteLineAsync(Usage);return 2; }
         Guid? created=null; bool creating=false;
         try
         {
@@ -44,7 +44,7 @@ internal static class RestoreLayoutCommand
             foreach(var b in source.Blocks)
             {
                 var wid=windows[b.WindowId].ToString("D");
-                // Deliberately omit command, environment, cwd and all input. Shell initialization is the receiving host's own policy.
+                // Never restore command, environment, cwd or input. The new host chooses the default shell.
                 var born=await Call("block.create",new(){["sessionId"]=sid,["block"]=new JsonObject{["transport"]="pty",["label"]=b.Label,["windowId"]=wid,
                     ["dimensions"]=new JsonObject{["columns"]=b.Dimensions.Columns,["rows"]=b.Dimensions.Rows,["widthPixels"]=0,["heightPixels"]=0}}});
                 var id=born.GetProperty("id").GetGuid();blocks.Add(b.Id,id);
@@ -55,11 +55,21 @@ internal static class RestoreLayoutCommand
                     await Call("block.place",fields);
                 }
             }
-            foreach(var w in source.Windows) if(w.Layout is {} tree)
-                await Call("session.set_layout",new(){["sessionId"]=sid,["windowId"]=windows[w.Id].ToString("D"),["layout"]=Remap(tree,blocks)});
+            foreach (var w in source.Windows)
+            {
+                var wid=windows[w.Id].ToString("D");
+                if (w.Layout is {} tree) await Call("session.set_layout",new(){["sessionId"]=sid,["windowId"]=wid,["layout"]=Remap(tree,blocks)});
+                var order=MultiplexerLayers.Ordered(source,w);
+                var creationOrder=source.Blocks.Where(b=>b.WindowId==w.Id && b.Placement==MultiplexerPaneKind.Floating).Select(b=>b.Id);
+                if (!order.SequenceEqual(creationOrder))
+                {
+                    var ids=new JsonArray();
+                    foreach (Guid old in order) ids.Add(blocks[old].ToString("D"));
+                    await Call("session.set_layer_order",new(){["sessionId"]=sid,["windowId"]=wid,["blocks"]=ids});
+                }
+            }
             await output.WriteLineAsync(new JsonObject{["sourceSession"]=source.Id.ToString("D"),["sessionId"]=sid,["windows"]=Map(windows),["blocks"]=Map(blocks),["commandsReplayed"]=false}.ToJsonString());
             return 0;
-
             async ValueTask<JsonElement> Call(string method,JsonObject fields)
             { using var doc=JsonDocument.Parse(fields.ToJsonString());return await api.CallAsync(method,doc.RootElement,ct); }
         }
@@ -86,7 +96,7 @@ internal static class RestoreLayoutCommand
             Label(b.Label);blocks.Add(b.Id,b);
         }
         HashSet<Guid> tiled=[];
-        foreach(var w in s.Windows) if(w.Layout is {} node) Walk(node,w.Id,0);
+        foreach(var w in s.Windows){ _=MultiplexerLayers.Ordered(s,w); if(w.Layout is {} node) Walk(node,w.Id,0); }
         if(tiled.Count!=blocks.Values.Count(b=>b.Placement==MultiplexerPaneKind.Tiled))throw Bad();
         void Walk(MultiplexerLayoutNode node,Guid home,int depth)
         {
@@ -102,7 +112,6 @@ internal static class RestoreLayoutCommand
     private static void Label(string? s){if(string.IsNullOrWhiteSpace(s) || s.Length>256 || s.Any(char.IsControl))throw Bad();}
     private static InvalidDataException Bad()=>new("Archive contains an invalid label, placement, geometry or split tree. No workspace has been created.");
 }
-
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase,UseStringEnumConverter=true)]
 [JsonSerializable(typeof(MultiplexerSessionDescriptor))]
 internal partial class LayoutRestoreJson:JsonSerializerContext;

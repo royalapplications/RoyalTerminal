@@ -56,6 +56,10 @@ def run():
         script="local t=assert(rex.block.call('com.superlogical.terminal','size'));return {r=t.rows,c=t.columns}"
         output=subprocess.run(['dotnet',CLI,'do','-e',script],env=e,capture_output=True,text=True,timeout=10,check=True);assert json.loads(output.stdout)=={'r':20,'c':70}
         block('write',{'data':base64.b64encode(bytes([0,255,65])).decode()});poll(lambda:'HEX=00ff41' in block('format')['content']);poll(lambda:block('process')['child'] is None)
-        assert call('session.view',{'sessionId':s})['blocks'][0]['exitCode']==37
+        # Kernel PID disappearance is not the broker's completion receipt. Assert the actual code on the exact exited block.
+        def exited():
+            rows=call('session.view',{'sessionId':s})['blocks']
+            return next((row for row in rows if row['id']==b and row['state']=='Exited'),None)
+        assert poll(exited)['exitCode']==37
         print('11 discovered typed methods, real child PID and exit, exact binary input, display-only reset, scoped denials, config and CLI Lua verified.')
-if __name__=='__main__': run()
+if __name__=='__main__':run()
