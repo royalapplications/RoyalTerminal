@@ -15,6 +15,9 @@ try {handler=WorkspaceConnection.CreateHandler(unixSocket);}catch(Exception e) w
 using HttpClient http=new(handler){Timeout=TimeSpan.FromSeconds(130)};
 if(!string.IsNullOrEmpty(unixSocket))endpoint="http://localhost/";
 int command=args.Length>=2&&args[0]=="--endpoint"?2:0;string? target=command==2?args[1]:endpoint;
+var context = new CliCurrentContext(Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SESSION"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_BLOCK"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_WINDOW"));
+if (args.ElementAtOrDefault(command) is {} shellVerb && ShellSyntax.Handles(shellVerb,args[(command+1)..]))
+    return await ShellWorkflow.RunAsync(shellVerb,args[(command+1)..],target,token,context,http,Console.OpenStandardInput(),Console.Out,Console.Error,cancellation.Token);
 if(ConfigurationTools.Handles(args.AsSpan(command)))return await ConfigurationTools.RunAsync(args[command..],target,token,http,Console.Out,Console.Error,cancellation.Token);
 switch(args.ElementAtOrDefault(command))
 {
@@ -29,7 +32,7 @@ switch(args.ElementAtOrDefault(command))
         return await LuaDoCommand.RunAsync(rest,target,token,http,Console.In,Console.Out,Console.Error,cancellation.Token);
     case "mirror":using(var invoker=new HttpMessageInvoker(handler,disposeHandler:false))return await CheckpointMirror.RunAsync(args[(command+1)..],target,token,http,invoker,Console.Out,Console.Error,cancellation.Token);
 }
-int result=await WorkspaceCli.RunAsync(args,token,endpoint,Console.In,Console.Out,Console.Error,http,cancellation.Token,new CliCurrentContext(Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SESSION"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_BLOCK"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_WINDOW")));
+int result=await WorkspaceCli.RunAsync(args,token,endpoint,Console.In,Console.Out,Console.Error,http,cancellation.Token,context);
 if(args.ElementAtOrDefault(command) is null or "-h" or "--help" or "help")Console.WriteLine($"""
   lua FILE [ARGS...]                 Execute a trusted local Lua 5.1 script.
   {LuaDoCommand.Usage} (.lua and paths are files; other bare names invoke server actions)
@@ -42,5 +45,6 @@ if(args.ElementAtOrDefault(command) is null or "-h" or "--help" or "help")Consol
   {TerminalTools.EventUsage}    Stream ordered terminal metadata as NDJSON.
   {ArchiveCommand.Usage}
   {RestoreLayoutCommand.Usage}
+  Shell workflows (use VERB --help): {ShellSyntax.Usage}
 """);
 return result;
