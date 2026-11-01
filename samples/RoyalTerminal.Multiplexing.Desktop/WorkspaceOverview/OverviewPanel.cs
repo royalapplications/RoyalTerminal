@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. Licensed under the MIT license.
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 
 namespace RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview;
 
@@ -8,17 +9,25 @@ namespace RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview;
 public sealed class OverviewPanel : Panel
 {
     private readonly Dictionary<Control, Rect> _areas = [];
+    internal Control? LastFocusedPane { get; private set; }
 
     internal void Place(Control child, Rect area, int layer)
     {
         _areas[child] = area;
         child.ZIndex = layer;
-        if (!Children.Contains(child)) Children.Add(child);
+        if (!Children.Contains(child)) { child.GotFocus += RememberFocus; Children.Add(child); }
         InvalidateMeasure();
+    }
+
+    private void RememberFocus(object? sender, GotFocusEventArgs args)
+    {
+        if (sender is Control pane && _areas.ContainsKey(pane)) LastFocusedPane = pane;
     }
 
     internal void RemovePane(Control child)
     {
+        child.GotFocus -= RememberFocus;
+        if (ReferenceEquals(child, LastFocusedPane)) LastFocusedPane = null;
         _areas.Remove(child);
         Children.Remove(child);
     }
