@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise production CLI, Lua hosts, Kestrel and real PTYs through an isolated Unix socket."""
+"""Exercise production CLI, both Lua hosts, Kestrel and real PTYs through an isolated Unix socket."""
 import json, os, secrets, subprocess, tempfile, time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
@@ -10,6 +10,10 @@ rex.action{name='bad',run=function() rex.client.queue('client.sidebar.toggle');e
 rex.action{name='ordered',run=function(ctx,args)
   assert(ctx.client_id==args.client); rex.session.focus_block{block_id=args.block}
   local v,e=rex.invoke('bad');assert(v==nil and e);rex.client.queue('pane.zoom');return 'ok'
+end}
+rex.action{name='discover',run=function(ctx)
+  local catalog=assert(rex.client.actions());assert(catalog.clientId==ctx.client_id)
+  return catalog
 end}
 '''
 with tempfile.TemporaryDirectory() as folder:
@@ -47,6 +51,26 @@ with tempfile.TemporaryDirectory() as folder:
         assert poll(4)['cursor']==5
         api('client.close_view',**j);after=len(api('session.view',sessionId=s)['blocks']);cmd('split','-s',s,'-b',b,'-C',aid,'--focus=true','--','/bin/true',code=3)
         assert len(api('session.view',sessionId=s)['blocks'])==after
-        print('Verified two independent clients, repeated reads, ambiguous/stale preflight, nested action rollback, immediate Lua dispatch, focused splits and child exit 37.')
+
+        legacy=api('client.open_view',sessionId=s,label='Old',kind='native');modern=api('client.open_navigator',sessionId=s,label='Desk')
+        mid=modern['view']['id'];lid=legacy['view']['id'];rev=api('session.view',sessionId=s)['revision']
+        cat=json.loads(cmd('-C','Desk','actions','-s',s,'--json'))
+        assert cat==json.loads(cmd('view-actions','-s',s,'-C',mid))==json.loads(cmd('actions','-C',mid,'-s',s))
+        assert cat['sessionId']==s and cat['clientId']==mid and cat['navigationVersion']==2 and 'readerKey' not in cat
+        assert modern['readerKey'] not in json.dumps(cat) and len(cat['forms'])==5
+        assert json.loads(cmd('view-actions','-C',lid,'-s',s))['navigationVersion']==1
+        assert len(json.loads(cmd('view-actions','-C','Old','-s',s))['forms'])==2
+        cmd('view-actions','-s',s,code=3)
+        assert json.loads(cmd('do','-e','return assert(rex.client.actions())',extra={**ctx,'ROYALTERMINAL_MUX_CLIENT':mid}))==cat
+        assert api('lua.invoke',sessionId=s,clientId=mid,name='discover',arguments={})==cat
+        grant=api('share.create',sessionId=s,role='observer')['token']
+        result=subprocess.run(['dotnet',CLI,'api','call','client.actions',json.dumps({'sessionId':s,'clientId':mid})],env={**env,'ROYALTERMINAL_MUX_TOKEN':grant},text=True,capture_output=True,timeout=15)
+        assert result.returncode!=0 and '403' in result.stderr and not result.stdout.strip(),result.stderr
+        assert json.loads(cmd('focus','-s',s,'-C','Desk','--direction','right'))['sequence']==1
+        page=api('client.read_view',sessionId=s,clientId=mid,readerKey=modern['readerKey'],after=0,timeoutMs=0)
+        assert page['batches'][0]['actions'][0]['direction']=='right'
+        assert api('session.view',sessionId=s)['revision']==rev
+        api('client.close_view',sessionId=s,clientId=mid,readerKey=modern['readerKey']);cmd('view-actions','-s',s,'-C',mid,code=3)
+        print('Verified per-client discovery from all CLI spellings and both Lua hosts, scoped denial, withdrawal, ordered presentation batches, focused splits and real exit 37.')
     finally:
         server.terminate();server.wait(timeout=15)
