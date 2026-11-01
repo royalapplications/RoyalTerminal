@@ -4,38 +4,36 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using RoyalTerminal.Multiplexing.Desktop.Controls;
 using RoyalTerminal.Multiplexing.Desktop.Services;
+using RoyalTerminal.Terminal.Transport.Multiplexing;
 
 namespace RoyalTerminal.Multiplexing.Desktop;
 
-/// <summary>Composition root and application lifetime for the experimental native client.</summary>
 public sealed class App : Application
 {
-    /// <inheritdoc />
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
-
-    /// <inheritdoc />
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
-            MainWindow window = new();
-            RemoteTerminalControl terminal = window.FindControl<RemoteTerminalControl>("Terminal")
-                ?? throw new InvalidOperationException("The compiled terminal surface was not found.");
-            WorkspaceTerminalController controller = new(terminal, http);
-            WorkspaceViewModel viewModel = new(new WorkspaceClient(http), controller)
+            string? path = Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SOCKET");
+            UnixWorkspaceEndpoint? local = string.IsNullOrWhiteSpace(path) ? null : new(path);
+            var http = new HttpClient(local?.CreateHandler() ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(30) };
+            var window = new MainWindow { LocalEndpoint = local };
+            var terminal = window.FindControl<RemoteTerminalControl>("Terminal") ?? throw new InvalidOperationException("Missing terminal surface.");
+            if (local is not null) terminal.RemoteFactory.ConfigureBeforeFirstAttach(local);
+            var controller = new WorkspaceTerminalController(terminal, http);
+            var vm = new WorkspaceViewModel(new WorkspaceClient(http), controller)
             {
-                Endpoint = Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_URL") ?? "http://127.0.0.1:7331/",
+                Endpoint = local is not null ? "http://localhost/" : Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_URL") ?? "http://127.0.0.1:7331/",
                 Token = Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_TOKEN") ?? string.Empty,
             };
-            window.DataContext = viewModel;
-            desktop.MainWindow = window;
+            window.DataContext = vm; desktop.MainWindow = window;
             window.Closed += async (_, _) =>
             {
-                viewModel.Dispose();
-                try { await controller.DisposeAsync(); }
-                finally { http.Dispose(); desktop.Shutdown(); }
+                vm.Dispose();
+                try { await window.CloseOverviewAsync(); await controller.DisposeAsync(); }
+                finally { http.Dispose(); local?.Dispose(); desktop.Shutdown(); }
             };
         }
         base.OnFrameworkInitializationCompleted();

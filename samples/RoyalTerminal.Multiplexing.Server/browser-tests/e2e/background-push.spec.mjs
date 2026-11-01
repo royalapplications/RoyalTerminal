@@ -1,24 +1,37 @@
-import {chromium,expect,test} from '@playwright/test';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {chromium, expect, test} from '@playwright/test';
+import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-test('workspace worker handles browser-dispatched push without an open workspace page', async({baseURL})=>{
-  const profile=await mkdtemp(join(tmpdir(),'rt-push-'));
-  const ctx=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true});
+// This exercises the production worker and the browser's Notification API without assuming an enrolled FCM account.
+// The push event is injected. No provider, OS lock screen, or native APNs integration is simulated as a successful delivery.
+test('registered worker shows a generic alert without a workspace tab or bearer token', async ({baseURL}) => {
+  const profile = await mkdtemp(join(tmpdir(), 'rt-push-'));
+  const context = await chromium.launchPersistentContext(profile, {channel:'chromium',headless:true});
   try {
-    const origin=new URL(baseURL).origin, root=new URL('./',baseURL).href;
-    await ctx.grantPermissions(['notifications'],{origin});
-    const probe=ctx.pages()[0]; await probe.goto(new URL('healthz',root).href);
-    const cdp=await ctx.newCDPSession(probe);
-    const id=new Promise(resolve=>cdp.on('ServiceWorker.workerRegistrationUpdated',({registrations})=>{for(const item of registrations)if(item.scopeURL===root&&!item.isDeleted) resolve(item.registrationId);}));
-    await cdp.send('ServiceWorker.enable');
-    const page=await ctx.newPage();await page.goto(root);
-    await page.evaluate(async()=>{await navigator.serviceWorker.register('./workspace-alert-worker.js');await navigator.serviceWorker.ready;});
-    const registrationId=await id;
-    await page.close();expect(ctx.pages().map(p=>p.url())).toEqual([new URL('healthz',root).href]);
-    // web origin remains observable via a JSON diagnostic page; no workspace client or credentials remain open.
-    await cdp.send('ServiceWorker.deliverPushMessage',{origin,registrationId,data:'DO_NOT_SHOW_PRIVATE_COMMAND'});
-    await expect.poll(()=>probe.evaluate(async()=>{const r=await navigator.serviceWorker.getRegistration();return (await r.getNotifications()).map(n=>[n.title,n.body]);})).toEqual([['RoyalTerminal','A terminal needs your attention. Open your workspace for details.']]);
-  } finally {await ctx.close();await rm(profile,{recursive:true,force:true});}
+    const origin=new URL(baseURL).origin;
+    await context.grantPermissions(['notifications'], {origin});
+    const page=context.pages()[0];
+    await page.goto(baseURL);
+    const ready=page.evaluate(async()=>{
+      const r=await navigator.serviceWorker.register('./workspace-alert-worker.js');
+      await navigator.serviceWorker.ready;
+      if (!r.active || r.active.state!=='activated') await new Promise(resolve=>{
+        const w=r.installing || r.waiting || r.active;
+        const changed=()=>{if(w.state==='activated'){w.removeEventListener('statechange',changed);resolve();}};
+        w.addEventListener('statechange',changed);changed();
+      });
+    });
+    const worker=context.serviceWorkers().find(w=>w.url().endsWith('/workspace-alert-worker.js')) ?? await context.waitForEvent('serviceworker');
+    await ready;
+    const blank=await context.newPage();await page.close();expect(context.pages()).toEqual([blank]);expect(blank.url()).toBe('about:blank');
+    const displayed=await worker.evaluate(async()=>{
+      const ev=new PushEvent('push',{data:'never display this private terminal content'});
+      // A synthetic ExtendableEvent has no browser lifetime observer. Capture the real handler's waitUntil promise.
+      let shown; Object.defineProperty(ev,'waitUntil',{value:promise=>{shown=promise;}}); self.dispatchEvent(ev);
+      if(!shown)throw Error('No worker registered a push handler.');await shown;
+      return (await self.registration.getNotifications()).map(n=>({title:n.title,body:n.body}));
+    });
+    expect(displayed).toEqual([{title:'RoyalTerminal',body:'A terminal needs your attention. Open your workspace for details.'}]);
+  } finally { await context.close();await rm(profile,{recursive:true,force:true}); }
 });
