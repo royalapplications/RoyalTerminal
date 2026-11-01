@@ -23,13 +23,15 @@ jobs:
         run: bash scripts/workspace/test-agent-skill.sh
       - name: Verify local process scopes
         run: bash scripts/workspace/test-script-processes.sh
-      - name: Run real scripts and mirror to actual child exit
+      - name: Run real scripts and mirror to child exit
         run: bash scripts/workspace/smoke-lua.sh
       - name: Validate trusted Lua publication and rollback
         run: bash scripts/workspace/smoke-server-lua.sh
-      - name: Launch nested PTY layouts from config and script
+      - name: Launch nested PTY layouts
         run: bash scripts/workspace/smoke-layout-templates.sh
-      - name: Verify named keyboard encoding and NDJSON with a real child process
+      - name: Verify named keyboard encoding and NDJSON with a real child
         run: bash scripts/workspace/smoke-terminal-tools.sh
+      - name: Bind and remove modal shortcuts and execute versioned callback chains
+        run: bash scripts/workspace/smoke-keymap.sh
       - name: Recover an offline workspace after its broker stops
         run: bash scripts/workspace/smoke-archive.sh

@@ -2,7 +2,7 @@
   <PropertyGroup><IsPackable>false</IsPackable><JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault></PropertyGroup>
   <ItemGroup>
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Lua/config-worker.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Lua/config-*.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../src/RoyalTerminal.Multiplexing.Automation/Lua/layout.lua" Link="Lua/layout.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Inspection/RoyalTerminal.Multiplexing.Inspection.csproj" />
