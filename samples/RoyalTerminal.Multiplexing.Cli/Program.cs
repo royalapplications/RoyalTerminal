@@ -16,6 +16,8 @@ using HttpClient http=new(handler){Timeout=TimeSpan.FromSeconds(130)};
 if(!string.IsNullOrEmpty(unixSocket))endpoint="http://localhost/";
 int command=args.Length>=2&&args[0]=="--endpoint"?2:0;string? target=command==2?args[1]:endpoint;
 var context = new CliCurrentContext(Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SESSION"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_BLOCK"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_WINDOW"));
+if(args.ElementAtOrDefault(command) is {} ui && RemoteViewCommand.Handles(ui,args[(command+1)..]))
+    return await RemoteViewCommand.RunAsync(ui,args[(command+1)..],target,token,context,http,Console.Out,Console.Error,cancellation.Token);
 if (args.ElementAtOrDefault(command) is {} shellVerb && ShellSyntax.Handles(shellVerb,args[(command+1)..]))
     return await ShellWorkflow.RunAsync(shellVerb,args[(command+1)..],target,token,context,http,Console.OpenStandardInput(),Console.Out,Console.Error,cancellation.Token);
 if(ConfigurationTools.Handles(args.AsSpan(command)))return await ConfigurationTools.RunAsync(args[command..],target,token,http,Console.Out,Console.Error,cancellation.Token);
@@ -46,5 +48,6 @@ if(args.ElementAtOrDefault(command) is null or "-h" or "--help" or "help")Consol
   {ArchiveCommand.Usage}
   {RestoreLayoutCommand.Usage}
   Shell workflows (use VERB --help): {ShellSyntax.Usage}
+  Remote presentation: {RemoteViewCommand.Usage}
 """);
 return result;
