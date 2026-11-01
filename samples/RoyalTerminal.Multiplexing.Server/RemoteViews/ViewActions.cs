@@ -38,6 +38,10 @@ internal sealed partial class ApiCatalog
         Define("client.open_navigator","Opt in a desktop overview that implements spatial, cyclic and tab navigation.",["sessionId:string!","label:string!"],wire.ViewLease,(a,g,_) => {
             var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Open(s.Id,a.String("label"),"native",g,2),wire.ViewLease);
         },"Never use the extended profile for legacy or mobile receivers.");
+        Define("client.negotiate_view","Register a consenting view at the highest mutually supported presentation version.",["sessionId:string!","label:string!","kind:string!","maxVersion:integer!"],wire.ViewLease,(a,g,_) => {
+            var s = _workspaces.Broker.GetSession(Session(a,g)); var kind=a.String("kind");
+            return Done(hub.Open(s.Id,a.String("label"),kind,g,ViewCapabilities.Negotiate(kind,a.Integer("maxVersion",0))),wire.ViewLease);
+        },"A receiver implements every version from one through its offer. No input or mutation rights are granted.");
         Define("client.views","List remote-control-enabled interfaces. Does not expose receiver secrets.",["sessionId:string!"],wire.ViewIdentityArray,(a,g,_) => { ServerHttp.RequireAdministrator(g); return Done(hub.List(Session(a,g)),wire.ViewIdentityArray); });
         Define("client.actions","Describe the presentation commands accepted by one active view. Each form accepts exactly the indicated argument, or none.",["sessionId:string!","clientId:string!"],wire.ViewActionCatalog,(a,g,_) => {
             ServerHttp.RequireAdministrator(g); var session = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Describe(session.Id,a.Id("clientId")),wire.ViewActionCatalog);

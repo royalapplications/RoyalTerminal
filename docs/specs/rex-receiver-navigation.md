@@ -1,21 +1,22 @@
-# Client action discovery and native pane navigation
+# Client action discovery, native navigation and pane zoom
 
-The Rex [CLI reference](https://www.superlogical.com/rex/docs/automate/cli) and [custom-action guide](https://www.superlogical.com/rex/docs/customize/actions) distinguish a particular app's actions from server operations. RoyalTerminal makes the same distinction on its own protocol. A session can contain a browser and an older native client at the same time; the fact that both show the same terminal says nothing about whether they can present the same command.
+The Rex [CLI reference](https://www.superlogical.com/rex/docs/automate/cli) and [custom-action guide](https://www.superlogical.com/rex/docs/customize/actions) distinguish a particular app's actions from operations on the server. A browser and an older phone can show the same terminal without supporting the same presentation commands. RoyalTerminal describes each consenting receiver rather than guessing from its OS. This is a RoyalTerminal protocol, not a Rex wire implementation.
 
-## Discover first
+## Try it
 
-In the desktop overview choose **Allow remote focus**, or explicitly opt a browser tab in through its palette. A phone supports the existing absolute-focus profile. Run these commands with an administrator credential for the broker and select the consenting UI. `SESSION` below is an ID or an unambiguous session selector; use the actual client ID reported by `views`.
+In the desktop overview choose **Allow remote focus**, or opt a browser tab in through its command palette. With the administrator credential and the ID of that view:
 
 ```sh
 royalterminal-mux views -s "$SESSION"
 royalterminal-mux -C "$CLIENT" actions -s "$SESSION" --json
 royalterminal-mux focus -s "$SESSION" -C "$CLIENT" --direction right
+royalterminal-mux ui -s "$SESSION" -C "$CLIENT" pane.zoom
 royalterminal-mux ui -s "$SESSION" -C "$CLIENT" client.tab.next
 ```
 
-`view-actions -s SESSION -C CLIENT` is equivalent. A missing or ambiguous receiver is an error. No catalog command takes control, sends a key, extends the receiver lease, acknowledges queued actions, or changes the shared layout. Plain `actions` continues to mean the existing server automation command. `client.actions` accepts `sessionId` and `clientId` and returns `clientId`, `sessionId`, `kind`, `navigationVersion` and `forms`. Each form describes one wire shape: `name`, human-readable `title`, at most one `requiredArgument`, and optional `acceptedValues`. `pane.focus(blockId)` and `pane.focus(direction)` are distinct forms. The same definitions enforce enqueue admission. A catalog is a snapshot, not a promise that a client will still exist when an action is queued.
+`view-actions -s SESSION -C CLIENT` is equivalent to targeted `actions`. Bare `actions` retains its existing server-automation meaning. A missing or ambiguous receiver is an error. Discovery does not take control, send a key, renew or acknowledge a receiver lease, or change the workspace revision. `client.actions` takes `sessionId` and `clientId`. The result identifies the receiver and includes its `navigationVersion` and `forms`. Each form has a `name`, display `title`, at most one `requiredArgument`, and optional `acceptedValues`. `pane.focus(blockId)` and `pane.focus(direction)` are distinct. Enqueue admission uses the same definitions, but a catalog is not a guarantee that the receiver will still exist at enqueue time.
 
-In either Lua host, `rex.client.actions()` reads the catalog for the invocation origin; `rex.client.actions{session_id=...,client_id=...}` explicitly selects IDs. This RoyalTerminal helper does not change the server's action registry. Discovery is not available while loading a configuration. On an API error it returns `nil, error`; missing or ambiguous selection is reported as a script error. Example:
+In either Lua host, `rex.client.actions()` reads the catalog for the calling view. `rex.client.actions{session_id=...,client_id=...}` selects explicit IDs. This read is forbidden while loading a configuration. API failures return `nil, error`; missing or ambiguous selectors raise a script error. To perform a specific action only when the selected client accepts it:
 
 ```lua
 local catalog = assert(rex.client.actions())
@@ -24,21 +25,26 @@ for _, form in ipairs(catalog.forms) do
     return rex.session.focus_direction{direction='right'}
   end
 end
-return false -- older phone or desktop: leave its screen alone
+return false
 ```
 
-## Receiver behavior
-
-| Profile | Actions registered |
+| Receiver | Advertised actions |
 | --- | --- |
-| Browser v1 | Focus a block or window, spatial/cyclic pane focus, next/previous tab, zoom, palette, sidebar |
-| Desktop navigator v2 | Focus a block or window, spatial/cyclic pane focus, next/previous tab |
-| Native v1 / mobile v1 | Explicit block or window IDs only |
+| Browser v1 | Absolute and directional pane focus, window focus, next/previous tab, zoom, palette, sidebar |
+| Desktop overview v3 | Absolute and directional pane focus, window focus, next/previous tab and zoom |
+| Desktop navigator v2 | As v3, without zoom |
+| Legacy native or mobile v1 | Focus by block ID or window ID only |
 
-Desktop `left/right/up/down` uses the normalized rectangles of tiled and floating blocks in the displayed window. A candidate must be on the requested side of the focused pane's center. Prefer overlapping projections on the perpendicular axis, then the nearest forward center, then the smallest perpendicular offset; stable IDs break ties. No wrapping at an edge. `next/previous` instead traverses the visible projection cyclically; with no remembered pane it starts at the first/last entry. A toolbar may hold keyboard focus without losing the remembered pane. Removing a pane removes that reference. Shelved blocks never participate. Switching windows observes the newly visible terminals; multiple observers cannot change the process's authoritative grid. A slow handshake must not focus a pane on completion.
+`client.negotiate_view` takes the session, kind, label and `maxVersion`; the host selects the highest compatible version. Older receivers can continue using their original registration methods. The SDK only falls back to an older method after a definitive `404 method_not_found`. It does not create a second lease after a timeout, revoked credential, unsupported response, or ambiguous network failure.
 
-A local layout edit, a vanished target, or a snapshot that changed during presentation can cause a receiver to decline. A queue receipt is **not an on-screen acknowledgement**. Unknown commands are rejected before any callback in the affected batch. A local presentation refusal stops later actions in that batch but does not imply that earlier actions were undone. Registration falls back to absolute-only mode **only** on a definitive `404 method_not_found`; network errors and revocation never cause duplicate registration.
+## Focus and zoom semantics
 
-## Acceptance
+Desktop `left/right/up/down` uses normalized rectangles for tiled and floating terminals in the displayed window. Candidates must be on the requested side of the focused pane's center. Overlap on the perpendicular axis wins, followed by forward center distance, perpendicular offset, and stable block ID. It stops at an edge. `next/previous` instead traverses visible slots cyclically. Without a remembered pane it starts at the first/last slot. Toolbar focus preserves that memory; removing the pane clears it. Shelved blocks are excluded. Slow observer handshakes never move focus.
 
-The server tests enumerate each declared form and verify whole-batch rejection on a legacy receiver. The SDK tests distinguish unsupported registration from credential errors, and reject malformed mixed batches before the first effect. Avalonia headless tests exercise focus ownership at a delayed handshake, boundaries and wrap, an empty tab, and observer-only cleanup. The existing real-process remote-view smoke runs the production CLI and both Lua hosts against Kestrel, checks action discovery without side effects, and attempts it with a read-only sharing token. These are independent workflows; they do not establish physical-device acceptance or equivalence to every Rex action.
+**Zoom** in the toolbar, **Alt+Z** inside an overview terminal, or the remote `pane.zoom` action expands the focused pane. With several panes and no remembered focus the action is declined. Escape inside the zoomed pane restores the layout. The other controls remain attached and parse output. Their scrollback, parsers and PTY grids are not resized. Changing focus to a different pane reveals it; editing shared placement or removing the zoomed pane restores the normal projection. If another client moves a divider during local zoom, leaving zoom shows the *new* divider position. Zoom changes no one else's screen. This is a toggle, not an idempotent 'ensure zoomed' command.
+
+A local edit, missing target, or snapshot change can cause a receiver to decline. A queue receipt is not proof the command was displayed. Malformed batches are rejected before the first callback. Local refusal stops the remaining actions in the batch without undoing earlier effects. These presentation operations never grant permission to type in a shell.
+
+## Evidence
+
+`ViewCapabilityTests` checks declared forms against admission; `ViewNegotiationTests` checks fallback and malformed batches. `OverviewSubscriptionTests` delays a real transport handshake while another native pane is focused. `ObserverZoomTests` drives bytes into a hidden observer and checks its parser and restoration geometry without any outbound socket messages. `LiveViewProfileTests` connects the SDK over HTTP to a running broker with a scoped observer token: it can receive zoom but cannot enumerate or issue actions. `scripts/workspace/smoke-remote-views.py` verifies the CLI and both Lua paths against a real Kestrel host and PTYs. These checks do not establish physical-device or every-action Rex parity.
