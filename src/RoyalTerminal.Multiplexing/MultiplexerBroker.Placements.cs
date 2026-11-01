@@ -66,7 +66,6 @@ public sealed partial class MultiplexerBroker
                     ? MultiplexerLayoutNode.Split(orientation, leaf, other, ratio) : MultiplexerLayoutNode.Split(orientation, other, leaf, ratio);
                 destTree = relativeTo is { } id ? Rewrite(destTree, n => n.BlockId == id ? Join(n) : n) : destTree is null ? leaf : Join(destTree);
             }
-            // No visible partial edit: target validation and all tree allocations precede the commit.
             source.Layout = sourceTree;
             dest.Layout = destTree;
             session.Placements[blockId] = next;
@@ -94,7 +93,6 @@ public sealed partial class MultiplexerBroker
             session.Changed(); return Describe(session);
         }
     }
-
     private static MultiplexerLayoutNode? Rewrite(MultiplexerLayoutNode? node, Func<MultiplexerLayoutNode, MultiplexerLayoutNode> leaf)
     {
         if (node is null) return null;
@@ -133,7 +131,7 @@ public sealed partial class MultiplexerBroker
             Guid[] owned = session.Placements.Where(x => x.Value.Window == windowId).Select(x => x.Key).ToArray();
             if (owned.Length != 0 && survivor is null) throw Conflict("Specify a destination for this window's running or exited blocks.");
             foreach (Guid block in owned) session.Placements[block] = new(survivor!.Id, MultiplexerPaneKind.Unplaced);
-            session.Windows.Remove(window); session.Changed(); return Describe(session);
+            session.Windows.Remove(window); session.Changed("window_closed", windowId); return Describe(session);
         }
     }
 
@@ -154,11 +152,7 @@ public sealed partial class MultiplexerBroker
             signal = (session.PendingChange ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
             ++session.WatcherCount;
         }
-        try
-        {
-            await signal.WaitAsync(cancellationToken).ConfigureAwait(false);
-            return GetSession(sessionId);
-        }
+        try { await signal.WaitAsync(cancellationToken).ConfigureAwait(false); return GetSession(sessionId); }
         finally { lock (_gate) --session.WatcherCount; }
     }
 }
