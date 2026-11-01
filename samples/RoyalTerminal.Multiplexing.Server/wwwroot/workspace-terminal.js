@@ -18,7 +18,7 @@ export class TerminalPane extends RecoveredPane {
   async recover(connection){await super.recover(connection);if(this.replica && !this.disposed)this.historyButton.hidden=false;}
   async readHistory(){
     const replica=this.replica;if(!replica||this.disposed||this.history.open)return;
-    try{await this.history.show(this.element,()=>replica.call('scrollback'),()=>this.replica===replica&&!this.disposed);}
+    try{await this.history.show(this.element,()=>replica.call('history'),()=>this.replica===replica&&!this.disposed);}
     catch(e){if(!this.disposed)this.ctx.toast(e.message);}
   }
   fail(connection,message){this.history?.clear();super.fail(connection,message);}
