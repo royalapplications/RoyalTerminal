@@ -1,4 +1,4 @@
-// This worker has no child-process transport or credential. Install the message handler before loading .NET.
+// No PTY, bearer credential or clipboard access in this worker.
 let runtime;
 function api(){
   return runtime ??= import('./vendor/managed/_framework/dotnet.js')
@@ -15,6 +15,7 @@ self.addEventListener('message',async({data:{id,op,handle,value}})=>{
       case 'output': r.Write(handle,value);break;
       case 'resize': r.Resize(handle,value.columns,value.rows,value.widthPixels??0,value.heightPixels??0);break;
       case 'paint': result={cols:r.Columns(handle),rows:r.Rows(handle),vt:r.Paint(handle)};break;
+      case 'scrollback': result=r.Scrollback(handle);break;
       default: throw Error('Unknown replica operation.');
     }
     self.postMessage({id,result});
