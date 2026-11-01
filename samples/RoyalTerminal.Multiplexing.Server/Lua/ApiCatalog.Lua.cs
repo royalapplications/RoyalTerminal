@@ -7,46 +7,30 @@ namespace RoyalTerminal.Multiplexing.Server;
 
 internal sealed partial class ApiCatalog
 {
-    // Called once before the JSON automation configuration is schema-checked. No remote path selection.
     internal void ConfigureLua(WebApplicationBuilder builder)
     {
-        string? file = builder.Configuration["ROYALTERMINAL_MUX_LUA_INIT"];
-        if (string.IsNullOrEmpty(file)) return;
-        string executable = builder.Configuration["ROYALTERMINAL_MUX_LUA_EXECUTABLE"] ?? "/usr/bin/lua5.1";
-        var program = new TrustedLuaProgram(file, executable);
-        builder.Services.AddHostedService(_ => new LuaStartup(program));
-        Define("lua.actions", "List trusted server-side callbacks and their configuration digest.", [], LuaWire.Default.LuaManifest,
-            (_, grant, _) => { ServerHttp.RequireAdministrator(grant); return Done(program.Manifest, LuaWire.Default.LuaManifest); });
-        Define("lua.reload", "Validate and atomically replace callbacks from the startup-selected file. No source is accepted over HTTP.", [], LuaWire.Default.LuaManifest,
-            async (_, grant, ct) => { ServerHttp.RequireAdministrator(grant); return Element(await program.ReloadAsync(ct), LuaWire.Default.LuaManifest); });
-        Define("lua.invoke", "Execute one locally configured callback by name, passing structured arguments and optional workspace context.",
-            ["name:string!", "arguments:object", "sessionId:string", "windowId:string", "blockId:string"], ServerJsonContext.Default.JsonElement,
-            async (a, grant, ct) =>
-            {
-                ServerHttp.RequireAdministrator(grant);
-                JsonElement args = a.Value.TryGetProperty("arguments", out _) ? a.Object("arguments") : EmptyArguments;
-                ActionContext context = new(a.OptionalId("sessionId"), a.OptionalId("blockId"), a.OptionalId("windowId"));
-                return await program.InvokeAsync(a.String("name"), context, args, (method, input, token) => InvokeAsync(method, input, grant, token), ct);
-            });
+        Define("session.launch_layout", "Validate a bounded tree of shell blocks, start each process once, then publish its layout. Supply blockId to split beside an existing tile, otherwise a new window is created.", ["sessionId:string!","layout:object!","label:string","blockId:string","direction:string","side:string","ratio:number","expectedRevision:integer"],LayoutTemplateJson.Default.LayoutReceipt, LaunchLayout);
+        string? file=builder.Configuration["ROYALTERMINAL_MUX_LUA_INIT"];
+        if(string.IsNullOrEmpty(file)) return;
+        var program=new TrustedLuaProgram(file,builder.Configuration["ROYALTERMINAL_MUX_LUA_EXECUTABLE"]??"/usr/bin/lua5.1");
+        builder.Services.AddHostedService(_=>new LuaStartup(program));
+        Define("lua.actions","List trusted server-side callbacks and their configuration digest.",[],LuaWire.Default.LuaManifest,
+            (_,grant,_)=>{ ServerHttp.RequireAdministrator(grant); return Done(program.Manifest,LuaWire.Default.LuaManifest); });
+        Define("lua.reload","Validate and atomically replace callbacks from the startup-selected file; accepts no source.",[],LuaWire.Default.LuaManifest,
+            async(_,grant,ct)=>{ ServerHttp.RequireAdministrator(grant); return Element(await program.ReloadAsync(ct),LuaWire.Default.LuaManifest); });
+        Define("lua.invoke","Execute a locally configured action using structured arguments and workspace context.",["name:string!","arguments:object","sessionId:string","windowId:string","blockId:string"],ServerJsonContext.Default.JsonElement,
+            async(a,grant,ct)=>{ ServerHttp.RequireAdministrator(grant); var args=a.Value.TryGetProperty("arguments",out _)?a.Object("arguments"):EmptyArguments;
+                ActionContext context=new(a.OptionalId("sessionId"),a.OptionalId("blockId"),a.OptionalId("windowId"));
+                return await program.InvokeAsync(a.String("name"),context,args,(method,input,token)=>InvokeAsync(method,input,grant,token),ct); });
     }
-
-    private static readonly JsonElement EmptyArguments = JsonSerializer.SerializeToElement(new Dictionary<string,string>(), EmptyMapJson.Default.DictionaryStringString);
-
-    private void Define(string name, string description, string[] fields, JsonTypeInfo result,
-        Func<ApiArguments,AccessGrant,CancellationToken,ValueTask<JsonElement>> handler)
+    private static readonly JsonElement EmptyArguments=JsonSerializer.SerializeToElement(new Dictionary<string,string>(),EmptyMapJson.Default.DictionaryStringString);
+    private void Define(string name,string description,string[] fields,JsonTypeInfo result,Func<ApiArguments,AccessGrant,CancellationToken,ValueTask<JsonElement>> handler)
     {
-        var input=Schema(name, fields);
-        using var output=JsonDocument.Parse(result.GetJsonSchemaAsNode().ToJsonString());
-        _methods.Add(name,new(new(name,description,input,output.RootElement.Clone(),ValidationNotes:"Administrator only. Trusted local Lua code; completed API effects are not rolled back or retried."),
-            fields.Select(f=>f[..f.IndexOf(':')]).ToArray(),ApiInputSchemas.ForActions(input),handler));
+        var input=Schema(name,fields); using var output=JsonDocument.Parse(result.GetJsonSchemaAsNode().ToJsonString());
+        _methods.Add(name,new(new(name,description,input,output.RootElement.Clone(),ValidationNotes:"Administrator only. External process effects are not rolled back or retried."),fields.Select(f=>f[..f.IndexOf(':')]).ToArray(),ApiInputSchemas.ForActions(input),handler));
     }
-
-    private sealed class LuaStartup(TrustedLuaProgram program) : IHostedService
-    {
-        public async Task StartAsync(CancellationToken cancellationToken) => _ = await program.ReloadAsync(cancellationToken);
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-    }
+    private sealed class LuaStartup(TrustedLuaProgram program):IHostedService
+    { public async Task StartAsync(CancellationToken ct)=>_=await program.ReloadAsync(ct); public Task StopAsync(CancellationToken ct)=>Task.CompletedTask; }
 }
-
 [System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string,string>))]
-internal partial class EmptyMapJson : System.Text.Json.Serialization.JsonSerializerContext;
+internal partial class EmptyMapJson:System.Text.Json.Serialization.JsonSerializerContext;
