@@ -4,6 +4,9 @@
     <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Lua/config-*.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../src/RoyalTerminal.Multiplexing.Automation/Lua/*.lua" Link="Lua/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Both hosts use one argv/pipe implementation. This is source sharing, not an executable dependency. -->
+    <Compile Include="../RoyalTerminal.Multiplexing.Cli/LuaLocalProcesses.cs" Link="Lua/Internal/LuaLocalProcesses.cs" />
+    <None Include="../RoyalTerminal.Multiplexing.Cli/Lua/process.lua" Link="Lua/config-process.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Inspection/RoyalTerminal.Multiplexing.Inspection.csproj" />
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Automation/RoyalTerminal.Multiplexing.Automation.csproj" />

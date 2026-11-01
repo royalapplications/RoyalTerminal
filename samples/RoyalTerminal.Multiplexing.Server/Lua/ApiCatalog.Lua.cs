@@ -13,6 +13,7 @@ internal sealed partial class ApiCatalog
         string? file=builder.Configuration["ROYALTERMINAL_MUX_LUA_INIT"];
         TrustedLuaProgram? program=string.IsNullOrEmpty(file)?null:new TrustedLuaProgram(file,builder.Configuration["ROYALTERMINAL_MUX_LUA_EXECUTABLE"]??"/usr/bin/lua5.1")
         {
+            AllowExec=builder.Configuration["ROYALTERMINAL_MUX_LUA_EXEC"]=="1",
             Published=(m,changed)=>_workspaces.Broker.Activity.RecordConfiguration(m.Generation,changed?m.Peers.Hash:null)
         };
         Define("server.hosts","List configured peer labels, ordered endpoints and stable IDs. Never includes local token-file pins.",[],PeerWire.Default.WorkspacePeers,(_,grant,_)=>
@@ -32,7 +33,6 @@ internal sealed partial class ApiCatalog
         Define("lua.key","Invoke an anonymous keybinding callback against its originating generation.",["id:integer!","generation:string!","sessionId:string","windowId:string","blockId:string","clientId:string"],ServerJsonContext.Default.JsonElement,async(a,grant,ct)=>{
             ServerHttp.RequireAdministrator(grant);return await program.InvokeAsync(a.Integer("id",-1).ToString(CultureInfo.InvariantCulture),Context(a),EmptyArguments,CallbackDispatch(a.OptionalId("clientId"),grant),ct,a.String("generation"),binding:true);});
     }
-    // Private invocation-local metadata, not discoverable as a general host method. Target scope/consent is revalidated on publication.
     private Func<string,JsonElement,CancellationToken,ValueTask<JsonElement>> CallbackDispatch(Guid? client,AccessGrant grant)
     {
         using var doc=JsonDocument.Parse(client is Guid id?$"\"{id:D}\"":"null");var origin=doc.RootElement.Clone();
@@ -48,7 +48,7 @@ internal sealed partial class ApiCatalog
     private sealed class LuaStartup(TrustedLuaProgram program,WorkspacePeerRouter router):IHostedService
     {
         public async Task StartAsync(CancellationToken ct){GC.KeepAlive(router);_=await program.ReloadAsync(ct);}
-        public Task StopAsync(CancellationToken ct)=>Task.CompletedTask;
+        public Task StopAsync(CancellationToken ct)=>program.StopJobsAsync(ct);
     }
 }
 [System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string,string>))]

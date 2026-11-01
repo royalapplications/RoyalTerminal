@@ -21,6 +21,8 @@ jobs:
           dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
       - name: Verify scoped UI delivery, focused launches and nested Lua rollback
         run: python3 scripts/workspace/smoke-remote-views.py
+      - name: Exercise trusted action subprocesses, detachment and shutdown with real kernel processes
+        run: python3 scripts/workspace/smoke-server-exec.py
       - name: Validate agent setup and removal
         run: bash scripts/workspace/test-agent-skill.sh
       - name: Verify local process scopes
