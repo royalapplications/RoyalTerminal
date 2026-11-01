@@ -1,7 +1,7 @@
 name: Typed workspace block protocol
 on:
   pull_request:
-    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','scripts/workspace/smoke-lua-json.py','tests/workspace-lua/**','.github/workflows/workspace-block-protocol.yml']
+    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','scripts/workspace/smoke-session-tools.py','scripts/workspace/smoke-lua-json.py','tests/workspace-lua/**','.github/workflows/workspace-block-protocol.yml']
   workflow_dispatch:
 permissions: {contents: read}
 concurrency: {group: 'workspace-block-protocol-${{ github.ref }}', cancel-in-progress: true}
@@ -19,3 +19,5 @@ jobs:
         run: python3 scripts/workspace/smoke-block-protocol.py
       - name: Check shared Lua JSON semantics in a real CLI script and a server configuration action
         run: python3 scripts/workspace/smoke-lua-json.py
+      - name: Move and resize live terminal processes and exercise scoped session introspection
+        run: python3 scripts/workspace/smoke-session-tools.py

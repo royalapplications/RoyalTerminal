@@ -5,7 +5,7 @@ internal sealed partial class ApiCatalog
 {
     private void RegisterTerminalCommands()
     {
-        RegisterBlockProtocol();
+        RegisterBlockProtocol(); RegisterSessionTools();
         string[] fields=["sessionId:string!","blockId:string!","keys:array!"];
         RegisterReader("terminal.encode_keys","Encode named presses without writing; an existing controller can send the base64 result over its own leased socket.",fields,ServerJsonContext.Default.TerminalTextValue,(a,grant,ct)=>{
             Guid session=Session(a,grant);ct.ThrowIfCancellationRequested();var bytes=_workspaces.Inspection(session,a.Id("blockId")).EncodeKeyPresses(ReadKeyBatch(a));
