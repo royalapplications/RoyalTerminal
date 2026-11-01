@@ -1,0 +1,27 @@
+name: Workspace archive protection
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/RoyalTerminal.Terminal.Transport.Multiplexing/**'
+      - 'samples/RoyalTerminal.Multiplexing.Cli/**'
+      - 'scripts/workspace/smoke-protected-archive.sh'
+      - '.github/workflows/workspace-archive-protection.yml'
+permissions: {contents: read}
+concurrency: {group: 'workspace-archive-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - name: Install packaged age implementation
+        run: sudo apt-get update -qq && sudo apt-get install -y age
+      - name: Build the CLI and actual broker
+        run: |
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+      - name: Round-trip with stock age and reject tampering before observable effects
+        run: bash scripts/workspace/smoke-protected-archive.sh

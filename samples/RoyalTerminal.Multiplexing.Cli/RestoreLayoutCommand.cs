@@ -8,16 +8,18 @@ namespace RoyalTerminal.Multiplexing.Cli;
 
 internal static class RestoreLayoutCommand
 {
-    internal const string Usage = "restore-layout FILE --plan | restore-layout FILE NEW-SESSION-LABEL --fresh-shells";
+    internal const string Usage = "restore-layout FILE --plan [--identity FILE] | restore-layout FILE NEW-SESSION-LABEL --fresh-shells [--identity FILE]";
 
     internal static async Task<int> RunAsync(string[] args,string? endpoint,string? token,HttpClient http,TextWriter output,TextWriter error,CancellationToken ct)
     {
-        if (args is not ([_ ,"--plan"] or [_,_,"--fresh-shells"])) { await error.WriteLineAsync(Usage);return 2; }
         Guid? created=null; bool creating=false;
         try
         {
-            await using var file = new FileStream(args[0],FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
-            var archive=await WorkspaceArchive.ReadAsync(file,ct);
+            string? identity = ArchiveProtection.Identity(ref args);
+            if (args is not ([_ ,"--plan"] or [_,_,"--fresh-shells"])) { await error.WriteLineAsync(Usage);return 2; }
+            // No credentials are inspected, no HTTP calls are made and no shell is launched
+            // until both the inner snapshot and the entire outer envelope have verified.
+            var archive=await ArchiveProtection.ReadAsync(args[0],identity,ct);
             var source=archive.Session.Deserialize(LayoutRestoreJson.Default.MultiplexerSessionDescriptor) ?? throw new InvalidDataException("Missing session descriptor.");
             Validate(source);
             if(args.Length == 2)
@@ -37,14 +39,13 @@ internal static class RestoreLayoutCommand
             for(int i=0;i<source.Windows.Count;i++)
             {
                 var w=source.Windows[i]; Guid next;
-                if(i==0){ next=session.GetProperty("windows")[0].GetProperty("id").GetGuid();await Call("session.set_window_label",new(){["sessionId"]=sid,["windowId"]=next.ToString("D"),["label"]=w.Label}); }
+                if(i==0){ next=session.GetProperty("windows")[0].GetGuidFromProperty("id");await Call("session.set_window_label",new(){["sessionId"]=sid,["windowId"]=next.ToString("D"),["label"]=w.Label}); }
                 else {var extra=await Call("session.new_window",new(){["sessionId"]=sid,["label"]=w.Label});next=extra.GetProperty("id").GetGuid();}
                 windows.Add(w.Id,next);
             }
             foreach(var b in source.Blocks)
             {
                 var wid=windows[b.WindowId].ToString("D");
-                // Never restore command, environment, cwd or input. The new host chooses the default shell.
                 var born=await Call("block.create",new(){["sessionId"]=sid,["block"]=new JsonObject{["transport"]="pty",["label"]=b.Label,["windowId"]=wid,
                     ["dimensions"]=new JsonObject{["columns"]=b.Dimensions.Columns,["rows"]=b.Dimensions.Rows,["widthPixels"]=0,["heightPixels"]=0}}});
                 var id=born.GetProperty("id").GetGuid();blocks.Add(b.Id,id);
@@ -73,7 +74,7 @@ internal static class RestoreLayoutCommand
             async ValueTask<JsonElement> Call(string method,JsonObject fields)
             { using var doc=JsonDocument.Parse(fields.ToJsonString());return await api.CallAsync(method,doc.RootElement,ct); }
         }
-        catch(Exception ex) when(ex is IOException or JsonException or InvalidDataException or ArgumentException or FormatException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or OperationCanceledException or KeyNotFoundException)
+        catch(Exception ex) when(ex is IOException or JsonException or InvalidDataException or ArgumentException or FormatException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or OperationCanceledException or KeyNotFoundException or TimeoutException)
         {
             await error.WriteLineAsync(ex.Message);
             if(created.HasValue) await error.WriteLineAsync($"Partial new session: {created:D}. No automatic deletion or retry. Inspect this session before closing it.");
@@ -82,6 +83,7 @@ internal static class RestoreLayoutCommand
         }
     }
 
+    private static Guid GetGuidFromProperty(this JsonElement value,string name) => value.GetProperty(name).GetGuid();
     internal static void Validate(MultiplexerSessionDescriptor s)
     {
         if(s.Id==Guid.Empty || s.Windows is null || s.Blocks is null || s.Windows.Count is <1 or >128 || s.Blocks.Count>128)throw Bad();
@@ -113,5 +115,4 @@ internal static class RestoreLayoutCommand
     private static InvalidDataException Bad()=>new("Archive contains an invalid label, placement, geometry or split tree. No workspace has been created.");
 }
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase,UseStringEnumConverter=true)]
-[JsonSerializable(typeof(MultiplexerSessionDescriptor))]
 internal partial class LayoutRestoreJson:JsonSerializerContext;
