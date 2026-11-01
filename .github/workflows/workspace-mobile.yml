@@ -36,10 +36,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
-        with: {dotnet-version: '10.0.x'}
-      - name: Build and launch on an iPhone simulator
+        with: {dotnet-version: '10.0.401'}
+      - name: Select matching SDK and workload set
         run: |
-          dotnet workload install ios
-          bash scripts/workspace/mobile-ios.sh
+          printf '%s\n' '{"sdk":{"version":"10.0.401","rollForward":"disable"}}' > global.json
+          dotnet workload install ios --version 10.0.401
+      - name: Build and launch on an iPhone simulator
+        run: bash scripts/workspace/mobile-ios.sh
       - uses: actions/upload-artifact@v7
         with: {name: workspace-ios-simulator, path: out/, if-no-files-found: error, retention-days: 7}
