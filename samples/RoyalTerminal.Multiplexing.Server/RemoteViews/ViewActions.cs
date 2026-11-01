@@ -50,7 +50,8 @@ internal sealed partial class ApiCatalog
             ServerHttp.RequireAdministrator(g); t.ThrowIfCancellationRequested(); var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Publish(s.Id,a.Id("clientId"),ViewActions.Parse(a.Value,s)),wire.ViewReceipt);
         });
         Define("client.read_view","Read up to eight batches; after acknowledges delivery, not success.",["sessionId:string!","clientId:string!","readerKey:string!","after:integer!","timeoutMs:integer"],wire.ViewDelivery,async(a,g,t) => {
-            var sid=Session(a,g); var page=await hub.ReadAsync(sid,a.Id("clientId"),a.String("readerKey"),Cursor(a,"after"),a.Integer("timeoutMs",15000),t);
+            var sid=Session(a,g);
+            var page=await hub.ReadAsync(sid,a.Id("clientId"),a.String("readerKey"),g,Cursor(a,"after"),a.Integer("timeoutMs",15000),t);
             EnsureLive(sid,g); return Element(page,wire.ViewDelivery);
         },"Requires the original capability and private reader key.");
         Define("client.finish_view","Report how many consecutive actions the receiver applied. A short prefix means it declined the next action.",["sessionId:string!","clientId:string!","readerKey:string!","sequence:integer!","applied:integer!"],wire.ViewOutcome,(a,g,t)=>{

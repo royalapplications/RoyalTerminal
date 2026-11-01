@@ -36,20 +36,27 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
             _ => throw new ArgumentException("The experimental host exposes pty and pipe transports."),
         };
     }
-    public async ValueTask<MultiplexerBlockDescriptor> CreateBlockAsync(Guid sessionId, NewBlock request, CancellationToken cancellationToken)
+    public async ValueTask<MultiplexerBlockDescriptor> CreateBlockAsync(Guid sessionId, NewBlock request, CancellationToken cancellationToken,
+        MultiplexerPaneKind placement = MultiplexerPaneKind.Tiled, MultiplexerFloatBounds? bounds = null)
     {
         var options = Prepare(sessionId,request);
         var journal = Events(sessionId);
         MultiplexerBlockDescriptor block;
         if (request.SplitBlockId is { } target)
         {
+            if (placement != MultiplexerPaneKind.Tiled || bounds is not null) throw new ArgumentException("A split must create a tiled block.");
             var orientation = request.Orientation switch { "horizontal" => MultiplexerSplitOrientation.Horizontal, "vertical" => MultiplexerSplitOrientation.Vertical, _ => throw new ArgumentException("Split orientation must be horizontal or vertical.") };
             block = await Broker.SplitBlockAsync(sessionId,target,orientation,request.Ratio,request.Label,options,request.ExpectedRevision,cancellationToken);
         }
-        else block = await Broker.AppendBlockAsync(sessionId,request.WindowId,request.Label,options,request.ExpectedRevision,cancellationToken);
+        else block = await Broker.CreatePlacedBlockAsync(sessionId,request.WindowId,placement,bounds,request.Label,options,request.ExpectedRevision,cancellationToken);
         _options[block.Id] = options;
         try { journal.Include(block.Id, Inspection(sessionId, block.Id).Metadata); }
-        catch { _options.TryRemove(block.Id,out _); throw; }
+        catch
+        {
+            _options.TryRemove(block.Id,out _);
+            try { await Broker.CloseBlockAsync(sessionId, block.Id); } catch (MultiplexerException e) when (e.Code == MultiplexerErrorCode.NotFound) { }
+            throw;
+        }
         return block;
     }
     public async ValueTask CloseBlockAsync(Guid sessionId, Guid blockId)
@@ -57,6 +64,14 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
         _ = GetBlock(sessionId,blockId);
         try { await Broker.CloseBlockAsync(sessionId,blockId); }
         finally { _options.TryRemove(blockId,out _); }
+    }
+    internal async ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid blockId, long revision)
+    {
+        // A stale close must not discard the inspection mapping for a block that is still running.
+        try { await Broker.CloseFloatingLayerAsync(sessionId, blockId, revision); }
+        catch (MultiplexerException) { throw; }
+        catch { _options.TryRemove(blockId, out _); throw; }
+        _options.TryRemove(blockId, out _);
     }
     public async ValueTask CloseSessionAsync(Guid sessionId)
     {

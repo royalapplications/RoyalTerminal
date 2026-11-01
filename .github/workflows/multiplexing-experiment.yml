@@ -9,6 +9,7 @@ on:
       - 'src/RoyalTerminal.Avalonia/**'
       - 'samples/RoyalTerminal.Multiplexing.*/**'
       - 'tests/RoyalTerminal.Multiplexing.*/**'
+      - 'tests/workspace-lua/**'
       - 'scripts/workspace/**'
       - 'native/unix-pty/**'
       - 'scripts/build-unix-pty.sh'
@@ -39,21 +40,26 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with: {dotnet-version: '10.0.x'}
       - if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y libfontconfig1 libfreetype6 fonts-dejavu-core
+        run: sudo apt-get update -qq && sudo apt-get install -y libfontconfig1 libfreetype6 fonts-dejavu-core lua5.1 lua-dkjson
       - if: runner.os == 'macOS'
         run: bash scripts/build-unix-pty.sh
-      - name: Managed, native headless and phone interaction suites
-        shell: bash
-        run: |
-          set -euo pipefail
-          for suite in Tests InspectionTests AutomationTests ClientTests DesktopTests ServerTests MobileTests; do
-            project="RoyalTerminal.Multiplexing.$suite"
-            dotnet test "tests/$project/$project.csproj" -c Release -m:1 -nr:false -p:UseSharedCompilation=false --logger "trx;LogFileName=$suite.trx" --results-directory test-results --blame-hang --blame-hang-timeout 3m --blame-hang-dump-type none
-          done
       - name: Browser model, key handling and protocol tests (no browser installation)
         if: runner.os == 'Linux'
         working-directory: samples/RoyalTerminal.Multiplexing.Server
         run: node --test browser-tests/*.test.mjs
+      - name: Managed, native headless and phone interaction suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=0
+          for suite in Tests InspectionTests AutomationTests ClientTests DesktopTests ServerTests MobileTests; do
+            project="RoyalTerminal.Multiplexing.$suite"
+            dotnet test "tests/$project/$project.csproj" -c Release -m:1 -nr:false -p:UseSharedCompilation=false --logger "trx;LogFileName=$suite.trx" --results-directory test-results --blame-hang --blame-hang-timeout 3m --blame-hang-dump-type none || result=1
+          done
+          exit "$result"
+      - name: Exercise both Lua hosts, real PTYs, receiver outcomes and scoped denial
+        if: runner.os == 'Linux'
+        run: python3 scripts/workspace/smoke-placement-focus.py
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'multiplexing-tests-${{ matrix.os }}', path: test-results/, retention-days: 7}

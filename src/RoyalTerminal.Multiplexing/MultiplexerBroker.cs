@@ -111,7 +111,7 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
         }
     }
 
-    /// <summary>Changes a block label with optional optimistic concurrency.</summary>
+    /// <summary>Changes a block label without restarting it.</summary>
     public MultiplexerBlockDescriptor RenameBlock(Guid sessionId, Guid blockId, string label, long? expectedRevision = null)
     {
         ValidateLabel(label);
@@ -164,13 +164,21 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
     }
 
     /// <summary>Removes a block from its placement and explicitly stops its transport.</summary>
-    public async ValueTask CloseBlockAsync(Guid sessionId, Guid blockId)
+    public ValueTask CloseBlockAsync(Guid sessionId, Guid blockId) => RetireBlockAsync(sessionId, blockId, null, null);
+
+    /// <summary>Closes a one-terminal floating layer only if it still is floating at the expected revision.</summary>
+    public ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid blockId, long expectedRevision)
+        => RetireBlockAsync(sessionId, blockId, MultiplexerPaneKind.Floating, expectedRevision);
+
+    private async ValueTask RetireBlockAsync(Guid sessionId, Guid blockId, MultiplexerPaneKind? required, long? revision)
     {
         MultiplexerBlock block;
         lock (_gate)
         {
             Session session = FindSession(sessionId);
+            CheckRevision(session, revision);
             block = FindBlock(session, blockId);
+            if (required is { } kind && GetPlacement(session, blockId).Kind != kind) throw Conflict("The block is not a floating layer.");
             RemoveBlock(session, block);
             _retiring.Add(block);
         }
@@ -216,63 +224,6 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
         }
         _ = CompleteDisposeAsync(blocks, completion);
         return new(completion.Task);
-    }
-
-    private async ValueTask<MultiplexerBlockDescriptor> StartBlockAsync(Guid sessionId, Guid? windowId,
-        Guid? targetBlockId, MultiplexerSplitOrientation orientation, double ratio, string label,
-        ITerminalTransportOptions options, long? expectedRevision, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ValidateLabel(label);
-        ValidateSplit(orientation, ratio);
-        MultiplexerBlock.ValidateDimensions(options.Dimensions, _options);
-        cancellationToken.ThrowIfCancellationRequested();
-        MultiplexerBlock block;
-        lock (_gate)
-        {
-            Session session = FindSession(sessionId);
-            CheckRevision(session, expectedRevision);
-            if (targetBlockId is { } target)
-            {
-                Placement p = GetPlacement(session, target);
-                if (p.Kind != MultiplexerPaneKind.Tiled) throw Conflict("Only tiled blocks can be split.");
-                windowId = p.Window;
-            }
-            Window window = windowId is { } id ? FindWindow(session, id) : session.Windows[0];
-            if (session.Blocks.Count >= _options.MaxBlocksPerSession) throw Capacity("The block limit has been reached.");
-            block = new(sessionId, window.Id, label, _factory.Create(options), options.Dimensions, _options);
-            session.Blocks.Add(block.Id, block);
-            session.Placements.Add(block.Id, new(window.Id, MultiplexerPaneKind.Tiled));
-            session.BlockOrder.Add(block.Id);
-            MultiplexerLayoutNode leaf = MultiplexerLayoutNode.Leaf(block.Id);
-            window.Layout = targetBlockId is { } targetId ? SplitLeaf(window.Layout!, targetId, leaf, orientation, ratio)
-                : window.Layout is null ? leaf : MultiplexerLayoutNode.Split(orientation, window.Layout, leaf, ratio);
-            session.Changed("block_created", window.Id, block.Id);
-        }
-        try
-        {
-            await block.StartAsync(options, cancellationToken).ConfigureAwait(false);
-            lock (_gate)
-            {
-                if (_sessions.TryGetValue(sessionId, out Session? session) && session.Placements.ContainsKey(block.Id))
-                    return DescribeBlock(session, block);
-                throw new MultiplexerException(MultiplexerErrorCode.Disconnected, "Block closed while starting.");
-            }
-        }
-        catch
-        {
-            lock (_gate)
-            {
-                if (_sessions.TryGetValue(sessionId, out Session? session) && session.Blocks.ContainsKey(block.Id))
-                {
-                    RemoveBlock(session, block);
-                    _retiring.Add(block);
-                }
-            }
-            try { await block.CloseAsync().ConfigureAwait(false); }
-            finally { lock (_gate) _retiring.Remove(block); }
-            throw;
-        }
     }
 
     private static async Task CloseBlocksAsync(MultiplexerBlock[] blocks)
