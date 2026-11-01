@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 namespace RoyalTerminal.Multiplexing.Server;
 
-internal sealed record LuaManifest(string Generation, string[] Actions, JsonElement Keymap);
+internal sealed record LuaManifest(string Generation, string[] Actions, JsonElement Keymap, WorkspacePeers Peers);
 internal sealed record LuaRun(string Mode, string Source, string? Name, ActionContext Context, JsonElement Arguments);
 internal sealed record LuaReply(bool Ok, JsonElement? Value, string? Error = null);
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase,DefaultIgnoreCondition=JsonIgnoreCondition.WhenWritingNull)]
@@ -19,6 +19,7 @@ internal sealed partial class TrustedLuaProgram
     private readonly SemaphoreSlim _reload = new(1), _workers = new(4);
     private readonly string _file, _exe;
     private Generation? _current;
+    internal Action<LuaManifest,bool>? Published { get; init; }
     internal TrustedLuaProgram(string file,string exe)
     {
         if (!Path.IsPathFullyQualified(file) || !Path.IsPathFullyQualified(exe)) throw new ArgumentException("Configure absolute paths for init.lua and Lua 5.1.");
@@ -41,9 +42,14 @@ internal sealed partial class TrustedLuaProgram
             var declared=result.GetProperty("actions"); var keys=result.GetProperty("keymap");
             if(declared.ValueKind!=JsonValueKind.Array || declared.GetArrayLength()>256 || keys.GetProperty("bindings").GetArrayLength()>2048 || keys.GetProperty("modes").GetArrayLength()>128)throw new InvalidDataException("Invalid Lua manifest.");
             var names=declared.EnumerateArray().Select(n=>n.GetString()??throw new InvalidDataException("Invalid action name.")).ToArray();
-            var manifest=new LuaManifest(Convert.ToHexStringLower(SHA256.HashData(bytes.AsSpan(0,count))),names,keys.Clone());
+            var manifest=new LuaManifest(Convert.ToHexStringLower(SHA256.HashData(bytes.AsSpan(0,count))),names,keys.Clone(),WorkspacePeers.Parse(result.GetProperty("hosts")));
             ct.ThrowIfCancellationRequested();
-            if(publish)Volatile.Write(ref _current,new(source,manifest));
+            if(publish)
+            {
+                string previous=_current?.Manifest.Peers.Hash ?? WorkspacePeers.Empty.Hash;
+                Volatile.Write(ref _current,new(source,manifest));
+                Published?.Invoke(manifest,previous!=manifest.Peers.Hash);
+            }
             return manifest;
         }
         finally{_reload.Release();}

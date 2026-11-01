@@ -5,6 +5,7 @@ local function module(name) return assert(loadfile(entry.directory..name))() end
 local scoped=module('process.lua')(rex,call)
 local events=module('workspace-events.lua')(rex,call,plan and plan.all==true,module('block-events.lua')(rex))
 module('layout.lua')(rex,events.context)
+local loading=true;module('hosts.lua')(rex,function()return loading end,false)
 for _,name in ipairs{'after','every'} do local original=rex[name];rex[name]=function(n,fn)return original(n,function(...)return scoped(fn,...)end)end end
 local on=rex.on;rex.on=function(event,fn)return on(event,function(...)return scoped(fn,...)end)end
 local declared,action={},rex.action
@@ -20,6 +21,6 @@ rex.invoke=function(name,args)
 end
 local chunk
 if plan then rex.args=plan.args;chunk=assert(loadstring(plan.source,plan.name)) else chunk=assert(loadfile(entry.file)) end
-local value=scoped(chunk);events.seal()
+local value=scoped(chunk);events.seal();loading=false
 if plan and type(plan.action)=='string' then value,err=rex.invoke(plan.action,rex.args);if err then error(err,0) end end
 if plan and value~=nil then assert(call{op='result',value=value}) end

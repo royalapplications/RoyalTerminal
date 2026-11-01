@@ -9,5 +9,6 @@
     <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Automation/RoyalTerminal.Multiplexing.Automation.csproj" />
     <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pty/RoyalTerminal.Terminal.Transport.Pty.csproj" />
     <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pipe/RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Multiplexing/RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
   </ItemGroup>
 </Project>

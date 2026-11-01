@@ -1,7 +1,8 @@
 -- Host IPC. The only executable source comes from the operator's configured file.
 assert(_VERSION=='Lua 5.1','Lua 5.1 required')
 local json=require 'dkjson';local input,output=io.stdin,io.stdout;local dir=assert(arg[0]:match('^(.*[/\\])'))
-local install_layout=assert(loadfile(dir..'layout.lua'))();local install_keys=assert(loadfile(dir..'config-keys.lua'))()
+local function module(name)return assert(loadfile(dir..name..'.lua'))()end
+local install_layout,install_keys,install_hosts=module('layout'),module('config-keys'),module('hosts')
 local function receive()local s=assert(input:read('*l'),'parent closed');local v,p,e=json.decode(s,1,json.null);assert(v and not e and not s:sub(p):match('%S'),'bad parent frame');return v end
 local function send(v)local s=assert(json.encode(v));assert(#s<=262144,'result exceeds quota');assert(output:write(s,'\n'));assert(output:flush()) end
 local function object(t)return setmetatable(t or {},{__jsontype='object'}) end
@@ -22,6 +23,7 @@ local function run()
     local method=name;rex.session[method]=function(args)local a=object{};for k,v in pairs(args or {})do a[(k:gsub('_(%l)',string.upper))]=v end;a.sessionId=a.sessionId or ctx.session_id;return rex.call('session.'..method,a)end
   end
   install_layout(rex,function()return ctx end);local export,call_binding=install_keys(rex,array,object,function()return loading end)
+  local hosts=install_hosts(rex,function()return loading end,true)
   local active,depth={},0
   function rex.invoke(name,args)
     assert(not loading,'no invocations at load time');if type(name)~='string' or not defs[name] then return nil,'unknown action' end
@@ -31,7 +33,7 @@ local function run()
   local env={rex=rex,assert=assert,error=error,ipairs=ipairs,pairs=pairs,next=next,select=select,tonumber=tonumber,tostring=tostring,type=type,unpack=unpack,math=math,string=string,table=table,pcall=pcall,xpcall=xpcall,_VERSION=_VERSION}
   assert(spec.source:byte(1)~=27,'bytecode is not allowed');local chunk,why=loadstring(spec.source,'@init.lua');if not chunk then error(why,0)end;setfenv(chunk,env);chunk();loading=false
   local result,err
-  if spec.mode=='validate' then table.sort(names);result={actions=names,keymap=export()}
+  if spec.mode=='validate' then table.sort(names);result={actions=names,keymap=export(),hosts=hosts()}
   elseif spec.mode=='binding' then result=call_binding(tonumber(spec.name),ctx)
   else result,err=rex.invoke(spec.name,spec.arguments) end
   if err~=nil then error(tostring(err),0)end;if result==nil then result=json.null end;send{op='done',value=result}
