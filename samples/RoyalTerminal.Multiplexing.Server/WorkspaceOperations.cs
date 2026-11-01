@@ -16,11 +16,10 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
         lock (_journals)
         {
             _ = Broker.GetSession(sessionId);
-            if (!_journals.TryGetValue(sessionId, out var journal)) _journals.Add(sessionId, journal = new());
+            if (!_journals.TryGetValue(sessionId, out var journal)) _journals.Add(sessionId, journal = new(Broker.Activity,sessionId));
             return journal;
         }
     }
-
     internal static ITerminalTransportOptions Prepare(Guid sessionId, NewBlock request)
     {
         if (string.IsNullOrWhiteSpace(request.Label) || request.Label.Length > 256 || request.Label.Any(char.IsControl)) throw new ArgumentException("Invalid block label.");
