@@ -1,9 +1,9 @@
--- Operator-selected local code only. Keep operating-system facilities outside the configuration environment.
+-- Worker framing is private. Source strings came from the operator's configured files, never an HTTP payload.
 assert(_VERSION=='Lua 5.1','Lua 5.1 required')
 local json=require 'dkjson';local input,output=io.stdin,io.stdout;local dir=assert(arg[0]:match('^(.*[/\\])'))
 local function module(name)return assert(loadfile(dir..name..'.lua'))()end
 local install_layout,install_keys,install_hosts,install_ui=module('layout'),module('config-keys'),module('hosts'),module('client-actions')
-local install_process=module('config-process')
+local install_process,install_modules=module('config-process'),module('config-modules')
 local function receive()local s=assert(input:read('*l'),'parent closed');local v,p,e=json.decode(s,1,json.null);assert(v and not e and not s:sub(p):match('%S'),'bad parent frame');return v end
 local function send(v)local s=assert(json.encode(v));assert(#s<=262144,'result exceeds quota');assert(output:write(s,'\n'));assert(output:flush()) end
 local function object(t)return setmetatable(t or {},{__jsontype='object'}) end
@@ -40,6 +40,7 @@ local function run()
     active[name]=true;depth=depth+1;local ok,v,e=pcall(uiScope,processScope,defs[name],ctx,args or object{});active[name]=nil;depth=depth-1;if not ok then return nil,tostring(v) end;return v,e
   end
   local env={rex=rex,assert=assert,error=error,ipairs=ipairs,pairs=pairs,next=next,select=select,tonumber=tonumber,tostring=tostring,type=type,unpack=unpack,math=math,string=string,table=table,pcall=pcall,xpcall=xpcall,_VERSION=_VERSION}
+  install_modules(env,spec.modules)
   assert(spec.source:byte(1)~=27,'bytecode is not allowed');local chunk,why=loadstring(spec.source,'@init.lua');if not chunk then error(why,0)end;setfenv(chunk,env);chunk();loading=false
   local result,err
   if spec.mode=='validate' then table.sort(names);result={actions=names,keymap=export(),hosts=hosts()}

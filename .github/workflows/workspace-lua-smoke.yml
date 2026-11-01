@@ -23,6 +23,8 @@ jobs:
         run: python3 scripts/workspace/smoke-remote-views.py
       - name: Exercise trusted action subprocesses, detachment and shutdown with real kernel processes
         run: python3 scripts/workspace/smoke-server-exec.py
+      - name: Validate immutable operator module generations and rollback
+        run: bash scripts/workspace/smoke-config-modules.sh
       - name: Validate agent setup and removal
         run: bash scripts/workspace/test-agent-skill.sh
       - name: Verify local process scopes
