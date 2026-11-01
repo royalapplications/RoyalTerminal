@@ -1,7 +1,7 @@
 name: Typed workspace block protocol
 on:
   pull_request:
-    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','.github/workflows/workspace-block-protocol.yml']
+    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','scripts/workspace/smoke-lua-json.py','tests/workspace-lua/**','.github/workflows/workspace-block-protocol.yml']
   workflow_dispatch:
 permissions: {contents: read}
 concurrency: {group: 'workspace-block-protocol-${{ github.ref }}', cancel-in-progress: true}
@@ -17,3 +17,5 @@ jobs:
       - run: dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release && dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
       - name: Exercise every registered terminal method against a real process and both Lua hosts
         run: python3 scripts/workspace/smoke-block-protocol.py
+      - name: Check shared Lua JSON semantics in a real CLI script and a server configuration action
+        run: python3 scripts/workspace/smoke-lua-json.py
