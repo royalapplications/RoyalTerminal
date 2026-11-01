@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsPackable>false</IsPackable><AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Multiplexing/RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <!-- Compile the same transport, parser replacement and control implementation. Never reference the desktop runtime on a phone. -->
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/Controls/RemoteTerminalControl.cs" Link="Shared/RemoteTerminalControl.cs" />
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/Services/*.cs" Link="Shared/%(Filename)%(Extension)" />
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/WorkspaceClient.cs;../RoyalTerminal.Multiplexing.Desktop/WorkspaceContracts.cs" Link="Shared/%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="RoyalTerminal.Multiplexing.MobileTests" />
+  </ItemGroup>
+</Project>
