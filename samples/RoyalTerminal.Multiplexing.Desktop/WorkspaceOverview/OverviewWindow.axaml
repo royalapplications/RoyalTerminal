@@ -1,9 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#10151E" Opened="InitializeEditing">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="12" RowSpacing="8">
-    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
       <TextBlock Text="Window" VerticalAlignment="Center"/>
-      <ComboBox x:Name="WindowsList" Grid.Column="1" MinWidth="130" HorizontalAlignment="Stretch"/>
-      <Button Grid.Column="2" x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control"/>
+      <ComboBox x:Name="WindowsList" Grid.Column="1" MinWidth="100" HorizontalAlignment="Stretch"/>
+      <Button Grid.Column="2" x:Name="ViewConsent" Content="Allow remote focus" Click="ToggleRemoteView" ToolTip.Tip="Let an administrator navigate this overview only; all terminals remain observers"/>
+      <Button Grid.Column="3" x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control"/>
     </Grid>
     <StackPanel x:Name="EditBar" Grid.Row="1" IsVisible="False" Spacing="5">
       <WrapPanel>
@@ -18,7 +19,6 @@
     </StackPanel>
     <Grid Grid.Row="2" ClipToBounds="True">
       <views:OverviewPanel x:Name="Surface"/>
-      <!-- Editing owns the pointer. Native terminal selection, scroll bar thumbs and PTY pointer reporting do not see this gesture. -->
       <Border x:Name="GestureLayer" Background="Transparent" IsVisible="{Binding #EditBar.IsVisible}" Focusable="True" PointerPressed="BeginDrag" PointerMoved="MoveDrag" PointerReleased="EndDrag" PointerCaptureLost="GestureCaptureLost"/>
     </Grid>
     <StackPanel Grid.Row="3" Spacing="4"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#A4B0C2"/><TextBlock x:Name="StatusText" TextWrapping="Wrap"/></StackPanel>
