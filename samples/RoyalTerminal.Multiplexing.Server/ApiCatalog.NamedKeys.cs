@@ -6,6 +6,13 @@ internal sealed partial class ApiCatalog
     private void RegisterTerminalCommands()
     {
         RegisterBlockProtocol(); RegisterSessionTools(); RegisterActivityMethods(); RegisterRemoteViews(); RegisterLayerTools();
+        RegisterReader("terminal.encode_event","Encode one physical key with its actual layout text. Returns base64; never acquires a lease or writes input.",
+            ["sessionId:string!","blockId:string!","keyId:string!","text:string!","unshifted:integer!","modifiers:integer!","consumed:integer!","repeat:boolean!"],ServerJsonContext.Default.TerminalTextValue,(a,g,ct)=>{
+                var s=Session(a,g);ct.ThrowIfCancellationRequested();
+                if (!a.Value.TryGetProperty("repeat",out var r) || r.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new ArgumentException("repeat must be a boolean.");
+                var bytes=_workspaces.Inspection(s,a.Id("blockId")).EncodeKeyEvent(a.String("keyId"),a.String("text"),a.Integer("unshifted",-1),a.Integer("modifiers",-1),a.Integer("consumed",-1),r.GetBoolean());
+                return Done(new TerminalTextValue(Convert.ToBase64String(bytes)),ServerJsonContext.Default.TerminalTextValue);
+            });
         string[] fields=["sessionId:string!","blockId:string!","keys:array!"];
         RegisterReader("terminal.encode_keys","Encode named presses without writing; an existing controller can send the base64 result over its own leased socket.",fields,ServerJsonContext.Default.TerminalTextValue,(a,grant,ct)=>{
             Guid session=Session(a,grant);ct.ThrowIfCancellationRequested();var bytes=_workspaces.Inspection(session,a.Id("blockId")).EncodeKeyPresses(ReadKeyBatch(a));
