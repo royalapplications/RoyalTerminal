@@ -5,7 +5,7 @@ using RoyalTerminal.Terminal;
 
 namespace RoyalTerminal.Multiplexing.Inspection;
 
-/// <summary>A parser transition. Sequence belongs to the requested feed, never to the VT stream.</summary>
+/// <summary>A parser or job-control transition. Sequence belongs to the requested feed, never to the VT stream.</summary>
 public sealed record TerminalMetadataEvent(long Sequence, string Name, string? Text = null, int? ExitCode = null,
     string? RecordId = null, TerminalProgramStatus? Record = null, string? Reason = null)
 {
@@ -19,6 +19,8 @@ public sealed record TerminalMetadataEvent(long Sequence, string Name, string? T
     public TerminalDesktopNotification? Notification { get; init; }
     /// <summary>Progress with an optional percentage.</summary>
     public TerminalProgressReport? ProgressReport { get; init; }
+    /// <summary>A verified, sampled change of foreground job on a Linux PTY.</summary>
+    public WorkspaceForegroundChange? Process { get; init; }
 }
 
 /// <summary>NextSequence names the last delivered record, not an undelivered high-water mark.</summary>
@@ -58,6 +60,7 @@ public sealed class TerminalMetadataFeed
         processor.ProgressReportCallback = report => Add(new(0, "terminal.progress_report") { ProgressReport = report });
         processor.ProgramStatusChangedCallback = () => StatusChanged(processor.ProgramStatuses);
     }
+    internal void JobChanged(WorkspaceForegroundChange change) => Add(new(0,"terminal.process_changed") { Process=change });
     private static string Bound(string value, int limit) => value.Length <= limit ? value : value[..(char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit)];
 
     // The only nested lock order is child -> aggregate -> activity hub. No reader takes the reverse path.
@@ -113,6 +116,11 @@ public sealed class TerminalMetadataFeed
         int charge = 224 + 2 * ((item.Text?.Length ?? 0) + (item.RecordId?.Length ?? 0) +
             (item.Record?.Title.Length ?? 0) + (item.Record?.Message.Length ?? 0) + (item.Record?.App.Length ?? 0) +
             (item.Pwd?.Length ?? 0) + (item.Notification?.Title.Length ?? 0) + (item.Notification?.Body.Length ?? 0));
+        if(item.Process is {} job)
+        {
+            charge+=128+2*(job.Foreground?.Name?.Length??0);
+            foreach(var ancestor in job.Ancestors)charge+=64+2*(ancestor.Name?.Length??0);
+        }
         var owned = Store(item, charge);
         if (_aggregate is { } group) lock (group._gate) if (!group._ended) group.Store(Project(owned,_block),charge);
     }

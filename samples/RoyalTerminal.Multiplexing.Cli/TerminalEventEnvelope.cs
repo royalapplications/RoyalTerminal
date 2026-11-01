@@ -33,10 +33,11 @@ internal static class TerminalEventEnvelope
                 case "program_status_removed": w.WriteStartArray("ids");if(Get("recordId") is { } id)w.WriteStringValue(id.GetString());w.WriteEndArray();Field("reason","reason");break;
                 case "desktop_notification": CopyObject("notification");break;
                 case "progress_report": CopyObject("progressReport");break;
+                case "process_changed": CopyObject("process",includeNull:true);break;
             }
             w.WriteEndObject();w.WriteEndObject();w.WriteEndObject();w.WriteEndObject();w.WriteEndObject();
             void Field(string from,string to){if(Get(from) is { } v){w.WritePropertyName(to);v.WriteTo(w);}}
-            void CopyObject(string key){if(Get(key) is {ValueKind:JsonValueKind.Object} o)foreach(var p in o.EnumerateObject())if(p.Value.ValueKind!=JsonValueKind.Null)p.WriteTo(w);}
+            void CopyObject(string key,bool includeNull=false){if(Get(key) is {ValueKind:JsonValueKind.Object} o)foreach(var p in o.EnumerateObject())if(includeNull||p.Value.ValueKind!=JsonValueKind.Null)p.WriteTo(w);}
         }
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
         JsonElement? Get(string key)=>item.TryGetProperty(key,out var value)&&value.ValueKind!=JsonValueKind.Null?value:null;
