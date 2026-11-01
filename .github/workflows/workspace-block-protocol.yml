@@ -1,7 +1,7 @@
 name: Typed workspace block protocol
 on:
   pull_request:
-    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','scripts/workspace/smoke-session-tools.py','scripts/workspace/smoke-lua-json.py','scripts/workspace/smoke-activity.py','scripts/workspace/smoke-shell-workflows.py','scripts/workspace/smoke-foreground.py','tests/workspace-lua/**','.github/workflows/workspace-block-protocol.yml']
+    paths: ['samples/RoyalTerminal.Multiplexing.*/**','src/RoyalTerminal.Multiplexing*/**','src/RoyalTerminal.Terminal*/**','scripts/workspace/smoke-block-protocol.py','scripts/workspace/smoke-session-tools.py','scripts/workspace/smoke-lua-json.py','scripts/workspace/smoke-activity.py','scripts/workspace/smoke-shell-workflows.py','scripts/workspace/smoke-foreground.py','scripts/workspace/check-darwin-job-abi.c','tests/workspace-lua/**','.github/workflows/workspace-block-protocol.yml']
   workflow_dispatch:
 permissions: {contents: read}
 concurrency: {group: 'workspace-block-protocol-${{ github.ref }}', cancel-in-progress: true}
@@ -26,4 +26,37 @@ jobs:
       - name: Run shell workflows against real PTYs, a binary pipe and a read-only grant
         run: python3 scripts/workspace/smoke-shell-workflows.py
       - name: Transfer a real tty between foreground groups and observe it through HTTP, Lua and NDJSON
+        run: python3 scripts/workspace/smoke-foreground.py
+      - name: Stage the same distribution-verified, portable Lua module for the macOS test
+        run: mkdir -p "$RUNNER_TEMP/portable" && cp -L /usr/share/lua/5.1/dkjson.lua "$RUNNER_TEMP/portable/"
+      - uses: actions/upload-artifact@v7
+        with: {name: job-test-dkjson, path: '${{ runner.temp }}/portable/dkjson.lua', retention-days: 1}
+  darwin-job-control:
+    needs: protocol
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - uses: actions/download-artifact@v8
+        with: {name: job-test-dkjson, path: '${{ runner.temp }}/portable'}
+      - name: Check the managed FFI layout against the installed Apple SDK
+        run: xcrun clang -std=c11 -Wall -Werror -fsyntax-only scripts/workspace/check-darwin-job-abi.c
+      - name: Compile a checksummed Lua interpreter for the native runner
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo lua.tgz https://www.lua.org/ftp/lua-5.1.5.tar.gz
+          echo '2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333  lua.tgz' | shasum -a 256 -c -
+          tar xzf lua.tgz
+          make -C lua-5.1.5/src generic CC=clang
+          mkdir -p lua-bin && cp lua-5.1.5/src/lua lua-bin/lua5.1
+          echo "$RUNNER_TEMP/lua-bin" >> "$GITHUB_PATH"
+          echo "LUA_PATH=$RUNNER_TEMP/portable/?.lua;;" >> "$GITHUB_ENV"
+      - name: Build the macOS PTY launcher, broker and CLI
+        run: |
+          bash scripts/build-unix-pty.sh
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+      - name: Verify a real Darwin tty handoff via the OS broker, scoped Lua and NDJSON
         run: python3 scripts/workspace/smoke-foreground.py

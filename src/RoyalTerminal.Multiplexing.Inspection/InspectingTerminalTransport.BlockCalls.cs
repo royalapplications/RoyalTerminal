@@ -29,29 +29,20 @@ public sealed partial class InspectingTerminalTransport
             string? name;
             try { name=process.ProcessName; } catch (System.ComponentModel.Win32Exception) { name=null; }
             int? group=null; WorkspaceProcessIdentity? foreground=null;
-            if (OperatingSystem.IsLinux() && _inner is ITerminalPtyTransport && ReadStat(child) is { } root && root.Tty!=0 && root.Foreground>0)
+            if (SupportsJobObservation && UnixJobStat.Read(child) is { Live:true } root && root.Tty!=0 && root.Foreground>0)
             {
-                group=root.Foreground;
-                if (ReadStat(root.Foreground) is { } leader && leader.Group==group && leader.Tty==root.Tty && leader.Session==root.Session)
-                    foreground=new(root.Foreground,leader.Name);
+                var leader = root.Foreground == child ? root : UnixJobStat.Read(root.Foreground);
+                var fence = UnixJobStat.Read(child);
+                if (fence is { Live:true } && fence.OnTerminal(root) && fence.Birth==root.Birth && fence.Foreground==root.Foreground)
+                {
+                    group=root.Foreground;
+                    if (leader is not null && leader.Group==group && leader.OnTerminal(root)) foreground=leader.Identity;
+                }
             }
             if (process.HasExited || ChildId()!=child) return new(null,null,null);
             return new(new(child,name),foreground,group);
         }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException or IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException) { return new(null,null,null); }
-    }
-    private sealed record ProcStat(string Name,int Group,int Session,int Tty,int Foreground);
-    private static ProcStat? ReadStat(int pid)
-    {
-        try
-        {
-            string raw=File.ReadAllText($"/proc/{pid.ToString(CultureInfo.InvariantCulture)}/stat");
-            int left=raw.IndexOf('('),right=raw.LastIndexOf(')'); if(left<0||right<=left||right+2>=raw.Length)return null;
-            string[] fields=raw[(right+2)..].Split(' ',7,StringSplitOptions.RemoveEmptyEntries);
-            return fields.Length>=6 && int.TryParse(fields[2],out int group) && int.TryParse(fields[3],out int session) && int.TryParse(fields[4],out int tty) && int.TryParse(fields[5],out int foreground)
-                ?new(raw[(left+1)..right],group,session,tty,foreground):null;
-        }
-        catch(Exception e) when(e is IOException or UnauthorizedAccessException){return null;}
     }
 
     /// <summary>Resets the emulated display, not the child process. Publishes RIS through the same ordered output stream.</summary>
