@@ -1,14 +1,22 @@
-<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#10151E">
-  <Grid RowDefinitions="Auto,*,Auto" Margin="12" RowSpacing="8">
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#10151E" Opened="InitializeEditing">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="12" RowSpacing="8">
     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
       <TextBlock Text="Window" VerticalAlignment="Center" />
       <ComboBox x:Name="WindowsList" Grid.Column="1" MinWidth="130" HorizontalAlignment="Stretch" />
-      <TextBlock Grid.Column="2" Text="Observe only" VerticalAlignment="Center" Foreground="#95C7BD" />
+      <Button Grid.Column="2" x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control" />
     </Grid>
-    <views:OverviewPanel x:Name="Surface" Grid.Row="1" ClipToBounds="True" />
-    <StackPanel Grid.Row="2" Spacing="4">
-      <TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#A4B0C2" />
-      <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
+    <StackPanel x:Name="EditBar" Grid.Row="1" IsVisible="False" Spacing="5">
+      <WrapPanel>
+        <ComboBox x:Name="EditSource" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" ToolTip.Tip="Source terminal" />
+        <ComboBox x:Name="EditOperation" MinWidth="125" Margin="0,0,5,3" />
+        <ComboBox x:Name="EditTarget" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" ToolTip.Tip="Target terminal" />
+        <ComboBox x:Name="EditDestination" MinWidth="125" MaxWidth="200" Margin="0,0,5,3" ToolTip.Tip="Destination window" />
+        <TextBox x:Name="EditLabel" PlaceholderText="Name" Width="135" MaxLength="256" Margin="0,0,5,3" />
+        <Button x:Name="ApplyEdit" Content="Apply" Click="ApplyLayoutEdit" Margin="0,0,0,3" />
+      </WrapPanel>
+      <TextBlock x:Name="EditHint" Foreground="#A4B0C2" TextWrapping="Wrap" />
     </StackPanel>
+    <views:OverviewPanel x:Name="Surface" Grid.Row="2" ClipToBounds="True" />
+    <StackPanel Grid.Row="3" Spacing="4"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#A4B0C2" /><TextBlock x:Name="StatusText" TextWrapping="Wrap" /></StackPanel>
   </Grid>
 </Window>
