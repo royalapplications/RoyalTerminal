@@ -1,5 +1,4 @@
-// Copyright (c) Royal Apps. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for details.
+// Copyright (c) Royal Apps. Licensed under the MIT license.
 using System.Collections.Concurrent;
 using RoyalTerminal.Multiplexing.Inspection;
 using RoyalTerminal.Terminal;
@@ -9,7 +8,18 @@ namespace RoyalTerminal.Multiplexing.Server;
 internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTerminalTransportFactory inspections)
 {
     private readonly ConcurrentDictionary<Guid, ITerminalTransportOptions> _options = new();
+    private readonly Dictionary<Guid, SessionTerminalJournal> _journals = [];
     public MultiplexerBroker Broker { get; } = broker;
+
+    internal SessionTerminalJournal Events(Guid sessionId)
+    {
+        lock (_journals)
+        {
+            _ = Broker.GetSession(sessionId);
+            if (!_journals.TryGetValue(sessionId, out var journal)) _journals.Add(sessionId, journal = new());
+            return journal;
+        }
+    }
 
     internal static ITerminalTransportOptions Prepare(Guid sessionId, NewBlock request)
     {
@@ -30,6 +40,7 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
     public async ValueTask<MultiplexerBlockDescriptor> CreateBlockAsync(Guid sessionId, NewBlock request, CancellationToken cancellationToken)
     {
         var options = Prepare(sessionId,request);
+        var journal = Events(sessionId);
         MultiplexerBlockDescriptor block;
         if (request.SplitBlockId is { } target)
         {
@@ -38,8 +49,7 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
         }
         else block = await Broker.AppendBlockAsync(sessionId,request.WindowId,request.Label,options,request.ExpectedRevision,cancellationToken);
         _options[block.Id] = options;
-        // If a concurrent close won before inspection registration, do not leak a stale entry.
-        try { _ = GetBlock(sessionId,block.Id); }
+        try { journal.Include(block.Id, Inspection(sessionId, block.Id).Metadata); }
         catch { _options.TryRemove(block.Id,out _); throw; }
         return block;
     }
@@ -53,7 +63,11 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
     {
         var session = Broker.GetSession(sessionId);
         try { await Broker.CloseSessionAsync(sessionId); }
-        finally { foreach (var block in session.Blocks) _options.TryRemove(block.Id,out _); }
+        finally
+        {
+            foreach (var block in session.Blocks) _options.TryRemove(block.Id,out _);
+            lock (_journals) if (_journals.Remove(sessionId, out var journal)) journal.Complete();
+        }
     }
     public void Input(Guid sessionId, Guid blockId, string base64)
     {

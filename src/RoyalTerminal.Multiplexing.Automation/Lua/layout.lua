@@ -1,7 +1,35 @@
 -- Shared by trusted local scripts and the operator's init.lua worker. Constructors never perform I/O.
-return function(rex, context)
+return function(rex, original_context)
   local function object(t) return setmetatable(t or {}, {__jsontype='object'}) end
   local function copy(t) local r=object(); for k,v in pairs(t or {}) do r[k]=v end; return r end
+  local current_event
+  local function context() return current_event or original_context() end
+  if rex.on then
+    local on=rex.on
+    function rex.on(name,fn)
+      assert(type(fn)=='function','expected an event handler')
+      return on(name,function(ctx,ev)
+        local prior=current_event;current_event=ctx
+        local ok,err=pcall(fn,ctx,ev);current_event=prior
+        if not ok then error(err,0) end
+      end)
+    end
+  end
+  local extension=rex.block and rex.block.call
+  local supported={format=true,process=true,pwd=true,title=true,size=true,write=true,reset=true,resize=true,set_theme=true,program_status=true,list_dir=true}
+  rex.block=rex.block or {}
+  function rex.block.call(creator,method,args)
+    if creator~='terminal' and creator~='com.superlogical.terminal' then return nil,'unknown block creator' end
+    if type(method)~='string' or args~=nil and type(args)~='table' then return nil,'invalid block method or arguments' end
+    local c=context();local a=copy(args)
+    if a.session_id and a.sessionId or a.block_id and a.blockId then return nil,'duplicate scope' end
+    local s,b=a.session_id or a.sessionId or c.session_id,a.block_id or a.blockId or c.block_id
+    if not s or not b then return nil,'this call requires a session and block' end
+    a.session_id,a.sessionId,a.block_id,a.blockId=nil,nil,nil,nil
+    if supported[method] then return rex.call('com.superlogical.terminal.'..method,object{sessionId=s,blockId=b,args=a}) end
+    if extension then a.sessionId,a.blockId=s,b;return extension(creator,method,a) end
+    return nil,'unknown block method'
+  end
   local function branch(axis,r,a,b)
     assert(type(r)=='number' and r>0 and r<1 and type(a)=='table' and type(b)=='table','invalid split')
     return object{orientation=axis,ratio=r,first=a,second=b}
@@ -10,7 +38,6 @@ return function(rex, context)
     assert(type(def)=='table' and type(def.flavor)=='string','expected block definition')
     local node=copy(def); if node.options~=nil then assert(type(node.options)=='table'); node.options=copy(node.options) end; return node
   end,horizontal=function(r,a,b)return branch('horizontal',r,a,b)end, vertical=function(r,a,b)return branch('vertical',r,a,b)end}
-
   local previous=rex.session.new_window
   local function launch(args,split)
     if type(args)~='table' or type(args.layout)~='table' then return nil,'a layout is required' end

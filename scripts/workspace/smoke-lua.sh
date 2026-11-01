@@ -45,14 +45,24 @@ grep -q READY "$scratch/mirror.txt"; grep -q RESTORED_LIVE_SCREEN "$scratch/mirr
 # Bare `do` names must still reach the server catalog rather than the trusted local Lua loader.
 dotnet "$cli" config load samples/RoyalTerminal.Multiplexing.Server/automation.example.json >/dev/null
 dotnet "$cli" do capture_focused "$s" "$b" | jq -e '.steps[-1].result.content|contains("RESTORED_LIVE_SCREEN")' >/dev/null
-# Register first, then emit a BEL: no timing assumption about the shell or event subscriber.
-ROYALTERMINAL_MUX_BLOCK=$(dotnet "$cli" run "$s" --pipe -- /bin/cat | jq -er .id);export ROYALTERMINAL_MUX_BLOCK
+# Enroll without a default block. A handler must target the block which actually emitted the event.
+bellblock=$(dotnet "$cli" run "$s" --pipe -- /bin/cat | jq -er .id)
 cat > "$scratch/bell.lua" <<'LUA'
-rex.on('com.superlogical.terminal.bell', function(ctx, ev)
-  assert(ctx.block_id==rex.block_id and ev.type=='terminal.bell'); print('METADATA_BELL_OK'); rex.stop(0)
+assert(not rex.block_id)
+local id=assert(rex.args[1]);local removed=false
+rex.on('com.superlogical.terminal.program_status_removed', function(ctx,ev)
+  assert(ctx.block_id==id and ev.type=='block_event' and ev.name=='program_status_removed' and ev.ids[1]=='task' and ev.payload.ids[1]=='task');removed=true
 end)
-assert(rex.call('block.input',{sessionId=rex.session_id,blockId=rex.block_id,data='Bw=='}))
+rex.on('com.superlogical.terminal.bell',function(ctx,ev)
+  assert(ctx.block_id==id and ev.block_id==id and ev.type=='block_event' and ev.name=='bell' and ev.creator_name=='com.superlogical.terminal');assert(removed)
+  local size=assert(rex.block.call('com.superlogical.terminal','size',{}));assert(size.columns>0)
+  print('METADATA_BELL_OK');rex.stop(0)
+end)
+-- Two OSC 7501 reports (create and clear), then a BEL. The program is cat, not a shell.
+assert(rex.call('block.input',{sessionId=rex.session_id,blockId=id,data=assert(rex.args[2])}))
 rex.after(8,function()rex.stop(19)end)
 LUA
-timeout 15 dotnet "$cli" lua "$scratch/bell.lua" 2>"$scratch/bell.result";grep -q METADATA_BELL_OK "$scratch/bell.result"
-echo 'Verified scoped metadata, legacy server actions, Lua scripts, observer recovery and real child exits.'
+bytes=$(printf '\033]7501;state=working:id=task\033\\\033]7501;state=clear:id=task\033\\\007' | base64 -w0)
+env -u ROYALTERMINAL_MUX_BLOCK timeout 15 dotnet "$cli" lua "$scratch/bell.lua" "$bellblock" "$bytes" 2>"$scratch/bell.result" || { cat "$scratch/bell.result" >&2; exit 1; }
+grep -q METADATA_BELL_OK "$scratch/bell.result"
+echo 'Verified metadata envelopes, implicit callback block scope, status removal, legacy actions and real process exits.'

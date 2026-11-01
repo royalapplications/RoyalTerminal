@@ -1,6 +1,4 @@
-// Copyright (c) Royal Apps. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for details.
-
+// Copyright (c) Royal Apps. Licensed under the MIT license.
 using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Schema;
@@ -8,11 +6,9 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using RoyalTerminal.Multiplexing.Inspection;
 using RoyalTerminal.Terminal;
-
 namespace RoyalTerminal.Multiplexing.Server;
 
-internal sealed record AttentionCounts(int Idle = 0, int Working = 0, int Done = 0, int Blocked = 0, int Error = 0,
-    int Permission = 0, int Question = 0, int Auth = 0)
+internal sealed record AttentionCounts(int Idle = 0, int Working = 0, int Done = 0, int Blocked = 0, int Error = 0, int Permission = 0, int Question = 0, int Auth = 0)
 {
     internal static AttentionCounts From(IReadOnlyList<TerminalProgramStatus> statuses)
     {
@@ -35,8 +31,7 @@ internal sealed record AttentionCounts(int Idle = 0, int Working = 0, int Done =
         }
         return new(idle, working, done, blocked, error, permission, question, auth);
     }
-    internal AttentionCounts Plus(AttentionCounts b) => new(Idle + b.Idle, Working + b.Working, Done + b.Done,
-        Blocked + b.Blocked, Error + b.Error, Permission + b.Permission, Question + b.Question, Auth + b.Auth);
+    internal AttentionCounts Plus(AttentionCounts b) => new(Idle + b.Idle, Working + b.Working, Done + b.Done, Blocked + b.Blocked, Error + b.Error, Permission + b.Permission, Question + b.Question, Auth + b.Auth);
 }
 internal sealed record BlockAttention(Guid BlockId, string Label, AttentionCounts? Counts);
 internal sealed record WindowAttention(Guid WindowId, string Label, AttentionCounts Counts, IReadOnlyList<BlockAttention> Blocks);
@@ -51,8 +46,10 @@ internal sealed partial class ApiCatalog
 {
     private void RegisterInspectionMethods()
     {
-        RegisterReader("terminal.events", "Read ordered bell, title, program status and child-exit events. Omit after for a start-at-now cursor. Continue from nextSequence.",
-            ["sessionId:string!", "blockId:string!", "after:integer", "limit:integer", "timeoutMs:integer"], WorkspaceInspectionJsonContext.Default.TerminalMetadataPage, ReadMetadataAsync);
+        RegisterReader("terminal.events", "Read a block's ordered metadata. Omit after to start now; resume from nextSequence.",
+            ["sessionId:string!", "blockId:string!", "after:integer", "limit:integer", "timeoutMs:integer"], WorkspaceInspectionJsonContext.Default.TerminalMetadataPage, (a,g,t) => ReadMetadataAsync(a,g,t,false));
+        RegisterReader("session.terminal_events", "Observe terminal events across every block, including new and shelved blocks. sequence is session-wide; blockId and blockSequence identify the source. Omit after to start now.",
+            ["sessionId:string!", "after:integer", "limit:integer", "timeoutMs:integer"], WorkspaceInspectionJsonContext.Default.TerminalMetadataPage, (a,g,t) => ReadMetadataAsync(a,g,t,true));
         RegisterReader("session.attention", "Count program-status records by window and block, including hidden terminals. A null counts value means inspection was unavailable, not idle.",
             ["sessionId:string!"], WorkspaceInspectionJsonContext.Default.SessionAttention, ReadAttentionAsync);
     }
@@ -64,19 +61,19 @@ internal sealed partial class ApiCatalog
         using (Utf8JsonWriter writer = new(buffer)) result.GetJsonSchemaAsNode().WriteTo(writer);
         using JsonDocument schema = JsonDocument.Parse(buffer.WrittenMemory);
         string[] names = fields.Select(f => f[..f.IndexOf(':')]).ToArray();
-        _methods.Add(name, new(new(name, description, input, schema.RootElement.Clone(), ValidationNotes: "Session-scoped read. Terminal metadata cursors are unrelated to VT replay cursors and structural revisions."), names, ApiInputSchemas.ForActions(input), handler));
+        _methods.Add(name, new(new(name, description, input, schema.RootElement.Clone(), ValidationNotes: "Session-scoped operation. Terminal metadata cursors are unrelated to VT replay cursors and structural revisions."), names, ApiInputSchemas.ForActions(input), handler));
     }
-    private async ValueTask<JsonElement> ReadMetadataAsync(ApiArguments args, AccessGrant grant, CancellationToken token)
+    private async ValueTask<JsonElement> ReadMetadataAsync(ApiArguments args, AccessGrant grant, CancellationToken token, bool aggregate)
     {
-        Guid sessionId = Session(args, grant);
-        long? after = null;
+        Guid id = Session(args, grant); long? after = null;
         if (args.Value.TryGetProperty("after", out JsonElement value))
         {
             if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt64(out long cursor) || cursor < 0) throw new ArgumentException("after must be a nonnegative 64-bit integer.");
             after = cursor;
         }
-        var feed = _workspaces.Inspection(sessionId, args.Id("blockId")).Metadata;
-        var page = await feed.ReadAsync(after, args.Integer("limit", 64), args.Integer("timeoutMs", 0), token);
+        int limit = args.Integer("limit", 64), timeout = args.Integer("timeoutMs", 0);
+        var page = aggregate ? await _workspaces.Events(id).ReadAsync(after,limit,timeout,token)
+            : await _workspaces.Inspection(id,args.Id("blockId")).Metadata.ReadAsync(after,limit,timeout,token);
         token.ThrowIfCancellationRequested();
         if (!_tokens.IsActive(grant)) throw new ApiException(403, "expired", "Access expired or was revoked while reading terminal events.");
         return Element(page, WorkspaceInspectionJsonContext.Default.TerminalMetadataPage);

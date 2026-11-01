@@ -24,22 +24,22 @@ switch(args.ElementAtOrDefault(command))
     case "lua":return await LuaScriptCli.RunAsync(args[(command+1)..],target,token,http,Console.Error,cancellation.Token);
     case "do":
         var rest=args[(command+1)..];
-        if(rest.Length>1&&rest[0]=="--file")rest=rest[1..];
-        else if(rest.Length==0||rest[0] is not ("-e" or "-")&&!rest[0].Contains('/')&&!rest[0].Contains('\\'))break;
+        if(rest.Length>0 && rest[0]=="--file") { if(rest.Length==1){Console.Error.WriteLine("--file requires a script filename.");return 2;} rest=rest[1..]; }
+        else if(rest.Length==0 || rest[0] is not ("-e" or "-" or "-h" or "--help") && !rest[0].EndsWith(".lua",StringComparison.Ordinal) && !rest[0].Contains('/') && !rest[0].Contains('\\'))break;
         return await LuaDoCommand.RunAsync(rest,target,token,http,Console.In,Console.Out,Console.Error,cancellation.Token);
     case "mirror":using(var invoker=new HttpMessageInvoker(handler,disposeHandler:false))return await CheckpointMirror.RunAsync(args[(command+1)..],target,token,http,invoker,Console.Out,Console.Error,cancellation.Token);
 }
 int result=await WorkspaceCli.RunAsync(args,token,endpoint,Console.In,Console.Out,Console.Error,http,cancellation.Token,new CliCurrentContext(Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_SESSION"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_BLOCK"),Environment.GetEnvironmentVariable("ROYALTERMINAL_MUX_WINDOW")));
 if(args.ElementAtOrDefault(command) is null or "-h" or "--help" or "help")Console.WriteLine($"""
   lua FILE [ARGS...]                 Execute a trusted local Lua 5.1 script.
-  {LuaDoCommand.Usage} (use ./name or --file name for scripts, bare names invoke server actions)
+  {LuaDoCommand.Usage} (.lua and paths are files; other bare names invoke server actions)
   keymap [--mode NAME]                Inspect the active server Lua keymap, source and generation.
   config check | reload               Evaluate the server-selected init.lua; only reload publishes.
   skill show|setup|status|remove      Read or install the workspace agent guide and startup hooks.
   --socket /ABSOLUTE/PATH COMMAND     Use a private Unix socket without a TCP fallback.
   mirror SESSION BLOCK [--wait]       Restore a checkpoint; optionally follow as an observer.
   send-key SESSION BLOCK KEY...       Send named presses under the remote terminal's keyboard mode.
-  events SESSION BLOCK [--after N] [--count N]   Stream ordered block metadata as NDJSON.
+  {TerminalTools.EventUsage}    Stream ordered terminal metadata as NDJSON.
   {ArchiveCommand.Usage}
   {RestoreLayoutCommand.Usage}
 """);
