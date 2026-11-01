@@ -4,14 +4,14 @@ using System.Text;
 
 namespace RoyalTerminal.Multiplexing.Server;
 
-internal sealed record ViewIdentity(Guid Id, Guid SessionId, string Label, string Kind);
+internal sealed record ViewIdentity(Guid Id, Guid SessionId, string Label, string Kind, int NavigationVersion = 1);
 internal sealed record ViewLease(ViewIdentity View, string ReaderKey);
 internal sealed record ViewAction(string Name, Guid? BlockId = null, Guid? WindowId = null, string? Direction = null);
 internal sealed record ViewBatch(long Sequence, ViewAction[] Actions);
 internal sealed record ViewDelivery(long Cursor, ViewBatch[] Batches);
 internal sealed record ViewReceipt(Guid ClientId, long Sequence);
 
-/// <summary>One mailbox per explicitly consenting UI, never per PTY. Retain batches until the receiver acknowledges its cursor.</summary>
+/// <summary>One mailbox per consenting UI, unrelated to PTY ownership. Batches are retained until acknowledged.</summary>
 internal sealed class ViewMailbox(TimeProvider clock, Func<AccessGrant,bool> active)
 {
     private const int MaxViews = 128, MaxPerGrant = 8, MaxBatches = 32;
@@ -27,15 +27,16 @@ internal sealed class ViewMailbox(TimeProvider clock, Func<AccessGrant,bool> act
         internal bool Reading;
         internal TaskCompletionSource? Wake;
     }
-    internal ViewLease Open(Guid session, string label, string kind, AccessGrant owner)
+    internal ViewLease Open(Guid session, string label, string kind, AccessGrant owner, int navigationVersion = 1)
     {
         label = label.Trim();
-        if (label.Length is 0 or > 80 || label.Any(char.IsControl) || kind is not ("browser" or "native" or "mobile")) throw new ArgumentException("Invalid client kind or label.");
+        if (label.Length is 0 or > 80 || label.Any(char.IsControl)) throw new ArgumentException("Invalid client label.");
+        _ = ViewCapabilities.Forms(kind, navigationVersion);
         lock (_gate)
         {
             Sweep();
             if (_views.Count >= MaxViews || _views.Values.Count(x => x.Owner.Id == owner.Id) >= MaxPerGrant) throw new ApiException(429,"view_limit","Too many active remote views.");
-            var view = new ViewIdentity(Guid.NewGuid(),session,label,kind);
+            var view = new ViewIdentity(Guid.NewGuid(),session,label,kind,navigationVersion);
             var key = AccessTokens.GenerateToken();
             _views.Add(view.Id,new(view,owner,Digest(key),clock.GetTimestamp()));
             return new(view,key);
@@ -45,12 +46,20 @@ internal sealed class ViewMailbox(TimeProvider clock, Func<AccessGrant,bool> act
     {
         lock (_gate) { Sweep(); return _views.Values.Where(e => e.View.SessionId == session).Select(e => e.View).OrderBy(v => v.Id).ToArray(); }
     }
+    internal ViewActionCatalog Describe(Guid session, Guid id)
+    {
+        lock (_gate)
+        {
+            var view = Find(session, id).View;
+            return new(id, session, view.Kind, view.NavigationVersion, ViewCapabilities.Forms(view.Kind, view.NavigationVersion));
+        }
+    }
     internal ViewReceipt Publish(Guid session, Guid id, ViewAction[] actions)
     {
         lock (_gate)
         {
             var e = Find(session,id);
-            if (actions.Any(a => !ViewActions.Supported(e.View.Kind,a))) throw new ApiException(409,"unsupported_action","This receiver does not support the requested action.");
+            if (actions.Any(a => !ViewCapabilities.Allows(e.View.Kind,e.View.NavigationVersion,a))) throw new ApiException(409,"unsupported_action","This receiver does not support the requested action.");
             if (e.Queue.Count >= MaxBatches) throw new ApiException(429,"view_busy","The receiver has not acknowledged earlier batches.");
             var batch = new ViewBatch(checked(++e.Issued),actions); e.Queue.Enqueue(batch); Signal(e); return new(id,batch.Sequence);
         }

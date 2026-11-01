@@ -5,34 +5,26 @@ namespace RoyalTerminal.Multiplexing.Server;
 
 internal static class ViewActions
 {
-    internal static bool Supported(string kind,ViewAction a) => kind == "browser" || a.Name is "window.focus" or "pane.focus" && a.Direction is null;
     internal static ViewAction[] Parse(JsonElement args, MultiplexerSessionDescriptor session)
     {
         if (!args.TryGetProperty("actions",out var array) || array.ValueKind != JsonValueKind.Array || array.GetArrayLength() is < 1 or > 16) throw new ArgumentException("Supply 1–16 client actions.");
-        var commands = new List<ViewAction>();
+        var commands = new List<ViewAction>(array.GetArrayLength());
         foreach (var json in array.EnumerateArray())
         {
             var a = new ApiArguments(json); a.Validate("name","blockId","windowId","direction");
-            string name = a.String("name"); var block = a.OptionalId("blockId"); var window = a.OptionalId("windowId");
-            string? direction = json.TryGetProperty("direction",out _) ? a.String("direction") : null;
-            bool valid = name switch
-            {
-                "pane.focus" => window is null && ((block.HasValue && direction is null) || (!block.HasValue && direction is "left" or "right" or "up" or "down" or "next" or "previous")),
-                "window.focus" => window.HasValue && !block.HasValue && direction is null,
-                "pane.zoom" or "client.tab.next" or "client.tab.previous" or "client.palette" or "client.sidebar.toggle" => !block.HasValue && !window.HasValue && direction is null,
-                _ => false
-            };
-            if (!valid) throw new ArgumentException("Unknown client action or invalid action arguments.");
+            var block = a.OptionalId("blockId"); var window = a.OptionalId("windowId");
+            var command = new ViewAction(a.String("name"), block, window, json.TryGetProperty("direction",out _) ? a.String("direction") : null);
+            if (!ViewCapabilities.Allows("browser", 1, command)) throw new ArgumentException("Unknown client action or invalid action arguments.");
             if (block.HasValue && !session.Blocks.Any(b => b.Id == block && b.Placement != MultiplexerPaneKind.Unplaced)) throw new ApiException(409,"view_target","Terminal is missing or unplaced.");
             if (window.HasValue && !session.Windows.Any(w => w.Id == window)) throw new ApiException(409,"view_target","Window is missing.");
-            commands.Add(new(name,block,window,direction));
+            commands.Add(command);
         }
         return [..commands];
     }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy=JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(ViewLease)), JsonSerializable(typeof(ViewIdentity[])), JsonSerializable(typeof(ViewDelivery)), JsonSerializable(typeof(ViewReceipt))]
+[JsonSerializable(typeof(ViewLease)), JsonSerializable(typeof(ViewIdentity[])), JsonSerializable(typeof(ViewDelivery)), JsonSerializable(typeof(ViewReceipt)), JsonSerializable(typeof(ViewActionCatalog))]
 internal partial class RemoteViewJson : JsonSerializerContext;
 
 internal sealed partial class ApiCatalog
@@ -40,10 +32,16 @@ internal sealed partial class ApiCatalog
     private void RegisterRemoteViews()
     {
         var hub = new ViewMailbox(TimeProvider.System,_tokens.IsActive); var wire = RemoteViewJson.Default;
-        Define("client.open_view","Opt in one user interface for a single session. Keep the reader key in memory only.",["sessionId:string!","label:string!","kind:string!"],wire.ViewLease,(a,g,_) => {
+        Define("client.open_view","Opt in one UI for a single session using its original presentation profile.",["sessionId:string!","label:string!","kind:string!"],wire.ViewLease,(a,g,_) => {
             var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Open(s.Id,a.String("label"),a.String("kind"),g),wire.ViewLease);
         },"Session-scoped receiver; distinct from a terminal control lease.");
+        Define("client.open_navigator","Opt in a desktop overview that implements spatial, cyclic and tab navigation.",["sessionId:string!","label:string!"],wire.ViewLease,(a,g,_) => {
+            var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Open(s.Id,a.String("label"),"native",g,2),wire.ViewLease);
+        },"Never use the extended profile for legacy or mobile receivers.");
         Define("client.views","List remote-control-enabled interfaces. Does not expose receiver secrets.",["sessionId:string!"],wire.ViewIdentityArray,(a,g,_) => { ServerHttp.RequireAdministrator(g); return Done(hub.List(Session(a,g)),wire.ViewIdentityArray); });
+        Define("client.actions","Describe the presentation commands accepted by one active view. Each form accepts exactly the indicated argument, or none.",["sessionId:string!","clientId:string!"],wire.ViewActionCatalog,(a,g,_) => {
+            ServerHttp.RequireAdministrator(g); var session = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Describe(session.Id,a.Id("clientId")),wire.ViewActionCatalog);
+        },"Reading the catalog does not acknowledge, queue, or extend a receiver lease.");
         Define("client.queue","Validate and enqueue one ordered presentation-only batch for an explicit client.",["sessionId:string!","clientId:string!","actions:array!"],wire.ViewReceipt,(a,g,t) => {
             ServerHttp.RequireAdministrator(g); t.ThrowIfCancellationRequested(); var s = _workspaces.Broker.GetSession(Session(a,g)); return Done(hub.Publish(s.Id,a.Id("clientId"),ViewActions.Parse(a.Value,s)),wire.ViewReceipt);
         });
