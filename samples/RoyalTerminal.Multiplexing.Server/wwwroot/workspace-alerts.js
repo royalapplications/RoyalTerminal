@@ -1,78 +1,38 @@
-// Browser-only, opt-in observation. No token, event payload or cursor is stored on disk.
-const clean = value => [...String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, ' ')].slice(0, 240).join('');
-export function activityLine(e) {
-  switch (e.name) {
-    case 'terminal.desktop_notification': return {line: [e.notification?.title,e.notification?.body].map(clean).filter(Boolean).join(' · ') || 'Terminal notification', alert:true};
-    case 'terminal.bell': return {line:'Terminal bell',alert:true};
-    case 'terminal.progress_report': {const p=e.progressReport;return {line:`Progress: ${clean(p?.state)}${Number.isFinite(p?.progress)?` · ${p.progress}%`:''}`};}
-    case 'terminal.program_status_changed': {const r=e.record; if(!r)return null;return {line:`${clean(r.state)} · ${clean(r.title || r.message || e.recordId || 'Program')}`,alert:r.state==='Blocked'||r.state==='Error'};}
-    case 'terminal.child_exited': return {line:`Process exited (${Number.isInteger(e.exitCode)?e.exitCode:'unknown'})`,alert:e.exitCode!==0};
-    case 'terminal.pwd_changed': return {line:`Directory: ${clean(e.pwd)}`};
-    case 'terminal.title_changed': return {line:`Title: ${clean(e.text)}`};
-    default: return null;
-  }
-}
-export const deviceMessage = Object.freeze({title:'RoyalTerminal',body:'A terminal needs your attention. Open your workspace for details.'});
-
-// The first read establishes a cursor at NOW. Never turn backfilled output into new OS notifications.
-export async function followActivity(read,valid,deliver,signal) {
-  let after;
-  while (!signal.aborted && valid()) {
-    const page=await read(after,signal);
-    if(signal.aborted || !valid())return;
-    if(!Number.isSafeInteger(page.nextSequence) || page.nextSequence<0 || !Array.isArray(page.events))throw Error('Invalid activity cursor.');
-    if(after!==undefined) {
-      let expected=after;
-      for(const event of page.events) {
-        if(event.sequence!==++expected)throw Error('Activity history is incomplete. Restart observation to begin at the current cursor.');
-      }
-      if(expected!==page.nextSequence)throw Error('Activity page cursor is inconsistent.');
-      const entries=page.events.map(activityLine).filter(Boolean);
-      if(entries.length)await deliver(entries);
-    }
-    after=page.nextSequence;if(page.ended)return;
-  }
-}
-
-export function alertActions(ctx) {
-  let current,history=[],generation,sessionId,serial=0,rateAt=-Infinity;
-  const valid=(g,s)=>!ctx.state.stopped && ctx.state.generation===g && ctx.state.sessionId===s;
-  function stop(){++serial;current?.abort();current=null;history=[];generation=undefined;sessionId=undefined;}
-  globalThis.addEventListener?.('pagehide',stop);
-  async function read(ids,after,signal){
-    const args=after===undefined?ids:{...ids,after,limit:32,timeoutMs:8000};
-    const response=await fetch('api/call',{method:'POST',redirect:'error',cache:'no-store',credentials:'omit',signal,
-      headers:{Authorization:`Bearer ${ctx.state.token}`,'Content-Type':'application/json'},body:JSON.stringify({method:'terminal.events',arguments:args})});
-    if(!response.ok)throw Error(`Terminal activity unavailable (HTTP ${response.status}).`);return response.json();
-  }
-  async function start(device){
-    stop(); const run=serial,g=ctx.state.generation,s=ctx.state.sessionId,b=ctx.state.focused;
-    if(!s||!b)return;
-    let registration=null;
-    if(device){
-      if(!globalThis.isSecureContext || !globalThis.Notification || !navigator.serviceWorker)throw Error('Device notifications are unavailable here. Use Watch terminal activity instead.');
-      // Called directly from a user activation; do not ask on page load or on terminal output.
-      if(await Notification.requestPermission()!=='granted')throw Error('Device notifications were not enabled.');
-      if(run!==serial||!valid(g,s))return;
-      await navigator.serviceWorker.register(new URL('./workspace-alert-worker.js',import.meta.url));
-      registration=await navigator.serviceWorker.ready;
-    }
-    if(run!==serial||!valid(g,s))return;
-    const control=new AbortController();current=control;generation=g;sessionId=s;rateAt=-Infinity;
-    const isCurrent=()=>serial===run && valid(g,s);
-    ctx.toast(device?'Private device alerts enabled for this terminal.':'Watching activity for this terminal.');
-    void followActivity((after,signal)=>read({sessionId:s,blockId:b},after,signal),isCurrent,async entries=>{
-      history.push(...entries.map(e=>e.line));history=history.slice(-64);
-      if(!entries.some(e=>e.alert) || performance.now()-rateAt<5000)return;
-      rateAt=performance.now();
-      if(registration && document.hidden){await registration.showNotification(deviceMessage.title,{body:deviceMessage.body,tag:'royalterminal-attention',silent:true});}
-      else ctx.toast(entries.findLast(e=>e.alert).line);
-    },control.signal).catch(e=>{if(isCurrent()&&!control.signal.aborted){history=[];ctx.toast(e.message);}}).finally(()=>{if(current===control)current=null;});
-  }
-  return [
-    {title:'Watch terminal activity',hint:'In-app alerts · current terminal',block:true,run:()=>start(false)},
-    {title:'Enable private device alerts',hint:'Opt in · no terminal text on lock screen',block:true,run:()=>start(true)},
-    {title:'Read recent terminal activity',hint:'This tab only',session:true,run:()=>ctx.dialog('Recent terminal activity','Up to 64 events from the watched terminal. Watching does not take control.',[{name:'activity',label:'Recent activity',type:'textarea',readOnly:true,value:valid(generation,sessionId)&&history.length?history.join('\n'):'No activity recorded in this workspace.'}],'Done')},
-    {title:'Stop terminal activity alerts',hint:'Clear this tab’s activity',session:true,run:()=>{stop();ctx.toast('Activity cleared.');}},
-  ];
+import {alertActions as foreground} from './workspace-foreground-alerts.js';
+export {activityLine,deviceMessage,followActivity} from './workspace-foreground-alerts.js';
+const receiptKey='royalterminal.push.receipts.v1';
+const registrationURL=new URL('./workspace-alert-worker.js',import.meta.url);
+// Store opaque removal receipts only, never bearer tokens, block/session IDs, subscription URLs or terminal output.
+function receipts(){try{return JSON.parse(localStorage.getItem(receiptKey)||'[]').filter(x=>typeof x==='string'&&/^[0-9a-f-]{36}$/i.test(x)).slice(-64);}catch{return [];}}
+function store(ids){try{localStorage.setItem(receiptKey,JSON.stringify(ids.slice(-64)));}catch{/* Browser unsubscribe remains available with storage disabled. */}}
+if(typeof document!=='undefined'){const link=document.createElement('link');link.rel='manifest';link.href=new URL('./workspace.webmanifest',import.meta.url);document.head.append(link);}
+function bytes(key){const raw=atob(key.replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(raw,c=>c.charCodeAt(0));}
+async function request(path,token,method='GET',body){const r=await fetch(new URL('./api/push/'+path,registrationURL),{method,credentials:'omit',redirect:'error',cache:'no-store',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error(`Push service returned HTTP ${r.status}.`);return r.json();}
+export function alertActions(ctx){
+  let busy=false;
+  const enable=async()=>{
+    if(busy)return;busy=true;const {token,sessionId,focused:blockId,generation}=ctx.state;
+    try{
+      if(!isSecureContext||!globalThis.Notification||!navigator.serviceWorker||!globalThis.PushManager)throw Error('Web Push is unavailable. On iOS, open the installed Home Screen web app.');
+      if(await Notification.requestPermission()!=='granted')throw Error('Notifications were not enabled.');
+      const settings=await request('settings',token);if(!settings.enabled)throw Error('The operator has not enabled background Web Push. Foreground alerts remain available.');
+      await navigator.serviceWorker.register(registrationURL);const reg=await navigator.serviceWorker.ready;
+      const key=bytes(settings.applicationServerKey);let sub=await reg.pushManager.getSubscription();
+      if(sub && !new Uint8Array(sub.options.applicationServerKey).every((v,i)=>key[i]===v))throw Error('Server push key changed. Disable background alerts on this device and register again.');
+      sub??=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+      if(ctx.state.generation!==generation||ctx.state.stopped||ctx.state.sessionId!==sessionId||ctx.state.focused!==blockId)throw Error('Workspace selection changed; alert was not registered.');
+      const receipt=await request('watch',token,'POST',{sessionId,blockId,endpoint:sub.endpoint});
+      if(ctx.state.generation!==generation||ctx.state.stopped){await request('watch/'+receipt.id,token,'DELETE');return;}
+      store([...new Set([...receipts(),receipt.id])]);ctx.toast('Background alerts enabled until '+new Date(receipt.expiresUtc).toLocaleString()+'. Terminal text is never sent.');
+    }finally{busy=false;}
+  };
+  const disable=async(token)=>{
+    // Unsubscribe the local browser even when the grant is expired or the broker is offline.
+    const reg=await navigator.serviceWorker?.getRegistration(registrationURL);const sub=await reg?.pushManager?.getSubscription();
+    if(sub && !await sub.unsubscribe())throw Error('The browser could not remove this subscription.');
+    const ids=receipts();await Promise.allSettled(ids.map(id=>request('watch/'+id,token,'DELETE')));store([]);
+  };
+  document.getElementById('disconnect')?.addEventListener('click',()=>{if(receipts().length)void disable(ctx.state.token).catch(()=>{});},{capture:true});
+  return [...foreground(ctx),{title:'Enable background push for this terminal',hint:'Opt in · works after closing the tab',block:true,run:enable},
+    {title:'Disable background push on this device',hint:'Remove all browser push watches',session:true,run:async()=>{await disable(ctx.state.token);ctx.toast('Background push disabled on this device.');}}];
 }
