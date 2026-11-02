@@ -87,15 +87,8 @@ internal static class WorkspaceRoutes
             await workspaces.CloseBlockAsync(ServerHttp.RouteId(context, "sessionId"), ServerHttp.RouteId(context, "blockId"));
             await ServerHttp.WriteAsync(context, new ApiSuccess(), ServerJsonContext.Default.ApiSuccess);
         });
-        app.MapPost("/api/sessions/{sessionId}/blocks/{blockId}/input", async (HttpContext context) =>
-        {
-            Guid sessionId = ServerHttp.RouteId(context, "sessionId");
-            AccessGrant grant = ServerHttp.Authorize(context, tokens, sessionId);
-            if (!grant.CanControl) throw new ApiException(403, "forbidden", "This capability is read only.");
-            InputRequest input = await ServerHttp.ReadAsync(context, ServerJsonContext.Default.InputRequest);
-            workspaces.Input(sessionId, ServerHttp.RouteId(context, "blockId"), input.Data);
-            await ServerHttp.WriteAsync(context, new ApiSuccess(), ServerJsonContext.Default.ApiSuccess);
-        });
+        app.MapPost("/api/sessions/{sessionId}/blocks/{blockId}/input", (HttpContext context) =>
+            WriteInputAsync(context, tokens, workspaces.Input));
         app.MapGet("/api/sessions/{sessionId}/blocks/{blockId}/capture", (HttpContext context) =>
         {
             Guid sessionId = ServerHttp.RouteId(context, "sessionId");
@@ -104,5 +97,19 @@ internal static class WorkspaceRoutes
             return ServerHttp.WriteAsync(context, capture, ServerJsonContext.Default.ScreenCapture);
         });
         app.MapGet("/api/sessions/{sessionId}/blocks/{blockId}/stream", streams.HandleAsync);
+    }
+
+    internal static async Task WriteInputAsync(HttpContext context, AccessTokens tokens, Action<Guid, Guid, string> send)
+    {
+        Guid session = ServerHttp.RouteId(context, "sessionId");
+        AccessGrant grant = ServerHttp.Authorize(context, tokens, session);
+        if (!grant.CanControl) throw new ApiException(403, "forbidden", "This capability is read only.");
+        Guid block = ServerHttp.RouteId(context, "blockId");
+        InputRequest input = await ServerHttp.ReadAsync(context, ServerJsonContext.Default.InputRequest);
+        // A slow request body must not reserve authority for a later terminal write.
+        context.RequestAborted.ThrowIfCancellationRequested();
+        if (!tokens.IsActive(grant)) throw new ApiException(403, "expired", "Input access expired or was revoked.");
+        send(session, block, input.Data);
+        await ServerHttp.WriteAsync(context, new ApiSuccess(), ServerJsonContext.Default.ApiSuccess);
     }
 }
