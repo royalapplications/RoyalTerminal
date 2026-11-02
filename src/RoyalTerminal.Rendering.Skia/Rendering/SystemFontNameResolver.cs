@@ -6,7 +6,7 @@ using SkiaSharp;
 namespace RoyalTerminal.Avalonia.Rendering;
 
 /// <summary>Resolves family names and family-plus-advertised-style aliases without platform substitution.</summary>
-internal sealed class SystemFontNameResolver(IConfiguredFontFamilyMatcher matcher)
+internal sealed class SystemFontNameResolver(IConfiguredFontFamilyMatcher matcher, Func<string, string?>? expandWindowsFaceName = null)
 {
     internal SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null)
     {
@@ -21,6 +21,12 @@ internal sealed class SystemFontNameResolver(IConfiguredFontFamilyMatcher matche
             existing.Dispose();
             return null;
         }
+
+        // Windows font pickers may persist LOGFONT's 31-character face name.
+        // Only expand names confirmed by GDI; style matching stays exact.
+        if (family.Length == 31 && (expandWindowsFaceName ?? WindowsFontFaceName.TryExpand)(family) is { } fullName &&
+            fullName.Length > family.Length && fullName.StartsWith(family, StringComparison.OrdinalIgnoreCase))
+            return Match(fullName, style, styleName);
 
         // Accept a suffix only when the font actually advertises that style.
         // Longest family prefixes win; no hard-coded weight words are stripped.

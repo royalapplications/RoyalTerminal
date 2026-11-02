@@ -26,6 +26,82 @@ public sealed class SystemFontNameResolverTests
         Assert.Equal((family, TerminalTypefaceStyle.Regular, advertised), matcher.Requests[^1]);
     }
 
+    [Theory]
+    [InlineData("Bahnschrift SemiBold SemiConden", "Bahnschrift SemiBold SemiCondensed", "Bahnschrift", "SemiBold SemiCondensed")]
+    [InlineData("Segoe UI Variable Display Semib", "Segoe UI Variable Display Semibold", "Segoe UI Variable Display", "Semibold")]
+    public void TruncatedWindowsNamesUseConfirmedFullFaceMetadata(string stored, string fullName, string family, string advertised)
+    {
+        Matcher matcher = new((name, _, style) => name == family && style == advertised ? Mono() : null);
+        SystemFontNameResolver resolver = new(matcher, name => name == stored ? fullName : null);
+        using SKTypeface? face = resolver.Match(stored, TerminalTypefaceStyle.Regular);
+        Assert.NotNull(face);
+        Assert.Equal((family, TerminalTypefaceStyle.Regular, advertised), matcher.Requests[^1]);
+    }
+
+    [Fact]
+    public void ExactFamilyAtTheWindowsNameLimitWinsWithoutNativeExpansion()
+    {
+        string family = new('x', 31);
+        Matcher matcher = new((name, _, _) => name == family ? Mono() : null);
+        using SKTypeface? face = new SystemFontNameResolver(matcher,
+            _ => throw new InvalidOperationException("Exact families must not be expanded.")).Match(family, TerminalTypefaceStyle.Regular);
+        Assert.NotNull(face);
+    }
+
+    [Theory]
+    [InlineData("Unrelated Family Light")]
+    [InlineData("Bahnschrift SemiBold SemiConden")]
+    [InlineData("Bahnschrift SemiBold SemiConde")]
+    public void ExpansionCannotSubstituteUnrelatedOrNonExpandedNames(string fullName)
+    {
+        Matcher matcher = new((_, _, _) => null);
+        Assert.Null(new SystemFontNameResolver(matcher, _ => fullName)
+            .Match("Bahnschrift SemiBold SemiConden", TerminalTypefaceStyle.Regular));
+        Assert.DoesNotContain(matcher.Requests, request => request.Family == "Unrelated Family Light");
+    }
+
+    [Fact]
+    public void ExpandedAliasesStillHonorExplicitStyles()
+    {
+        Matcher matcher = new((name, _, style) => name == "Bahnschrift" && style is "SemiBold SemiCondensed" or "Heavy" ? Mono() : null);
+        SystemFontNameResolver resolver = new(matcher, _ => "Bahnschrift SemiBold SemiCondensed");
+        using SKTypeface? face = resolver.Match("Bahnschrift SemiBold SemiConden", TerminalTypefaceStyle.Bold, "Heavy");
+        Assert.NotNull(face);
+        Assert.Equal(("Bahnschrift", TerminalTypefaceStyle.Bold, "Heavy"), matcher.Requests[^1]);
+        Assert.Null(resolver.Match("Bahnschrift SemiBold SemiConden", TerminalTypefaceStyle.Bold, "Missing"));
+    }
+
+    [Theory]
+    [InlineData("Bahnschrift SemiBold SemiConden", "Bahnschrift", "SemiBold SemiCondensed", 600)]
+    [InlineData("Bahnschrift SemiLight SemiConde", "Bahnschrift", "SemiLight SemiCondensed", 350)]
+    [InlineData("Segoe UI Variable Display Semib", "Segoe UI Variable Display", "Semibold", 600)]
+    [InlineData("Segoe UI Variable Display Semil", "Segoe UI Variable Display", "Semilight", 350)]
+    [InlineData("Segoe UI Variable Small Semibol", "Segoe UI Variable Small", "Semibold", 600)]
+    [InlineData("Segoe UI Variable Small Semilig", "Segoe UI Variable Small", "Semilight", 350)]
+    [InlineData("Segoe UI Variable Text Semiligh", "Segoe UI Variable Text", "Semilight", 350)]
+    public void NativeWindowsTruncatedAliasesRetainFamilyWeightAndWidth(string stored, string family, string style, int weight)
+    {
+        Assert.SkipWhen(!OperatingSystem.IsWindows(), "LOGFONT aliases are specific to Windows.");
+        using SKFontManager manager = SKFontManager.CreateDefault();
+        using SKFontStyleSet styles = manager.GetFontStyles(family);
+        Assert.SkipWhen(styles.Count == 0, "Test font is not installed.");
+        using SKTypeface? expected = new SkiaConfiguredFontFamilyMatcher(manager).Match(family, TerminalTypefaceStyle.Regular, style);
+        Assert.NotNull(expected);
+        using GlyphCache cache = new(stored);
+        Assert.Equal(expected.FamilyName, cache.RegularTypeface.FamilyName);
+        Assert.Equal(weight, cache.RegularTypeface.FontWeight);
+        Assert.Equal(expected.FontWidth, cache.RegularTypeface.FontWidth);
+        using GlyphCache configured = GlyphCache.CreateWithFontFamilies(new() { Regular = [stored] });
+        Assert.Equal(cache.RegularTypeface.FontWeight, configured.RegularTypeface.FontWeight);
+        Assert.Equal(cache.MeasureCellSize(16), configured.MeasureCellSize(16));
+    }
+
+    [Theory]
+    [InlineData("Source Code Pro Light")]
+    [InlineData("Missing-font-2416-ABCDEFGHIJKLM")]
+    public void NativeNameExpansionRejectsShortNamesAndUnrelatedPlatformSubstitution(string name)
+        => Assert.Null(WindowsFontFaceName.TryExpand(name));
+
     [Fact]
     public void RealFamilyEndingInStyleWordWinsOverAlias()
     {

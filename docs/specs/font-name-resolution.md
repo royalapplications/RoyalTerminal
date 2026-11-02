@@ -7,6 +7,15 @@ prefix wins, and the suffix must match a real advertised style (case-insensitive
 in the Skia matcher). A genuine family whose name ends in `Light` wins over an
 alias. Unknown suffixes never silently select the base family's regular face.
 
+Windows GDI can truncate face names to 31 characters, for example
+`Bahnschrift SemiBold SemiConden`. After exact-family lookup fails, Windows
+resolves such names through GDI and reads the full selected face with
+`GetTextFaceW`. Accept that expansion only when it is longer and retains the
+entire requested prefix; unrelated platform substitutions are rejected. Resolve
+the resulting full name with the same exact advertised-style rules. Never guess
+from an abbreviated style prefix. Other platforms do not call GDI or perform
+this Windows-specific expansion. Stored font strings remain unchanged.
+
 Aliases behave like explicitly named faces: they may override the logical style
 category. An explicit `RegularStyle`/`BoldStyle`/etc. overrides an alias's style;
 a missing explicit style remains unavailable. Legacy glyph caches derive their
@@ -25,7 +34,9 @@ through `FontSource.File`/`FontFilePath` or `TypefaceCollection`. The embedded f
 is separately owned by each cache; styled faces use the existing synthesis policy
 when no installed variants exist. The font and its OFL-1.1 copyright/license are
 embedded in the renderer, and the license is also shipped in its NuGet package.
-See [bundled font provenance](../../src/RoyalTerminal.Rendering.Skia/Fonts/README.md).
+The fallback is an unchanged copy of
+`external/ghostty/src/font/res/JetBrainsMonoNoNF-Regular.ttf` from the pinned
+Ghostty submodule.
 Explicitly requested, available proportional fonts remain supported. File-loaded
 fonts and synthetic-style policy retain their existing behavior.
 
