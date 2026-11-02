@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 const token=process.env.ROYALTERMINAL_MUX_TEST_TOKEN||'browser-test-token-012345678901234567890123456789';
-async function command(page,name){await page.locator('#help-button').click();await page.locator('#palette-query').fill(name);await page.getByRole('button',{name,exact:true}).click();}
+async function command(page,name){await page.locator('#help-button').click();await page.locator('#palette-query').fill(name);await page.getByRole('option',{name,exact:true}).click();}
 test('mobile observer sees new OSC activity and can clear it without acquiring a controller',async({page,request})=>{
  const api=async(method,args)=>{const r=await request.post('/api/call',{headers:{Authorization:`Bearer ${token}`},data:{method,arguments:args}});expect(r.ok()).toBe(true);return r.json();};
  await page.setViewportSize({width:390,height:844});const session=await api('session.create',{label:'Activities'});const sessionId=session.id;
