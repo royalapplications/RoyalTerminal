@@ -40,7 +40,7 @@ internal static class LayoutEdits
                 return Send("session.close_window");
             case LayoutTool.NewShellRight: case LayoutTool.NewShellBelow:
                 var spec = new JsonObject { ["windowId"] = home.ToString("D"), ["label"] = string.IsNullOrWhiteSpace(label) ? "Shell" : Label(), ["orientation"] = tool == LayoutTool.NewShellRight ? "horizontal" : "vertical", ["expectedRevision"] = s.Revision };
-                if (subject.HasValue) { var anchor = Block(subject); if (anchor.WindowId != home || anchor.Placement != MultiplexerPaneKind.Tiled) throw new ArgumentException("Select a tiled split anchor, or clear the selection."); spec["splitBlockId"] = anchor.Id.ToString("D"); }
+                if (subject.HasValue) { var anchor = Block(subject); if (anchor.WindowId != home || anchor.Placement == MultiplexerPaneKind.Unplaced) throw new ArgumentException("Select a visible split anchor, or clear the selection."); spec["splitBlockId"] = anchor.Id.ToString("D"); }
                 a.Remove("windowId"); a.Remove("expectedRevision"); a["block"] = spec; return Send("block.create");
         }
         var block = Block(subject);
@@ -50,9 +50,13 @@ internal static class LayoutEdits
         {
             case LayoutTool.RenameBlock: a.Remove("windowId"); a["label"] = Label(); return Send("session.set_block_label");
             case LayoutTool.Grow: case LayoutTool.Shrink:
-                if (window.Layout is null || block.Placement != MultiplexerPaneKind.Tiled) throw new ArgumentException("Select a tiled terminal in a split.");
-                var layout = ResizeParent(window.Layout, block.Id, tool == LayoutTool.Grow ? .05 : -.05);
-                a.Remove("blockId"); a["layout"] = JsonSerializer.SerializeToNode(layout, OverviewJson.Default.MultiplexerLayoutNode); return Send("session.set_layout");
+                var frame = block.FloatingLayerId is Guid id ? window.FloatingLayers?.SingleOrDefault(x=>x.Id==id) : null;
+                var root = frame?.Layout ?? (block.Placement==MultiplexerPaneKind.Tiled ? window.Layout : null);
+                if(root is null)throw new ArgumentException("Select a terminal in a tiled or floating split.");
+                var layout=ResizeParent(root,block.Id,tool==LayoutTool.Grow?.05:-.05);
+                a.Remove("blockId");a["layout"]=JsonSerializer.SerializeToNode(layout,OverviewJson.Default.MultiplexerLayoutNode);
+                if(frame is null)return Send("session.set_layout");
+                a.Remove("windowId");a["layerId"]=frame.Id.ToString("D");return Send("session.set_layer_layout");
             case LayoutTool.Swap:
                 var second = Block(other); if (second.Id == block.Id) throw new ArgumentException("Select a different terminal to swap with.");
                 a.Remove("blockId"); a.Remove("windowId"); a["firstId"] = block.Id.ToString("D"); a["secondId"] = second.Id.ToString("D"); return Send("block.swap");
@@ -71,7 +75,6 @@ internal static class LayoutEdits
         }
         return Send("block.place");
     }
-
     private static MultiplexerLayoutNode ResizeParent(MultiplexerLayoutNode root, Guid block, double delta)
     {
         var result = Visit(root); return result ?? throw new ArgumentException("This terminal has no parent split.");
@@ -84,7 +87,6 @@ internal static class LayoutEdits
             return Visit(b) is { } right ? n with { Second = right } : null;
         }
     }
-
     internal static MultiplexerFloatBounds DragFloat(MultiplexerFloatBounds r, Vector delta, Size viewport, bool resize)
     {
         if (!(viewport.Width > 0 && viewport.Height > 0 && double.IsFinite(delta.X) && double.IsFinite(delta.Y))) throw new ArgumentException("Invalid drag coordinates.");
@@ -92,7 +94,6 @@ internal static class LayoutEdits
         return resize ? r with { Width = Math.Clamp(r.Width + dx, Math.Min(r.Width, 300), 10000-r.X), Height = Math.Clamp(r.Height + dy, Math.Min(r.Height, 300), 10000-r.Y) }
             : r with { X = Math.Clamp(r.X + dx, 0, 10000-r.Width), Y = Math.Clamp(r.Y + dy, 0, 10000-r.Height) };
     }
-
     internal static LayoutTool DropZone(Rect area, Point p)
     {
         double x = (p.X - area.X) / area.Width, y = (p.Y - area.Y) / area.Height;

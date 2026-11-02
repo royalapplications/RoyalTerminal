@@ -111,7 +111,7 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
         }
     }
 
-    /// <summary>Changes a block label without restarting it.</summary>
+    /// <summary>Changes a block label with optional optimistic concurrency.</summary>
     public MultiplexerBlockDescriptor RenameBlock(Guid sessionId, Guid blockId, string label, long? expectedRevision = null)
     {
         ValidateLabel(label);
@@ -151,7 +151,7 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
         ITerminalTransportOptions options, CancellationToken cancellationToken = default)
         => StartBlockAsync(sessionId, windowId, null, MultiplexerSplitOrientation.Horizontal, 0.5, label, options, null, cancellationToken);
 
-    /// <summary>Starts a terminal by splitting a tiled target under the same revision check.</summary>
+    /// <summary>Starts a terminal by splitting a visible target within its existing tile tree or floating frame.</summary>
     public ValueTask<MultiplexerBlockDescriptor> SplitBlockAsync(Guid sessionId, Guid targetBlockId,
         MultiplexerSplitOrientation orientation, double ratio, string label, ITerminalTransportOptions options,
         long? expectedRevision = null, CancellationToken cancellationToken = default)
@@ -163,28 +163,24 @@ public sealed partial class MultiplexerBroker : IAsyncDisposable
         lock (_gate) return FindBlock(FindSession(sessionId), blockId).Attach(role, lastSequence);
     }
 
-    /// <summary>Removes a block from its placement and explicitly stops its transport.</summary>
-    public ValueTask CloseBlockAsync(Guid sessionId, Guid blockId) => RetireBlockAsync(sessionId, blockId, null, null);
-
-    /// <summary>Closes a one-terminal floating layer only if it still is floating at the expected revision.</summary>
-    public ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid blockId, long expectedRevision)
-        => RetireBlockAsync(sessionId, blockId, MultiplexerPaneKind.Floating, expectedRevision);
-
-    private async ValueTask RetireBlockAsync(Guid sessionId, Guid blockId, MultiplexerPaneKind? required, long? revision)
+    /// <summary>Removes one terminal from its placement and explicitly stops its transport. Its siblings remain running.</summary>
+    public async ValueTask CloseBlockAsync(Guid sessionId, Guid blockId)
     {
         MultiplexerBlock block;
         lock (_gate)
         {
             Session session = FindSession(sessionId);
-            CheckRevision(session, revision);
             block = FindBlock(session, blockId);
-            if (required is { } kind && GetPlacement(session, blockId).Kind != kind) throw Conflict("The block is not a floating layer.");
             RemoveBlock(session, block);
             _retiring.Add(block);
         }
         try { await block.CloseAsync().ConfigureAwait(false); }
         finally { lock (_gate) _retiring.Remove(block); }
     }
+
+    /// <summary>Closes the whole floating frame by its stable handle or a current member. A stale revision rejects before any process is stopped.</summary>
+    public ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid blockId, long expectedRevision)
+        => CloseFrameAsync(sessionId, blockId, expectedRevision);
 
     /// <summary>Removes an entire session and explicitly stops every owned transport.</summary>
     public async ValueTask CloseSessionAsync(Guid sessionId)
