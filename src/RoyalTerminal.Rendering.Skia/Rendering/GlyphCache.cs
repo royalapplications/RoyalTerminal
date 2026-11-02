@@ -63,7 +63,7 @@ public sealed class GlyphCache : IDisposable
     /// <summary>
     /// Creates a new glyph cache with the specified font family and max entries.
     /// </summary>
-    /// <param name="fontFamily">Font family name (e.g., "JetBrains Mono", "Cascadia Code").</param>
+    /// <param name="fontFamily">Family or advertised face name (e.g., "Cascadia Code Light"). Unavailable names use a monospace fallback.</param>
     /// <param name="maxEntries">Maximum number of cached glyph images before eviction.</param>
     public GlyphCache(string fontFamily = "Consolas", int maxEntries = 8192)
         : this(fontFamily, TerminalFontSource.System, fontFilePath: null, maxEntries)
@@ -104,10 +104,15 @@ public sealed class GlyphCache : IDisposable
             return;
         }
 
-        _regularTypeface = CreateSystemTypeface(normalizedFamily, SKFontStyle.Normal);
-        _boldTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Bold);
-        _italicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.Italic);
-        _boldItalicTypeface = SKTypeface.FromFamilyName(normalizedFamily, SKFontStyle.BoldItalic);
+        using SKFontManager manager = SKFontManager.CreateDefault();
+        SkiaConfiguredFontFamilyMatcher matcher = new(manager);
+        _regularTypeface = matcher.Match(normalizedFamily, TerminalTypefaceStyle.Regular) ?? matcher.CreateMonospaceFallback();
+        // Styled variants must come from the selected family, including when
+        // the requested name was a face alias or an unavailable family.
+        string selectedFamily = _regularTypeface.FamilyName;
+        _boldTypeface = matcher.Match(selectedFamily, TerminalTypefaceStyle.Bold);
+        _italicTypeface = matcher.Match(selectedFamily, TerminalTypefaceStyle.Italic);
+        _boldItalicTypeface = matcher.Match(selectedFamily, TerminalTypefaceStyle.BoldItalic);
         List<TerminalTypefaceEntry> entries = [new(_regularTypeface, TerminalTypefaceStyle.Regular)];
         if (_boldTypeface is not null && SkiaConfiguredFontFamilyMatcher.MatchesStyle(_boldTypeface, TerminalTypefaceStyle.Bold))
             entries.Add(new(_boldTypeface, TerminalTypefaceStyle.Bold));
@@ -305,11 +310,6 @@ public sealed class GlyphCache : IDisposable
             _boldItalicTypeface?.Dispose();
         }
         _configuredFamilies?.Dispose();
-    }
-
-    private static SKTypeface CreateSystemTypeface(string fontFamily, SKFontStyle style)
-    {
-        return SKTypeface.FromFamilyName(fontFamily, style) ?? SKTypeface.Default;
     }
 
     private static SKTypeface? TryCreateTypefaceFromFile(string? fontFilePath)
