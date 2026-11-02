@@ -1,30 +1,29 @@
-<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#10151E" Opened="InitializeEditing">
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#14171C" Opened="InitializeEditing" SizeChanged="AdaptNavigation">
   <Window.Styles>
-    <Style Selector="Border.workspace-active-pane > DockPanel > TextBlock"><Setter Property="Foreground" Value="#D5C8FF"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    <Style Selector="Border.workspace-active-pane > DockPanel > TextBlock"><Setter Property="Foreground" Value="#BDEBD6"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   </Window.Styles>
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="12" RowSpacing="8">
-    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
-      <TextBlock Text="Window" VerticalAlignment="Center"/>
-      <ComboBox x:Name="WindowsList" Grid.Column="1" MinWidth="100" HorizontalAlignment="Stretch"/>
-      <Button Grid.Column="2" Content="Zoom" Click="ToggleLocalZoom" ToolTip.Tip="Zoom the selected pane or restore all panes (Alt+Z). The shared layout is unchanged."/>
-      <Button Grid.Column="3" x:Name="ViewConsent" Content="Allow remote focus" Click="ToggleRemoteView" ToolTip.Tip="Let an administrator navigate or zoom this overview only; all terminals remain observers"/>
-      <Button Grid.Column="4" x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control"/>
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="7" RowSpacing="5">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Background="#1C2026">
+      <!-- Both presentations use the same selector identity. Never recreate or control a PTY to select a tab. -->
+      <ComboBox x:Name="WindowsList" MinWidth="88" HorizontalAlignment="Stretch" VerticalAlignment="Center" AutomationProperties.Name="Workspace window"/>
+      <ScrollViewer x:Name="TabViewport" IsVisible="False" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <TabStrip x:Name="WindowTabs" ItemsSource="{Binding #WindowsList.ItemsSource}" SelectedItem="{Binding #WindowsList.SelectedItem,Mode=TwoWay}" AutoScrollToSelectedItem="True" AutomationProperties.Name="Workspace windows"><TabStrip.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></TabStrip.ItemsPanel></TabStrip>
+      </ScrollViewer>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+        <Button Content="Zoom" Click="ToggleLocalZoom" ToolTip.Tip="Zoom this view only (Alt+Z)"/>
+        <Button x:Name="ViewConsent" Content="Allow remote focus" Click="ToggleRemoteView" ToolTip.Tip="Let an administrator navigate this observer. Does not grant terminal input."/>
+        <Button x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control"/>
+      </StackPanel>
     </Grid>
-    <StackPanel x:Name="EditBar" Grid.Row="1" IsVisible="False" Spacing="5">
-      <WrapPanel>
-        <ComboBox x:Name="EditSource" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" ToolTip.Tip="Source terminal"/>
-        <ComboBox x:Name="EditOperation" MinWidth="125" Margin="0,0,5,3"/>
-        <ComboBox x:Name="EditTarget" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" ToolTip.Tip="Target terminal"/>
-        <ComboBox x:Name="EditDestination" MinWidth="125" MaxWidth="200" Margin="0,0,5,3"/>
-        <TextBox x:Name="EditLabel" PlaceholderText="Name" Width="135" MaxLength="256" Margin="0,0,5,3"/>
-        <Button x:Name="ApplyEdit" Content="Apply" Click="ApplyLayoutEdit" Margin="0,0,0,3"/>
-      </WrapPanel>
-      <TextBlock x:Name="EditHint" Foreground="#A4B0C2" Height="40" TextWrapping="Wrap"/>
-    </StackPanel>
-    <Grid Grid.Row="2" ClipToBounds="True">
-      <views:OverviewPanel x:Name="Surface" Editing="{Binding #EditBar.IsVisible}"/>
-      <Border x:Name="GestureLayer" Background="Transparent" IsVisible="{Binding #EditBar.IsVisible}" Focusable="True" PointerPressed="BeginDrag" PointerMoved="MoveDrag" PointerReleased="EndDrag" PointerCaptureLost="GestureCaptureLost"/>
-    </Grid>
-    <StackPanel Grid.Row="3" Spacing="4"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#A4B0C2"/><TextBlock x:Name="StatusText" TextWrapping="Wrap"/></StackPanel>
+    <StackPanel x:Name="EditBar" Grid.Row="1" IsVisible="False" Spacing="4"><WrapPanel>
+      <ComboBox x:Name="EditSource" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Source terminal"/>
+      <ComboBox x:Name="EditOperation" MinWidth="125" Margin="0,0,5,3" AutomationProperties.Name="Layout operation"/>
+      <ComboBox x:Name="EditTarget" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Target terminal"/>
+      <ComboBox x:Name="EditDestination" MinWidth="125" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Destination window"/>
+      <TextBox x:Name="EditLabel" PlaceholderText="Name" Width="135" MaxLength="256" Margin="0,0,5,3" AutomationProperties.Name="Terminal or window name"/>
+      <Button x:Name="ApplyEdit" Content="Apply" Click="ApplyLayoutEdit" Margin="0,0,0,3"/>
+    </WrapPanel><TextBlock x:Name="EditHint" Foreground="#B4C3BC" TextWrapping="Wrap"/></StackPanel>
+    <Grid Grid.Row="2" ClipToBounds="True"><views:OverviewPanel x:Name="Surface" Editing="{Binding #EditBar.IsVisible}"/><Border x:Name="GestureLayer" Background="Transparent" IsVisible="{Binding #EditBar.IsVisible}" Focusable="True" PointerPressed="BeginDrag" PointerMoved="MoveDrag" PointerReleased="EndDrag" PointerCaptureLost="GestureCaptureLost"/></Grid>
+    <StackPanel Grid.Row="3" Spacing="2"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#B4C3BC"/><TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="11"/></StackPanel>
   </Grid>
 </Window>

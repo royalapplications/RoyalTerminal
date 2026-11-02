@@ -1,5 +1,6 @@
 // Remote UI actions cannot send terminal input, request a lease or create a process.
 import {applyViewPage} from './view-delivery.js';
+import {initializeDrawer} from './shell-drawer.js';
 export function neighbor(items,current,dir){
   const i=items.findIndex(x=>x.id===current);if(i<0)return null;
   if(dir==='next'||dir==='previous')return items[(i+items.length+(dir==='next'?1:-1))%items.length].id;
@@ -17,7 +18,7 @@ export async function present(ctx,a,current,remote=false){
   const choose=id=>{const i=s.windows.findIndex(w=>w.id===id);if(i<0)return false;state.remoteNavigation=remote;try{document.querySelectorAll('#window-tabs [role=tab]')[i]?.click();}finally{state.remoteNavigation=false;}return state.windowId===id;};
   switch(a.name){
     case 'client.palette':click('palette-button');return true;
-    case 'client.sidebar.toggle':{const app=document.getElementById('application'),side=document.getElementById('sidebar');if(matchMedia('(max-width:640px)').matches)side.classList.toggle('visible');else{const hide=!side.hidden;side.hidden=hide;app.style.gridTemplateColumns=hide?'minmax(0,1fr)':'';}return true;}
+    case 'client.sidebar.toggle':click('toggle-sidebar');return true;
     case 'pane.zoom':if(!state.focused)return false;{const previous=state.zoom;click('zoom-block');return state.zoom!==previous;}
     case 'window.focus':return choose(a.windowId);
     case 'client.tab.next':case 'client.tab.previous':{const i=s.windows.findIndex(w=>w.id===state.windowId);return i>=0&&choose(s.windows[(i+s.windows.length+(a.name.endsWith('next')?1:-1))%s.windows.length].id);}
@@ -31,6 +32,7 @@ export async function present(ctx,a,current,remote=false){
 }
 export function remoteViewActions(ctx){
   if(typeof document==='undefined')return [];
+  initializeDrawer();
   let active=null,serial=0;const state=ctx.state,stopButton=document.createElement('button');stopButton.type='button';stopButton.hidden=true;stopButton.textContent='Stop remote UI';stopButton.onclick=()=>stop();document.getElementById('help-button').before(stopButton);
   const same=v=>active===v&&!state.stopped&&state.generation===v.gen&&state.sessionId===v.session;
   async function rpc(v,method,fields,signal){const r=await fetch('/api/call',{method:'POST',credentials:'omit',redirect:'error',cache:'no-store',signal,headers:{Authorization:`Bearer ${v.token}`,'Content-Type':'application/json'},body:JSON.stringify({method,arguments:{sessionId:v.session,...fields}})});const result=await r.json();if(!r.ok)throw Error(result.message||`HTTP ${r.status}`);return result;}

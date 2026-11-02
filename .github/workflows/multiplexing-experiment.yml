@@ -61,21 +61,25 @@ jobs:
       - name: Exercise both Lua hosts, real PTYs, receiver outcomes and scoped denial
         if: runner.os == 'Linux'
         run: python3 scripts/workspace/smoke-placement-focus.py
-      - name: Optional visual review on this runner (tag the tip commit with [workspace-ui])
+      - name: Optional whole-change and Chrome review on this runner
         if: runner.os == 'Linux' && github.event_name == 'pull_request'
         working-directory: samples/RoyalTerminal.Multiplexing.Server
         env:
           REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
           WORKSPACE_REVIEW_EVIDENCE: ${{ github.workspace }}/test-results/workspace-review
         run: |
           set -euo pipefail
           if ! git log -1 --format=%s "$REVIEW_HEAD" | grep -Fq '[workspace-ui]'; then exit 0; fi
+          python3 ../../scripts/workspace/review-source.py --base "$REVIEW_BASE" --out "$WORKSPACE_REVIEW_EVIDENCE/source-review.json"
           npm ci --ignore-scripts --no-audit --no-fund
           npm run build:stream-only
           cp -R wwwroot/vendor bin/Release/net10.0/wwwroot/
           export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$(command -v google-chrome || command -v chromium)"
           test -x "$PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
-          npx --no-install playwright test workspace-review.spec.mjs action-palette.spec.mjs mobile-alerts.spec.mjs workspace.spec.mjs --reporter=line
+          npx --no-install playwright test workspace-review.spec.mjs action-palette.spec.mjs mobile-alerts.spec.mjs workspace.spec.mjs remote-view.spec.mjs placements.spec.mjs --reporter=line,json > "$WORKSPACE_REVIEW_EVIDENCE/browser-console.txt" || { tail -100 "$WORKSPACE_REVIEW_EVIDENCE/browser-console.txt"; exit 1; }
+        # Playwright's JSON goes to its own file (line progress is retained separately).
+        shell: bash
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'multiplexing-tests-${{ matrix.os }}', path: test-results/, retention-days: 7}

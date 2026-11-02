@@ -1,8 +1,13 @@
 import {base64Bytes,encodeInput,formatState,nextSequence} from './workspace-model.js';
 import {bindUserInput} from './terminal-input.js';
+import {createTouchToolbar} from './terminal-toolbar.js';
 
 // One parser and cursor per server block, independent of the DOM element's parent or presentation plane.
 export class TerminalPane {
+  get ready(){return this._ready;}
+  set ready(value){this._ready=value;this.touch?.update();}
+  get hasControl(){return this._hasControl;}
+  set hasControl(value){this._hasControl=value;this.touch?.update();}
   constructor(block,ctx){
     this.ctx=ctx;this.id=block.id;this.sessionId=block.sessionId;this.sequence=0;this.lastVisible=performance.now();this.ready=false;this.hasControl=false;this.closed=false;this.disposed=false;this.exited=false;this.retries=0;this.pending=Promise.resolve();this.connection=null;
     const {text,button}=ctx;this.element=text('section','','terminal-pane');this.element.dataset.blockId=this.id;
@@ -14,11 +19,10 @@ export class TerminalPane {
     this.terminal=new window.Terminal({fontFamily:'"SFMono-Regular",Consolas,"Liberation Mono",monospace',fontSize:12,lineHeight:1.18,cursorBlink:true,scrollback:15000,allowProposedApi:false,convertEol:false,theme:{background:'#0e1217',foreground:'#c6d2dd',cursor:'#8be6c9',selectionBackground:'#3c625b80',black:'#15202a',red:'#df8d8d',green:'#8fc9a4',yellow:'#d9c18a',blue:'#8bb4da',magenta:'#b69ed4',cyan:'#86c9c7',white:'#ccd8df',brightBlack:'#667b8e',brightRed:'#f2aaaa',brightGreen:'#b2e8c4',brightYellow:'#f0d8a2',brightBlue:'#b5d7f3',brightMagenta:'#d3b8ef',brightCyan:'#b4e5df',brightWhite:'#eff7fc'}});
     this.fit=new window.FitAddon.FitAddon();this.terminal.loadAddon(this.fit);
     this.userInput=bindUserInput(this.terminal,data=>this.sendInput(data),data=>{if(this.ready&&this.hasControl)this.send({type:'input',data:btoa(data)});});
-    const touch=text('div','','touch-keys');for(const [label,v] of [['Esc','\u001b'],['Tab','\t'],['Ctrl C','\u0003'],['↑','\u001b[A'],['↓','\u001b[B'],['←','\u001b[D'],['→','\u001b[C']])touch.append(button(label,`Send ${label}`,()=>this.sendInput(v)));this.element.append(touch);
+    this.touch=createTouchToolbar(this,ctx);this.element.append(this.touch.element);
     this.resizeObserver=new ResizeObserver(()=>this.scheduleFit());
   }
   mount(){if(this.opened)return;this.opened=true;this.terminal.open(this.host);this.resizeObserver.observe(this.host);
-    for(const [name,data] of [['focus','\u001b[I'],['blur','\u001b[O']])this.terminal.textarea.addEventListener(name,()=>{if(this.terminal._core.coreService.decPrivateModes.sendFocus)this.sendInput(data);});
     this.connect();
   }
   connect(observer=false){
