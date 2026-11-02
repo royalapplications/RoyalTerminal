@@ -1,12 +1,13 @@
 // Copyright (c) Royal Apps. Licensed under the MIT license.
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using RoyalTerminal.Terminal.Transport.Multiplexing;
 
 namespace RoyalTerminal.Multiplexing.Server;
 
-/// <summary>Outbound routes require a private credential pinned to a stable host ID and endpoint. Only the authentication preflight can fail over.</summary>
+/// <summary>Outbound routes require a private credential pinned to a host identity and endpoint. Only authentication preflight may fail over.</summary>
 internal sealed class WorkspacePeerRouter : IDisposable
 {
     private sealed record Route(Uri Origin,string TokenFile,HttpClient Http);
@@ -70,7 +71,7 @@ internal sealed class WorkspacePeerRouter : IDisposable
                     catch(OperationCanceledException) when(!ct.IsCancellationRequested){continue;}
                     catch(MultiplexingApiException e){throw Remote(e);}
                     catch(HttpRequestException e) when(e.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError){continue;}
-                    catch(Exception e) when(e is HttpRequestException or IOException or JsonException){throw new ApiException(502,"peer_handshake_failed","Peer negotiation failed; no application call was dispatched.");}
+                    catch(Exception e) when(e is HttpRequestException or IOException or InvalidDataException or JsonException){throw new ApiException(502,"peer_handshake_failed","Peer negotiation failed; no application call was dispatched.");}
                 }
                 using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);deadline.CancelAfter(TimeSpan.FromSeconds(30));
                 try {return await client.CallAsync(method,args,deadline.Token);}
@@ -87,19 +88,24 @@ internal sealed class WorkspacePeerRouter : IDisposable
         int code=(int)(error.StatusCode??HttpStatusCode.BadGateway);
         return new(code is >=400 and <=599?code:502,"peer_rejected","The peer returned an error. The call was not retried.");
     }
-    private static async Task<string> ReadTokenAsync(string path,CancellationToken ct)
+    internal static async Task<string> ReadTokenAsync(string path,CancellationToken ct)
     {
+        // 512 token bytes + one CRLF + one sentinel. A full buffer is never a valid file.
+        byte[] data=new byte[515];
         try
         {
             await using var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete);
             const UnixFileMode nonOwner=UnixFileMode.GroupRead|UnixFileMode.GroupWrite|UnixFileMode.GroupExecute|UnixFileMode.OtherRead|UnixFileMode.OtherWrite|UnixFileMode.OtherExecute;
             if(!OperatingSystem.IsWindows()&&(File.GetUnixFileMode(file.SafeFileHandle)&nonOwner)!=0)throw new ApiException(503,"peer_credential_unavailable","Peer credential file must be private to its owner.");
-            byte[] data=new byte[515];int n=await file.ReadAtLeastAsync(data,data.Length,false,ct);
-            while(n>0&&data[n-1] is 10 or 13)n--;
-            if(n is <32 or >512 || data.AsSpan(0,n).ContainsAnyExceptInRange((byte)'!',(byte)'~'))throw new InvalidDataException();
+            int n=await file.ReadAtLeastAsync(data,data.Length,false,ct);
+            if(n==data.Length)throw InvalidCredential();
+            if(n>0&&data[n-1]==10){n--;if(n>0&&data[n-1]==13)n--;}
+            if(n is <32 or >512 || data.AsSpan(0,n).ContainsAnyExceptInRange((byte)'!',(byte)'~'))throw InvalidCredential();
             return Encoding.ASCII.GetString(data,0,n);
         }
-        catch(Exception e) when(e is IOException or UnauthorizedAccessException){throw new ApiException(503,"peer_credential_unavailable","Cannot read a valid local peer credential.");}
+        catch(Exception e) when(e is IOException or UnauthorizedAccessException){throw InvalidCredential();}
+        finally { CryptographicOperations.ZeroMemory(data); }
     }
+    private static ApiException InvalidCredential()=>new(503,"peer_credential_unavailable","Cannot read a valid local peer credential.");
     public void Dispose(){foreach(var route in _routes.Values)route.Http.Dispose();_routes.Clear();_available.Dispose();}
 }

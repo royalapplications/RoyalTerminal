@@ -94,7 +94,7 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
         using var attachment = Broker.Attach(sessionId,blockId,MultiplexerRole.Controller,block.LastSequence);
         attachment.SendInput(bytes);
     }
-    public MultiplexerBlockDescriptor GetBlock(Guid sessionId,Guid blockId) => Broker.GetSession(sessionId).Blocks.FirstOrDefault(x=>x.Id==blockId) ?? throw new MultiplexerException(MultiplexerErrorCode.NotFound,"Block not found.");
+    public MultiplexerBlockDescriptor GetBlock(Guid sessionId,Guid blockId) => Broker.GetBlock(sessionId,blockId);
     public InspectingTerminalTransport Inspection(Guid sessionId,Guid blockId)
     {
         _ = GetBlock(sessionId,blockId);
