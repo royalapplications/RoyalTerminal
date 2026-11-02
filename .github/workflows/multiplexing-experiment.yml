@@ -37,6 +37,7 @@ jobs:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     steps:
       - uses: actions/checkout@v7
+        with: {fetch-depth: 2}
       - uses: actions/setup-dotnet@v6
         with: {dotnet-version: '10.0.x'}
       - if: runner.os == 'Linux'
@@ -60,6 +61,21 @@ jobs:
       - name: Exercise both Lua hosts, real PTYs, receiver outcomes and scoped denial
         if: runner.os == 'Linux'
         run: python3 scripts/workspace/smoke-placement-focus.py
+      - name: Optional visual review on this runner (tag the tip commit with [workspace-ui])
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        working-directory: samples/RoyalTerminal.Multiplexing.Server
+        env:
+          REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
+          WORKSPACE_REVIEW_EVIDENCE: ${{ github.workspace }}/test-results/workspace-review
+        run: |
+          set -euo pipefail
+          if ! git log -1 --format=%s "$REVIEW_HEAD" | grep -Fq '[workspace-ui]'; then exit 0; fi
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build:stream-only
+          cp -R wwwroot/vendor bin/Release/net10.0/wwwroot/
+          export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$(command -v google-chrome || command -v chromium)"
+          test -x "$PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"
+          npx --no-install playwright test workspace-review.spec.mjs action-palette.spec.mjs mobile-alerts.spec.mjs workspace.spec.mjs --reporter=line
       - uses: actions/upload-artifact@v7
         if: always()
         with: {name: 'multiplexing-tests-${{ matrix.os }}', path: test-results/, retention-days: 7}
