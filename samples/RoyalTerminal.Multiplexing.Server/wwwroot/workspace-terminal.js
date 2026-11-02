@@ -9,7 +9,7 @@ export class TerminalPane extends RecoveredPane {
   inputLane(){const c=this.connection;if(!c||!this.ready||!this.hasControl||this.closed||this.disposed)return null;
     return c.inputLane??=new PaneInputLane(()=>this.connection===c&&this.ready&&this.hasControl&&!this.closed&&!this.disposed,
       f=>super.send(f),e=>this.ctx.toast(e.message));}
-  send(frame){if(frame.type!=='input'){super.send(frame);return;}this.inputLane()?.write(frame);}
+  send(frame){if(frame.type==='resize'&&this.ctx.state.sharedZoom)return;if(frame.type!=='input'){super.send(frame);return;}this.inputLane()?.write(frame);}
   connect(observer=false){super.connect(observer||this.remoteObserver);}
   async reconnectController(){this.remoteObserver=false;await super.reconnectController();}
   async recover(c){await super.recover(c);if(this.replica&&!this.disposed)this.historyButton.hidden=false;}

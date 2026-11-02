@@ -1,29 +1,28 @@
-import {deferPlacement, floatFrame, placementActions, windowPlanes} from './workspace-placements.js';
+import {deferPlacement,placementActions,windowPlanes} from './workspace-placements.js';
+import {floatingScenes,sharedTarget,drawScene} from './frame-scene.js';
 import {TerminalPane} from './workspace-terminal.js';
-import {leaves, replaceRatio, formatState, safeFilename} from './workspace-model.js';
+import {leaves,formatState,safeFilename} from './workspace-model.js';
 import {Keymap,keyStroke} from './keymap.js';
 
-const $ = id => document.getElementById(id);
-const state = {token:'',capability:null,sessions:[],sessionId:null,windowId:null,focused:null,zoom:false,panes:new Map(),layoutKey:null,stopped:true,generation:0};
-const text=(tag,value,klass='')=>{const n=document.createElement(tag); n.textContent=value;n.className=klass;return n;};
+const $=id=>document.getElementById(id);
+const state={token:'',capability:null,sessions:[],sessionId:null,windowId:null,focused:null,zoom:false,sharedZoom:null,panes:new Map(),layoutKey:null,stopped:true,generation:0};
+const text=(tag,value,klass='')=>{const n=document.createElement(tag);n.textContent=value;n.className=klass;return n;};
 const button=(label,title,action,klass='')=>{const n=text('button',label,klass);n.type='button';n.title=title;n.setAttribute('aria-label',title||label);n.addEventListener('click',e=>{e.stopPropagation();void run(action);});return n;};
 const currentSession=()=>state.sessions.find(s=>s.id===state.sessionId);
 const currentWindow=()=>currentSession()?.windows.find(w=>w.id===state.windowId);
 const focusedPane=()=>state.panes.get(state.focused);
 const status=s=>{$('status-text').textContent=s;};
-let toastTimer, refreshIssued=0, refreshApplied=0, refreshing=0;
-function toast(s){$('toast').textContent=String(s);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,4500);}
+let toastTimer,refreshIssued=0,refreshApplied=0,refreshing=0;
+function toast(s){$('toast').textContent=String(s);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true;},4500);}
 async function run(action){try{await action();}catch(error){if(error.name!=='AbortError'){toast(error.message);status(error.message);}}}
 async function request(path,method='GET',body){const gen=state.generation;const response=await fetch(path,{method,credentials:'omit',redirect:'error',cache:'no-store',headers:{Authorization:`Bearer ${state.token}`,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});const result=await response.json();if(gen!==state.generation)throw new DOMException('Connection changed','AbortError');if(!response.ok)throw Object.assign(new Error(result.message||`HTTP ${response.status}`),{code:result.code});return result;}
 const call=(method,args={})=>request('/api/call','POST',{method,arguments:args});
-let config={actions:[],modes:[],bindings:[]}, keys=new Keymap(config);
+let config={actions:[],modes:[],bindings:[]},keys=new Keymap(config);
 function showDialog(title,description,fields=[],submit='Continue'){
-  const dialog=$('dialog'), content=$('dialog-content');content.replaceChildren(text('h3',title));if(description)content.append(text('p',description));const controls=new Map();
+  const dialog=$('dialog'),content=$('dialog-content');content.replaceChildren(text('h3',title));if(description)content.append(text('p',description));const controls=new Map();
   for(const f of fields){const label=text('label',f.label);label.htmlFor=`field-${f.name}`;const n=document.createElement(f.options?'select':f.type==='textarea'?'textarea':'input');n.id=label.htmlFor;n.name=f.name;
     if(f.options){for(const [v,s] of f.options){const o=text('option',s);o.value=v;n.append(o);}}else if(f.type!=='textarea')n.type=f.type||'text';
-    if(f.value!==undefined)n.value=f.value;n.required=!!f.required;n.readOnly=!!f.readOnly;n.autocomplete='off';n.spellcheck=false;if(f.placeholder)n.placeholder=f.placeholder;
-    controls.set(f.name,n);content.append(label,n);
-  }
+    if(f.value!==undefined)n.value=f.value;n.required=!!f.required;n.readOnly=!!f.readOnly;n.autocomplete='off';n.spellcheck=false;if(f.placeholder)n.placeholder=f.placeholder;controls.set(f.name,n);content.append(label,n);}
   $('dialog-submit').textContent=submit;dialog.showModal();queueMicrotask(()=>controls.values().next().value?.focus());
   return new Promise(resolve=>{let result=null;const form=$('dialog-form');const onSubmit=e=>{e.preventDefault();result=Object.fromEntries([...controls].map(([k,v])=>[k,v.value]));dialog.close();};form.addEventListener('submit',onSubmit);dialog.addEventListener('close',()=>{form.removeEventListener('submit',onSubmit);resolve(result);},{once:true});});
 }
@@ -33,39 +32,30 @@ function focusBlock(id){state.focused=id;for(const [k,p] of state.panes)p.elemen
 function clearPanes(){for(const p of state.panes.values())p.dispose();state.panes.clear();state.layoutKey=null;}
 function paneFor(id){let p=state.panes.get(id);if(!p){const block=currentSession().blocks.find(b=>b.id===id);if(!block)throw Error('The layout refers to a missing terminal.');p=new TerminalPane(block,{state,text,button,toast,status,focusBlock,captureBlock,closeBlock,renameBlock});state.panes.set(id,p);}p.lastVisible=performance.now();return p.element;}
 const paletteSources=[];
-const placementUI={state,session:currentSession,window:currentWindow,call,refresh,dialog:showDialog,toast,
-  addPaletteSource:source=>paletteSources.push(source),paletteChanged:()=>{if($('palette').open)renderPalette();}};
+const placementUI={state,session:currentSession,window:currentWindow,call,refresh,dialog:showDialog,toast,addPaletteSource:source=>paletteSources.push(source),paletteChanged:()=>{if($('palette').open)renderPalette();}};
 function render(){
-  const session=currentSession(), admin=state.capability?.administrator;const list=$('session-list');list.replaceChildren();
+  const session=currentSession(),admin=state.capability?.administrator,list=$('session-list');list.replaceChildren();
   for(const s of state.sessions){const item=button('',`Open workspace ${s.label}`,()=>selectSession(s.id),'session-item');item.classList.toggle('active',s.id===state.sessionId);const info=text('span','','session-info');info.append(text('span',s.label,'session-label'),text('span',`${s.blocks.filter(b=>formatState(b)==='running').length} running · ${s.windows.length} windows`,'session-detail'));item.append(text('span','▱','session-symbol'),info,text('span',String(s.blocks.length),'session-count'));list.append(item);}
-  for(const id of ['new-session','empty-create'])$(id).disabled=!admin;
-  for(const id of ['new-window','new-shell','split-horizontal','split-vertical','share-session','workspace-menu'])$(id).disabled=!session||!admin;
+  for(const id of ['new-session','empty-create'])$(id).disabled=!admin;for(const id of ['new-window','new-shell','split-horizontal','split-vertical','share-session','workspace-menu'])$(id).disabled=!session||!admin;
   $('workspace-title').textContent=session?.label??'Your workspaces';$('workspace-meta').textContent=session?`${session.blocks.length} terminals · revision ${session.revision}`:'';
   if(!currentWindow())state.windowId=session?.windows[0]?.id??null;
   const tabs=$('window-tabs');tabs.replaceChildren();for(const w of session?.windows??[]){const tab=button(w.label,w.label,()=>selectWindow(w.id),'window-tab');tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(w.id===state.windowId));tab.ondblclick=()=>void run(()=>renameWindow(w.id));tabs.append(tab);}
-  const w=currentWindow(),planes=windowPlanes(session,w);let layout=w?.layout;const visible=[...leaves(layout),...planes.floats.map(b=>b.id)];
+  const w=currentWindow(),planes=windowPlanes(session,w);const visible=[...leaves(w?.layout),...planes.floats.map(b=>b.id)];
   if(!visible.includes(state.focused))focusBlock(visible[0]??null);
   if(state.zoom&&!state.focused)state.zoom=false;
+  const shared=sharedTarget(w,visible);if(shared!==state.sharedZoom)state.zoom=false;state.sharedZoom=shared;
+  if(shared)focusBlock(shared);
+  const scene={zoom:shared??(state.zoom?state.focused:null),frames:floatingScenes(w,planes.floats)};
   $('empty-state').hidden=visible.length>0;$('empty-create').textContent=session?'Open a shell':'Create workspace';
-  if(state.zoom&&state.focused)layout={blockId:state.focused};
-  const key=JSON.stringify([session?.id,w?.id,layout,state.zoom,planes.floats.map(b=>[b.id,b.floatingBounds]),planes.shelf.map(b=>[b.id,b.label]),!!admin]);
+  const key=JSON.stringify([session?.id,w?.id,w?.layout,scene.zoom,scene.frames.map(f=>[f.id,f.bounds,f.tree]),planes.shelf.map(b=>[b.id,b.label]),!!admin]);
   const existing=new Set(state.sessions.flatMap(s=>s.blocks.map(b=>b.id)));for(const [id,p] of state.panes)if(!existing.has(id)){p.dispose();state.panes.delete(id);}
-  if(key!==state.layoutKey){state.layoutKey=key;const root=$('pane-layout');root.replaceChildren();root.style.position='relative';if(layout)root.append(renderNode(layout,[]));
-    if(!state.zoom)for(const b of planes.floats)root.append(floatFrame(b,paneFor(b.id),root,admin?deferPlacement(placementUI,session,w,b):null,run));
-    let shelf=$('unplaced-blocks');if(!shelf){shelf=text('div','','unplaced-blocks');shelf.id='unplaced-blocks';shelf.setAttribute('aria-label','Unplaced terminals');$('workspace-content').before(shelf);}
-    shelf.replaceChildren();shelf.hidden=!planes.shelf.length;
+  if(key!==state.layoutKey){state.layoutKey=key;const root=$('pane-layout');root.replaceChildren();root.style.position='relative';
+    const old=state.remoteNavigation;try{if(shared)state.remoteNavigation=true;drawScene(root,session,w,scene,paneFor,placementUI,run);}finally{state.remoteNavigation=old;}
+    let shelf=$('unplaced-blocks');if(!shelf){shelf=text('div','','unplaced-blocks');shelf.id='unplaced-blocks';shelf.setAttribute('aria-label','Unplaced terminals');$('workspace-content').before(shelf);}shelf.replaceChildren();shelf.hidden=!planes.shelf.length;
     if(planes.shelf.length){shelf.append(text('span','Unplaced: '));for(const b of planes.shelf){const n=button(b.label,`Restore ${b.label}`,()=>deferPlacement(placementUI,session,w,b)({kind:'tiled'},session.revision));n.disabled=!admin;shelf.append(n);}}
     const cold=[...state.panes.values()].filter(p=>!visible.includes(p.id)).sort((a,b)=>a.lastVisible-b.lastVisible);while(state.panes.size>32&&cold.length){const p=cold.shift();p.dispose();state.panes.delete(p.id);}
-    requestAnimationFrame(()=>{for(const p of state.panes.values())if(p.element.isConnected){p.mount();p.scheduleFit();}focusBlock(state.focused);});
-  }
+    requestAnimationFrame(()=>{for(const p of state.panes.values())if(p.element.isConnected){p.mount();p.scheduleFit();}focusBlock(state.focused);});}
   for(const b of session?.blocks??[])state.panes.get(b.id)?.update(b);
-}
-function renderNode(node,path){if(node.blockId)return paneFor(node.blockId);const split=text('div','','split'), vertical=String(node.orientation).toLowerCase()==='vertical';split.classList.toggle('vertical',vertical);const first=text('div','','split-child'),second=text('div','','split-child'),divider=text('div','','splitter');divider.setAttribute('role','separator');divider.setAttribute('aria-label','Resize terminal split');divider.setAttribute('aria-orientation',vertical?'horizontal':'vertical');divider.tabIndex=0;
-  function ratio(r){first.style.flex=`${r} 1 0`;second.style.flex=`${1-r} 1 0`;divider.setAttribute('aria-valuenow',String(Math.round(100*r)));}
-  const commit=async(s,w,r)=>{await call('session.set_layout',{sessionId:s.id,windowId:w.id,layout:replaceRatio(w.layout,path,r),expectedRevision:s.revision});await refresh();};
-  ratio(node.ratio);first.append(renderNode(node.first,[...path,'first']));second.append(renderNode(node.second,[...path,'second']));split.append(first,divider,second);
-  divider.onpointerdown=e=>{if(!state.capability.administrator||state.zoom)return;e.preventDefault();const s=currentSession(),w=currentWindow();let r=node.ratio;divider.setPointerCapture(e.pointerId);divider.classList.add('dragging');const clean=()=>{divider.onpointermove=divider.onpointerup=divider.onpointercancel=null;divider.classList.remove('dragging');};divider.onpointermove=p=>{const rect=split.getBoundingClientRect();r=Math.max(.1,Math.min(.9,vertical?(p.clientY-rect.top)/rect.height:(p.clientX-rect.left)/rect.width));ratio(r);};divider.onpointerup=()=>{clean();void run(()=>commit(s,w,r));};divider.onpointercancel=()=>{clean();ratio(node.ratio);};};
-  divider.onkeydown=e=>{if(!state.capability.administrator||!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();void run(()=>commit(currentSession(),currentWindow(),Math.max(.1,Math.min(.9,node.ratio+(['ArrowDown','ArrowRight'].includes(e.key)?.05:-.05)))));};return split;
 }
 function selectSession(id){if(id!==state.sessionId){state.sessionId=id;state.windowId=null;state.zoom=false;render();}$('sidebar').classList.remove('visible');}
 function selectWindow(id){state.windowId=id;state.zoom=false;render();}
@@ -85,19 +75,19 @@ async function showStatus(){const records=await call('terminal.status',{sessionI
 async function reloadConfiguration(){if(!state.capability.administrator)return;config=(await request('/api/config')).configuration;keys=new Keymap(config);}
 async function editConfiguration(){await reloadConfiguration();const f=await showDialog('Workspace automation','Use ${sessionId}, ${blockId} and ${windowId} for context.',[{name:'json',label:'Configuration',type:'textarea',value:JSON.stringify(config,null,2)}],'Validate and save');if(f){await request('/api/config','PUT',JSON.parse(f.json));await reloadConfiguration();}}
 async function runConfiguredAction(id){const r=await request(`/api/actions/${encodeURIComponent(id)}/invoke`,'POST',{sessionId:state.sessionId,blockId:state.focused||null,windowId:state.windowId||null});await refresh();const end=r.steps.at(-1)?.result;if(end?.content!==undefined)await showDialog(id,'Action result',[{name:'result',label:'Output',type:'textarea',value:end.content,readOnly:true}],'Done');else toast(`Action ${id} completed (${r.steps.length} steps).`);}
-function toggleZoom(){if(state.focused){state.zoom=!state.zoom;render();}}
-function disconnect(){state.generation++;state.stopped=true;clearPanes();Object.assign(state,{token:'',capability:null,sessions:[],sessionId:null,windowId:null,focused:null,zoom:false});config={actions:[],bindings:[],modes:[]};keys=new Keymap(config);$('application').hidden=true;$('connect-screen').hidden=false;$('access-token').value='';status('Detached');}
-const actions=[
-  {title:'New workspace',run:createSession,admin:true},{title:'Open a new shell',run:()=>newShell(),admin:true,session:true},{title:'New window',hint:'Ctrl B, C',run:newWindow,admin:true,session:true},
-  {title:'Split side by side',run:()=>newShell('horizontal'),admin:true,block:true},{title:'Split above and below',run:()=>newShell('vertical'),admin:true,block:true},{title:'Zoom focused terminal',run:toggleZoom,block:true},{title:'Detach / reconnect focused terminal',run:()=>focusedPane()?.toggleAttachment(),block:true},{title:'Take control of focused terminal',run:takeControl,admin:true,block:true},{title:'Capture terminal output',run:()=>captureBlock(),block:true},{title:'Inspect program status',run:showStatus,block:true},{title:'Rename focused terminal',run:()=>renameBlock(state.focused),admin:true,block:true},{title:'Workspace settings',run:workspaceMenu,admin:true,session:true},{title:'Share workspace',run:shareSession,admin:true,session:true},{title:'Revoke workspace share',run:manageShares,admin:true,session:true},{title:'Explore server API',run:showApi},{title:'Edit actions and key modes',run:editConfiguration,admin:true},{title:'Reload actions and key modes',run:reloadConfiguration,admin:true},{title:'Disconnect all views',run:disconnect},...placementActions(placementUI)
-];
+function toggleZoom(){if(state.sharedZoom)return toast('This window has shared zoom. Restore it from the workspace palette.');if(state.focused){state.zoom=!state.zoom;render();}}
+async function setShared(zoom){const s=currentSession(),id=currentWindow()?.zoomedBlockId??state.focused;if(!id)return;await call('session.zoom_block',{sessionId:s.id,blockId:id,zoom,expectedRevision:s.revision});await refresh();}
+function disconnect(){state.generation++;state.stopped=true;clearPanes();Object.assign(state,{token:'',capability:null,sessions:[],sessionId:null,windowId:null,focused:null,zoom:false,sharedZoom:null});config={actions:[],bindings:[],modes:[]};keys=new Keymap(config);$('application').hidden=true;$('connect-screen').hidden=false;$('access-token').value='';status('Detached');}
+const actions=[{title:'New workspace',run:createSession,admin:true},{title:'Open a new shell',run:()=>newShell(),admin:true,session:true},{title:'New window',hint:'Ctrl B, C',run:newWindow,admin:true,session:true},
+ {title:'Zoom focused terminal for all viewers',run:()=>setShared(true),block:true,admin:true},{title:'Restore shared window layout',run:()=>setShared(false),block:true,admin:true},
+ {title:'Split side by side',run:()=>newShell('horizontal'),admin:true,block:true},{title:'Split above and below',run:()=>newShell('vertical'),admin:true,block:true},{title:'Zoom focused terminal',run:toggleZoom,block:true},{title:'Detach / reconnect focused terminal',run:()=>focusedPane()?.toggleAttachment(),block:true},{title:'Take control of focused terminal',run:takeControl,admin:true,block:true},{title:'Capture terminal output',run:()=>captureBlock(),block:true},{title:'Inspect program status',run:showStatus,block:true},{title:'Rename focused terminal',run:()=>renameBlock(state.focused),admin:true,block:true},{title:'Workspace settings',run:workspaceMenu,admin:true,session:true},{title:'Share workspace',run:shareSession,admin:true,session:true},{title:'Revoke workspace share',run:manageShares,admin:true,session:true},{title:'Explore server API',run:showApi},{title:'Edit actions and key modes',run:editConfiguration,admin:true},{title:'Reload actions and key modes',run:reloadConfiguration,admin:true},{title:'Disconnect all views',run:disconnect},...placementActions(placementUI)];
 let items=[],index=0;
 function renderPalette(){const query=$('palette-query').value.trim().toLowerCase().split(/\s+/);items=[...actions,...paletteSources.flatMap(source=>source()),...config.actions.map(a=>({title:a.id.replaceAll('_',' '),hint:'Custom action',admin:true,run:()=>runConfiguredAction(a.id)}))].filter(a=>{const search=`${a.title} ${a.hint||''} ${a.keywords||''}`.toLowerCase();return (!a.admin||state.capability?.administrator)&&(!a.session||state.sessionId)&&(!a.block||state.focused)&&query.every(word=>search.includes(word));});index=Math.min(index,Math.max(0,items.length-1));const dest=$('palette-results');dest.replaceChildren();items.forEach((a,i)=>{const n=button('',a.title,()=>{$('palette').close();return a.run();},'palette-action');n.append(text('span',a.title),text('small',a.hint||''));n.classList.toggle('selected',i===index);n.onmouseenter=()=>{index=i;[...dest.children].forEach((c,j)=>c.classList.toggle('selected',i===j));};dest.append(n);});}
 function openPalette(){if(state.stopped||$('dialog').open||$('palette').open)return;$('palette-query').value='';index=0;renderPalette();$('palette').showModal();$('palette-query').focus();}
 $('palette-query').oninput=()=>{index=0;renderPalette();};$('palette-query').onkeydown=e=>{if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();index=(index+(e.key==='ArrowDown'?1:-1)+items.length)%Math.max(1,items.length);renderPalette();}else if(e.key==='Enter'&&items[index]){e.preventDefault();$('palette').close();void run(items[index].run);}};
 let chord=false,chordTimer;
 document.addEventListener('keydown',e=>{if(state.stopped||e.isComposing||$('dialog').open||$('palette').open)return;const consume=()=>{e.preventDefault();e.stopImmediatePropagation();};if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){consume();openPalette();return;}const stroke=keyStroke(e);if(stroke){const d=keys.process(stroke);if(d.consumed){consume();$('chord-hint').textContent=d.pending?`Keys: ${d.pending}`:keys.mode==='default'?'':`Mode: ${keys.mode}`;if(d.actionId)void run(()=>runConfiguredAction(d.actionId));return;}}
-  if(e.ctrlKey&&!e.shiftKey&&e.key.toLowerCase()==='b'){consume();chord=true;$('chord-hint').textContent='Prefix: % split ↔ · " split ↕ · c window · d detach';clearTimeout(chordTimer);chordTimer=setTimeout(()=>{chord=false;$('chord-hint').textContent='';},2000);return;}if(chord){consume();chord=false;clearTimeout(chordTimer);$('chord-hint').textContent='';const k=e.key.toLowerCase();if(k==='d')void run(()=>focusedPane()?.toggleAttachment());else if(state.capability.administrator){if(k==='c')void run(newWindow);if(k==='%'||k==='"')void run(()=>newShell(k==='%'?'horizontal':'vertical'));}}},{capture:true});
+ if(e.ctrlKey&&!e.shiftKey&&e.key.toLowerCase()==='b'){consume();chord=true;$('chord-hint').textContent='Prefix: % split ↔ · " split ↕ · c window · d detach';clearTimeout(chordTimer);chordTimer=setTimeout(()=>{chord=false;$('chord-hint').textContent='';},2000);return;}if(chord){consume();chord=false;clearTimeout(chordTimer);$('chord-hint').textContent='';const k=e.key.toLowerCase();if(k==='d')void run(()=>focusedPane()?.toggleAttachment());else if(state.capability.administrator){if(k==='c')void run(newWindow);if(k==='%'||k==='"')void run(()=>newShell(k==='%'?'horizontal':'vertical'));}}},{capture:true});
 for(const [id,action] of Object.entries({'new-session':createSession,'empty-create':()=>currentSession()?newShell():createSession(),'new-shell':()=>newShell(),'new-window':newWindow,'split-horizontal':()=>newShell('horizontal'),'split-vertical':()=>newShell('vertical'),'zoom-block':toggleZoom,'share-session':shareSession,'workspace-menu':workspaceMenu,'disconnect':disconnect,'palette-button':openPalette,'help-button':openPalette,'toggle-sidebar':()=>$('sidebar').classList.toggle('visible')}))$(id).onclick=()=>void run(action);
 $('connect-form').onsubmit=async e=>{e.preventDefault();const gen=++state.generation;$('connect-error').textContent='';state.token=$('access-token').value.trim();try{if(!window.Terminal||!window.FitAddon)throw Error('Build the local xterm assets and rebuild the server.');state.capability=await request('/api/context');await reloadConfiguration();state.stopped=false;await refresh();$('connect-screen').hidden=true;$('application').hidden=false;for(const p of state.panes.values())p.scheduleFit();status('Connected · closing this tab only detaches');}catch(err){if(gen===state.generation){$('connect-error').textContent=err.message;state.stopped=true;}}};
 const fragment=new URLSearchParams(location.hash.slice(1));if(fragment.has('token')){$('access-token').value=fragment.get('token');state.sessionId=fragment.get('session');history.replaceState(null,'',location.pathname+location.search);$('connect-form').requestSubmit();}
