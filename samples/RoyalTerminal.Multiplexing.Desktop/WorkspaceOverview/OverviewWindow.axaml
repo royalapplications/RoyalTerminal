@@ -4,7 +4,6 @@
   </Window.Styles>
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="7" RowSpacing="5">
     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Background="#1C2026">
-      <!-- Both presentations use the same selector identity. Never recreate or control a PTY to select a tab. -->
       <ComboBox x:Name="WindowsList" MinWidth="88" HorizontalAlignment="Stretch" VerticalAlignment="Center" AutomationProperties.Name="Workspace window"/>
       <ScrollViewer x:Name="TabViewport" IsVisible="False" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <TabStrip x:Name="WindowTabs" ItemsSource="{Binding #WindowsList.ItemsSource}" SelectedItem="{Binding #WindowsList.SelectedItem,Mode=TwoWay}" AutoScrollToSelectedItem="True" AutomationProperties.Name="Workspace windows"><TabStrip.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></TabStrip.ItemsPanel></TabStrip>
@@ -22,7 +21,10 @@
       <ComboBox x:Name="EditDestination" MinWidth="125" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Destination window"/>
       <TextBox x:Name="EditLabel" PlaceholderText="Name" Width="135" MaxLength="256" Margin="0,0,5,3" AutomationProperties.Name="Terminal or window name"/>
       <Button x:Name="ApplyEdit" Content="Apply" Click="ApplyLayoutEdit" Margin="0,0,0,3"/>
-    </WrapPanel><TextBlock x:Name="EditHint" Foreground="#B4C3BC" TextWrapping="Wrap"/></StackPanel>
+    </WrapPanel>
+      <!-- A short 'Dragging' hint must not shrink a previously wrapped instruction and change the gesture coordinate system. -->
+      <TextBlock x:Name="EditHint" Foreground="#B4C3BC" Height="40" TextWrapping="Wrap" TextTrimming="WordEllipsis" ToolTip.Tip="{Binding #EditHint.Text}"/>
+    </StackPanel>
     <Grid Grid.Row="2" ClipToBounds="True"><views:OverviewPanel x:Name="Surface" Editing="{Binding #EditBar.IsVisible}"/><Border x:Name="GestureLayer" Background="Transparent" IsVisible="{Binding #EditBar.IsVisible}" Focusable="True" PointerPressed="BeginDrag" PointerMoved="MoveDrag" PointerReleased="EndDrag" PointerCaptureLost="GestureCaptureLost"/></Grid>
     <StackPanel Grid.Row="3" Spacing="2"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#B4C3BC"/><TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="11"/></StackPanel>
   </Grid>
