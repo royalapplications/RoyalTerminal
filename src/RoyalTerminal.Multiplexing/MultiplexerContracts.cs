@@ -56,11 +56,17 @@ public sealed record MultiplexerLayoutNode(Guid? BlockId=null,MultiplexerSplitOr
     public static MultiplexerLayoutNode Split(MultiplexerSplitOrientation orientation,MultiplexerLayoutNode first,MultiplexerLayoutNode second,double ratio=.5)
         =>new(Orientation:orientation,Ratio:ratio,First:first,Second:second);
 }
+/// <summary>A floating frame with its own stable identity, bounds and binary pane tree.</summary>
+public sealed record MultiplexerFloatingLayer(Guid Id, MultiplexerFloatBounds Bounds, MultiplexerLayoutNode Layout);
 /// <summary>An immutable window snapshot. A null layout means there are no tiled blocks.</summary>
 public sealed record MultiplexerWindowDescriptor(Guid Id,string Label,MultiplexerLayoutNode? Layout)
 {
-    /// <summary>All floating blocks in this window, bottom to top. Null on legacy snapshots; use creation order for those alone.</summary>
+    /// <summary>Floating block IDs from back to front. Members of one frame occupy consecutive slots.</summary>
     public IReadOnlyList<Guid>? FloatingOrder {get;init;}
+    /// <summary>Named compound frames. Legacy, independent single-pane floats need no entry.</summary>
+    public IReadOnlyList<MultiplexerFloatingLayer>? FloatingLayers {get;init;}
+    /// <summary>Shared presentation override, independent of terminal geometry and process ownership.</summary>
+    public Guid? ZoomedBlockId {get;init;}
 }
 /// <summary>An immutable block snapshot; its dimensions are shared by all viewers.</summary>
 public sealed record MultiplexerBlockDescriptor(Guid Id,Guid SessionId,Guid WindowId,string Label,MultiplexerBlockState State,TerminalSessionDimensions Dimensions,
@@ -68,8 +74,10 @@ public sealed record MultiplexerBlockDescriptor(Guid Id,Guid SessionId,Guid Wind
 {
     /// <summary>Current position independent of the lifetime of the underlying process.</summary>
     public MultiplexerPaneKind Placement {get;init;}
-    /// <summary>Normalized window coordinates for a floating block; null for other placements.</summary>
+    /// <summary>Resolved normalized leaf coordinates, including for a member of a nested frame.</summary>
     public MultiplexerFloatBounds? FloatingBounds {get;init;}
+    /// <summary>Stable compound frame ID; null for independent panes.</summary>
+    public Guid? FloatingLayerId {get;init;}
 }
 /// <summary>Immutable session snapshot. Windows are in display order; blocks always remain in creation order.</summary>
 public sealed record MultiplexerSessionDescriptor(Guid Id,string Label,long Revision,DateTimeOffset CreatedUtc,

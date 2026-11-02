@@ -65,13 +65,16 @@ internal sealed class WorkspaceOperations(MultiplexerBroker broker, InspectingTe
         try { await Broker.CloseBlockAsync(sessionId,blockId); }
         finally { _options.TryRemove(blockId,out _); }
     }
-    internal async ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid blockId, long revision)
+    internal async ValueTask CloseFloatingLayerAsync(Guid sessionId, Guid key, long revision)
     {
-        // A stale close must not discard the inspection mapping for a block that is still running.
-        try { await Broker.CloseFloatingLayerAsync(sessionId, blockId, revision); }
+        var s=Broker.GetSession(sessionId);
+        if(s.Revision!=revision)throw new MultiplexerException(MultiplexerErrorCode.Conflict,"The floating layer changed.");
+        Guid layer=s.Blocks.FirstOrDefault(b=>b.Id==key)?.FloatingLayerId??key;
+        var members=s.Blocks.Where(b=>b.FloatingLayerId==layer || b.Id==key).Select(b=>b.Id).ToArray();
+        try { await Broker.CloseFrameAsync(sessionId,key,revision); }
         catch (MultiplexerException) { throw; }
-        catch { _options.TryRemove(blockId, out _); throw; }
-        _options.TryRemove(blockId, out _);
+        catch { foreach(var id in members)_options.TryRemove(id,out _);throw; }
+        foreach(var id in members)_options.TryRemove(id,out _);
     }
     public async ValueTask CloseSessionAsync(Guid sessionId)
     {

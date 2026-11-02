@@ -19,37 +19,65 @@ public sealed record MultiplexerFloatBounds(int X,int Y,int Width,int Height)
 }
 public sealed partial class MultiplexerBroker
 {
-    private readonly record struct Placement(Guid Window,MultiplexerPaneKind Kind,MultiplexerFloatBounds? Bounds=null);
+    private readonly record struct Placement(Guid Window,MultiplexerPaneKind Kind,MultiplexerFloatBounds? Bounds=null,Guid? Layer=null);
     private static Placement GetPlacement(Session s,Guid id)=>s.Placements.TryGetValue(id,out var p)?p:throw new MultiplexerException(MultiplexerErrorCode.NotFound,"Block not found.");
-    /// <summary>Move an existing process without replacing its transport, cursor or control lease. A newly floated block is on top; a geometry edit preserves depth.</summary>
+    /// <summary>Move a process without replacing its stream. Moving a member out of a compound frame collapses its former split.</summary>
     public MultiplexerSessionDescriptor PlaceBlock(Guid sessionId,Guid blockId,Guid windowId,MultiplexerPaneKind kind,Guid? relativeTo=null,MultiplexerSplitOrientation orientation=MultiplexerSplitOrientation.Horizontal,double ratio=.5,bool before=false,MultiplexerFloatBounds? bounds=null,long? expectedRevision=null)
     {
         if(!Enum.IsDefined(kind))throw new ArgumentOutOfRangeException(nameof(kind));ValidateSplit(orientation,ratio);
         if(kind!=MultiplexerPaneKind.Tiled&&(relativeTo.HasValue||before))throw new ArgumentException("Only a tile can have a split target or ordering.");
         if(kind!=MultiplexerPaneKind.Floating&&bounds is not null)throw new ArgumentException("Only a floating block accepts bounds.");bounds?.Validate();
-        lock(_gate){var s=FindSession(sessionId);CheckRevision(s,expectedRevision);var old=GetPlacement(s,blockId);var source=FindWindow(s,old.Window);var dest=FindWindow(s,windowId);
+        lock(_gate)
+        {
+            var s=FindSession(sessionId);CheckRevision(s,expectedRevision);var old=GetPlacement(s,blockId);
+            var source=FindWindow(s,old.Window);var dest=FindWindow(s,windowId);
             if(relativeTo is {} anchor){if(anchor==blockId)throw new ArgumentException("Cannot split a block against itself.");var target=GetPlacement(s,anchor);if(target.Window!=dest.Id||target.Kind!=MultiplexerPaneKind.Tiled)throw Conflict("Split target is not tiled in the destination window.");}
-            Placement next=new(windowId,kind,kind==MultiplexerPaneKind.Floating?bounds??old.Bounds??MultiplexerFloatBounds.Default:null);if(old==next&&kind!=MultiplexerPaneKind.Tiled)return Describe(s);
-            var sourceTree=old.Kind==MultiplexerPaneKind.Tiled?RemoveLeaf(source.Layout,blockId):source.Layout;var destTree=source==dest?sourceTree:dest.Layout;
-            if(kind==MultiplexerPaneKind.Tiled){var leaf=MultiplexerLayoutNode.Leaf(blockId);MultiplexerLayoutNode Join(MultiplexerLayoutNode other)=>before?MultiplexerLayoutNode.Split(orientation,leaf,other,ratio):MultiplexerLayoutNode.Split(orientation,other,leaf,ratio);destTree=relativeTo is {} id?Rewrite(destTree,n=>n.BlockId==id?Join(n):n):destTree is null?leaf:Join(destTree);}
-            if(source!=dest||old.Kind!=kind){if(old.Kind==MultiplexerPaneKind.Floating)source.Floats.Remove(blockId);if(kind==MultiplexerPaneKind.Floating)dest.Floats.Add(blockId);}
-            source.Layout=sourceTree;dest.Layout=destTree;s.Placements[blockId]=next;s.Changed();return Describe(s);}
+            if(old.Kind==MultiplexerPaneKind.Floating&&kind==old.Kind&&source==dest)
+            {
+                if(bounds is null)return Describe(s);
+                if(old.Layer is Guid key)return EditFloating(sessionId,key,bounds:bounds,expectedRevision:expectedRevision);
+                if(bounds!=old.Bounds){s.Placements[blockId]=old with{Bounds=bounds};s.Changed();}return Describe(s);
+            }
+            var next=new Placement(windowId,kind,kind==MultiplexerPaneKind.Floating?bounds??old.Bounds??MultiplexerFloatBounds.Default:null);
+            if(next==old&&kind!=MultiplexerPaneKind.Tiled)return Describe(s);
+            bool keepZoom=source==dest&&source.Zoom==blockId&&kind!=MultiplexerPaneKind.Unplaced;
+            Unlink(s,source,blockId,old);
+            if(kind==MultiplexerPaneKind.Tiled)
+            {
+                var leaf=MultiplexerLayoutNode.Leaf(blockId);
+                MultiplexerLayoutNode Join(MultiplexerLayoutNode other)=>before?MultiplexerLayoutNode.Split(orientation,leaf,other,ratio):MultiplexerLayoutNode.Split(orientation,other,leaf,ratio);
+                dest.Layout=relativeTo is {} id?Rewrite(dest.Layout,n=>n.BlockId==id?Join(n):n):dest.Layout is null?leaf:Join(dest.Layout);
+            }
+            else if(kind==MultiplexerPaneKind.Floating)dest.Floats.Add(blockId);
+            s.Placements[blockId]=next;if(keepZoom)dest.Zoom=blockId;s.Changed();return Describe(s);
+        }
     }
-    /// <summary>Reorder a single float by one position or to an edge. A no-op does not advance the revision.</summary>
+    /// <summary>Raise/lower a frame as a unit. Either a member or the stable compound frame identity is accepted.</summary>
     public MultiplexerSessionDescriptor StackLayer(Guid sessionId,Guid blockId,bool raise,bool toEdge=false,long? expectedRevision=null)
     {
-        lock(_gate){var s=FindSession(sessionId);CheckRevision(s,expectedRevision);var p=GetPlacement(s,blockId);if(p.Kind!=MultiplexerPaneKind.Floating)throw Conflict("Only floating blocks have a stacking order.");
-            var floats=FindWindow(s,p.Window).Floats;int i=floats.IndexOf(blockId);if(i<0)throw new InvalidOperationException("Floating layer is missing.");int end=raise?floats.Count-1:0,to=toEdge?end:Math.Clamp(i+(raise?1:-1),0,floats.Count-1);
-            if(i!=to){floats.RemoveAt(i);floats.Insert(to,blockId);s.Changed();}return Describe(s);}
+        lock(_gate)
+        {
+            var s=FindSession(sessionId);CheckRevision(s,expectedRevision); Window w;Guid key;
+            if(s.Placements.TryGetValue(blockId,out var p)){if(p.Kind!=MultiplexerPaneKind.Floating)throw Conflict("Only floating blocks have a stacking order.");w=FindWindow(s,p.Window);key=p.Layer??blockId;}
+            else{var g=Group(s,blockId);w=g.Window;key=g.Layer.Id;}
+            Guid Frame(Guid id)=>s.Placements[id].Layer??id;
+            var frames=w.Floats.Select(Frame).Distinct().ToList();int i=frames.IndexOf(key),end=raise?frames.Count-1:0,to=toEdge?end:Math.Clamp(i+(raise?1:-1),0,frames.Count-1);
+            if(i!=to){var members=w.Floats.ToLookup(Frame);frames.RemoveAt(i);frames.Insert(to,key);w.Floats.Clear();foreach(var id in frames)w.Floats.AddRange(members[id]);s.Changed();}return Describe(s);
+        }
     }
-    /// <summary>Exchange complete placements (including bounds and stacking slots), without swapping process identities.</summary>
+    /// <summary>Exchange placement slots, retaining each process identity. Compound tree leaves are rewritten atomically with the flat compatibility projection.</summary>
     public MultiplexerSessionDescriptor SwapBlocks(Guid sessionId,Guid firstId,Guid secondId,long? expectedRevision=null)
     {
-        lock(_gate){var s=FindSession(sessionId);CheckRevision(s,expectedRevision);var a=GetPlacement(s,firstId);var b=GetPlacement(s,secondId);if(firstId==secondId)return Describe(s);
+        lock(_gate)
+        {
+            var s=FindSession(sessionId);CheckRevision(s,expectedRevision);var a=GetPlacement(s,firstId);var b=GetPlacement(s,secondId);if(firstId==secondId)return Describe(s);
             var first=FindWindow(s,a.Window);var second=FindWindow(s,b.Window);Guid Exchange(Guid id)=>id==firstId?secondId:id==secondId?firstId:id;
             MultiplexerLayoutNode Leaf(MultiplexerLayoutNode n)=>Exchange(n.BlockId!.Value) is var id&&id!=n.BlockId?n with{BlockId=id}:n;
-            var t1=Rewrite(first.Layout,Leaf);var t2=first==second?t1:Rewrite(second.Layout,Leaf);void Replace(List<Guid> ids){for(int i=0;i<ids.Count;i++)ids[i]=Exchange(ids[i]);}
-            Replace(first.Floats);if(first!=second)Replace(second.Floats);first.Layout=t1;second.Layout=t2;s.Placements[firstId]=b;s.Placements[secondId]=a;s.Changed();return Describe(s);}
+            void Replace(Window w){w.Layout=Rewrite(w.Layout,Leaf);for(int i=0;i<w.Floats.Count;i++)w.Floats[i]=Exchange(w.Floats[i]);foreach(var layer in w.Groups.Values.ToArray())w.Groups[layer.Id]=layer with{Layout=Rewrite(layer.Layout,Leaf)!};}
+            Replace(first);if(first!=second)Replace(second);s.Placements[firstId]=b;s.Placements[secondId]=a;
+            foreach(var w in s.Windows)if(w.Zoom is Guid z && (s.Placements[z].Window!=w.Id || s.Placements[z].Kind==MultiplexerPaneKind.Unplaced))w.Zoom=null;
+            s.Changed();return Describe(s);
+        }
     }
     private static MultiplexerLayoutNode? Rewrite(MultiplexerLayoutNode? n,Func<MultiplexerLayoutNode,MultiplexerLayoutNode> leaf)
     {if(n is null)return null;if(n.BlockId.HasValue)return leaf(n);var a=Rewrite(n.First,leaf);var b=Rewrite(n.Second,leaf);return ReferenceEquals(a,n.First)&&ReferenceEquals(b,n.Second)?n:n with{First=a,Second=b};}

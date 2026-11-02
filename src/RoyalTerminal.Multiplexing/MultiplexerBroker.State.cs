@@ -25,13 +25,13 @@ public sealed partial class MultiplexerBroker
     private static void RemoveBlock(Session s,MultiplexerBlock block)
     {
         var p=s.Placements[block.Id];var w=FindWindow(s,p.Window);
-        if(p.Kind==MultiplexerPaneKind.Tiled)w.Layout=RemoveLeaf(w.Layout,block.Id);else if(p.Kind==MultiplexerPaneKind.Floating)w.Floats.Remove(block.Id);
+        Unlink(s,w,block.Id,p);
         s.Placements.Remove(block.Id);s.Blocks.Remove(block.Id);s.BlockOrder.Remove(block.Id);s.Changed("block_closed",p.Window,block.Id);
     }
-    private static MultiplexerBlockDescriptor DescribeBlock(Session s,MultiplexerBlock b){var p=s.Placements[b.Id];return b.Describe() with{WindowId=p.Window,Placement=p.Kind,FloatingBounds=p.Bounds};}
+    private static MultiplexerBlockDescriptor DescribeBlock(Session s,MultiplexerBlock b){var p=s.Placements[b.Id];return b.Describe() with{WindowId=p.Window,Placement=p.Kind,FloatingBounds=p.Bounds,FloatingLayerId=p.Layer};}
     private static MultiplexerSessionDescriptor Describe(Session s)
     {var windows=new MultiplexerWindowDescriptor[s.Windows.Count];for(int i=0;i<windows.Length;i++)windows[i]=Describe(s.Windows[i]);var blocks=new MultiplexerBlockDescriptor[s.Blocks.Count];int index=0;foreach(Guid id in s.BlockOrder)blocks[index++]=DescribeBlock(s,s.Blocks[id]);return new(s.Id,s.Label,s.Revision,s.CreatedUtc,windows,blocks);}
-    private static MultiplexerWindowDescriptor Describe(Window w)=>new(w.Id,w.Label,w.Layout){FloatingOrder=w.Floats.ToArray()};
+    private static MultiplexerWindowDescriptor Describe(Window w)=>new(w.Id,w.Label,w.Layout){FloatingOrder=w.Floats.ToArray(), FloatingLayers=w.Groups.Count==0?null:w.Groups.Values.ToArray(), ZoomedBlockId=w.Zoom};
     private static MultiplexerException Capacity(string message)=>new(MultiplexerErrorCode.CapacityExceeded,message);
     private static MultiplexerException Conflict(string message)=>new(MultiplexerErrorCode.Conflict,message);
     private void ThrowIfDisposed()=>ObjectDisposedException.ThrowIf(_disposed,this);
@@ -43,5 +43,10 @@ public sealed partial class MultiplexerBroker
         internal void Changed(string? type=null,Guid? window=null,Guid? block=null,string? label=null){activity.Change(Id,++Revision,type,window,block,label);PendingChange?.TrySetResult();PendingChange=null;}
         internal void End(){activity.Close(Id);++Revision;PendingChange?.TrySetResult();PendingChange=null;}
     }
-    private sealed class Window(string label){internal Guid Id{get;}=Guid.NewGuid();internal string Label{get;set;}=label;internal MultiplexerLayoutNode? Layout{get;set;}internal List<Guid> Floats{get;}=[];}
+    private sealed class Window(string label)
+    {
+        internal Guid Id {get;}=Guid.NewGuid(); internal string Label {get;set;}=label;
+        internal MultiplexerLayoutNode? Layout {get;set;} internal List<Guid> Floats {get;}=[];
+        internal Dictionary<Guid,MultiplexerFloatingLayer> Groups {get;}=[]; internal Guid? Zoom {get;set;}
+    }
 }
