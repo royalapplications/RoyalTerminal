@@ -9,13 +9,29 @@ namespace RoyalTerminal.Avalonia.Rendering;
 
 internal interface IConfiguredFontFamilyMatcher
 {
-    // Returns a face from this family only, or null for an unavailable family.
+    // Returns a configured family/face, or null for an unavailable name/style.
+    // Never substitutes an unrelated platform default.
     // The caller releases its reference via Dispose; Skia may protect shared
     // system-font wrappers and retain their native resources in its own cache.
     SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null);
 }
 
 internal sealed class SkiaConfiguredFontFamilyMatcher(SKFontManager manager) : IConfiguredFontFamilyMatcher
+{
+    private readonly SystemFontNameResolver _resolver = new(new SkiaExactFontFamilyMatcher(manager));
+
+    public SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null)
+        => _resolver.Match(family, style, styleName);
+
+    internal SKTypeface CreateMonospaceFallback() => _resolver.CreateMonospaceFallback(manager.FontFamilies);
+
+    internal static bool MatchesStyle(SKTypeface face, TerminalTypefaceStyle style)
+        => style == TerminalTypefaceStyle.Regular ||
+            (face.IsBold == (style is TerminalTypefaceStyle.Bold or TerminalTypefaceStyle.BoldItalic) &&
+             face.IsItalic == (style is TerminalTypefaceStyle.Italic or TerminalTypefaceStyle.BoldItalic));
+}
+
+internal sealed class SkiaExactFontFamilyMatcher(SKFontManager manager) : IConfiguredFontFamilyMatcher
 {
     public SKTypeface? Match(string family, TerminalTypefaceStyle style, string? styleName = null)
     {
@@ -40,15 +56,10 @@ internal sealed class SkiaConfiguredFontFamilyMatcher(SKFontManager manager) : I
             TerminalTypefaceStyle.BoldItalic => SKFontStyle.BoldItalic,
             _ => SKFontStyle.Normal,
         });
-        if (candidate is null || MatchesStyle(candidate, style)) return candidate;
+        if (candidate is null || SkiaConfiguredFontFamilyMatcher.MatchesStyle(candidate, style)) return candidate;
         candidate.Dispose();
         return null;
     }
-
-    internal static bool MatchesStyle(SKTypeface face, TerminalTypefaceStyle style)
-        => style == TerminalTypefaceStyle.Regular ||
-            (face.IsBold == (style is TerminalTypefaceStyle.Bold or TerminalTypefaceStyle.BoldItalic) &&
-             face.IsItalic == (style is TerminalTypefaceStyle.Italic or TerminalTypefaceStyle.BoldItalic));
 }
 
 /// <summary>Owns configured face references independently of renderer/discovery caches.</summary>

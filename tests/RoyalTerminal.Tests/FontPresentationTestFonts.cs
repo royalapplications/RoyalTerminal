@@ -9,8 +9,8 @@ using SkiaSharp;
 namespace RoyalTerminal.Tests;
 
 /// <summary>
-/// Builds a portable COLRv0 fixture in memory from the pinned OFL Noto Emoji
-/// outlines. Its name is changed; copyright/license records remain intact.
+/// Builds portable color and coverage fixtures from the pinned OFL Noto Emoji
+/// and JetBrains Mono outlines. Its name is changed; copyright/license records remain intact.
 /// The bitmap-only upstream Noto Color Emoji cannot be loaded by CoreText.
 /// Layouts: Microsoft OpenType COLR, CPAL and sfnt specifications.
 /// </summary>
@@ -18,11 +18,11 @@ internal static class FontPresentationTestFonts
 {
     internal static SKTypeface Load(string name)
     {
-        if (name is not ("NotoColorEmoji.ttf" or "ColorEmojiV1.ttf" or "SvgEmoji.ttf" or "LastResort.ttf"))
+        if (name is not ("NotoColorEmoji.ttf" or "ColorEmojiV1.ttf" or "SvgEmoji.ttf" or "LastResort.ttf" or "LastResortMono.ttf" or "Proportional.ttf"))
             return SKTypeface.FromFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Fonts", name))
                    ?? throw new InvalidOperationException(name);
 
-        using SKTypeface source = Load("NotoEmoji-Regular.ttf");
+        using SKTypeface source = Load(name == "LastResortMono.ttf" ? "JetBrainsMono-Regular.ttf" : "NotoEmoji-Regular.ttf");
         SortedDictionary<uint, byte[]> tables = new();
         foreach (uint tag in source.GetTableTags())
             if (tag != 0x44534947) tables.Add(tag, source.GetTableData(tag)); // Strip invalidated DSIG.
@@ -84,7 +84,14 @@ internal static class FontPresentationTestFonts
             tables[0x53564720] = svg;
         }
         tables[0x6E616D65] = Rename(tables[0x6E616D65]);
-        if (name == "LastResort.ttf")
+        if (name == "Proportional.ttf")
+        {
+            // Clear both post.isFixedPitch and the OS/2 PANOSE monospaced
+            // classification, retaining the pinned outlines and font license.
+            Put32(tables[0x706F7374], 12, 0);
+            tables[0x4F532F32][35] = 0;
+        }
+        if (name is "LastResort.ttf" or "LastResortMono.ttf")
         {
             byte[] headTable = tables[0x68656164];
             Put16(headTable, 16, BinaryPrimitives.ReadUInt16BigEndian(headTable.AsSpan(16)) | 0x4000);
