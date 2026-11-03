@@ -299,8 +299,8 @@ public sealed partial class TerminalInputAdapterTests
     public async Task Win32BareModifiersAreIgnoredByPowerShellConsoleReadKey(bool useAppWrapper)
     {
         if (!OperatingSystem.IsWindows()) return;
-        string pwsh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
-        if (!File.Exists(pwsh)) Assert.Skip("An installed PowerShell Core in Program Files is required for the ConPTY integration test.");
+        string? pwsh = FindPowerShellCore();
+        if (pwsh is null) Assert.Skip("PowerShell Core is required for the ConPTY integration test.");
         await WithWin32Session((adapter, session, processor, transport) =>
         {
             if (!OperatingSystem.IsWindows()) return;
@@ -328,6 +328,8 @@ public sealed partial class TerminalInputAdapterTests
             string script = "[Console]::WriteLine('__READY__'); $k=[Console]::ReadKey($true); [Console]::WriteLine('__KEY_'+[int]$k.Key+'__')";
             try
             {
+                // Readiness also verifies that output uses ConPTY and ReadKey
+                // sees a console, rather than inherited test-runner pipes.
                 pty.Start(shell: pwsh, arguments: ["-NoLogo", "-NoProfile", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script))]);
                 Assert.True(ready.Wait(TimeSpan.FromSeconds(10)), "PowerShell did not reach Console.ReadKey. Output: " + CaptureOutput());
                 ITerminalInputAdapter input = useAppWrapper ? new HandledInputSuppressingTerminalInputAdapter(adapter) : adapter;
@@ -371,6 +373,19 @@ public sealed partial class TerminalInputAdapterTests
         const string prefix = "__KEY_";
         int start = output.IndexOf(prefix, StringComparison.Ordinal);
         return start >= 0 && output.IndexOf("__", start + prefix.Length, StringComparison.Ordinal) >= 0;
+    }
+
+    private static string? FindPowerShellCore()
+    {
+        string installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(installed)) return installed;
+        foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string candidate = Path.Combine(directory, "pwsh.exe");
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
     }
 
     private static async Task WithWin32Session(Action<DefaultTerminalInputAdapter, TerminalSessionService, FakeVtProcessor, FakeTransport> test)

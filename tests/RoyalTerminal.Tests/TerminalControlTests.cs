@@ -3298,12 +3298,19 @@ public class TerminalControlTests
             ArrangeControlToGrid(control, window, renderer, columns: 133, rows: 33);
 
             (int widthPx, int heightPx) = CalculateGridPixels(renderer, columns: 133, rows: 33);
+            const string marker = "__RT_RAPID_DONE__";
+            // Run a startup command so the marker cannot be mistaken for an
+            // echoed input line. Out-Host finishes the table before the marker.
+            string script = "$PSStyle.OutputRendering='Ansi'; Get-ChildItem | Out-Host; [Console]::WriteLine('" + marker + "')";
             PtyTransportOptions options = new(
                 Command: new TerminalCommandSpec(
                     pwshPath!,
                     [
                         "-NoLogo",
+                        "-NoProfile",
                         "-NoExit",
+                        "-EncodedCommand",
+                        Convert.ToBase64String(Encoding.Unicode.GetBytes(script)),
                     ]),
                 WorkingDirectory: root,
                 Environment: new Dictionary<string, string>(StringComparer.Ordinal)
@@ -3312,9 +3319,7 @@ public class TerminalControlTests
                 },
                 Dimensions: new TerminalSessionDimensions(133, 33, widthPx, heightPx));
 
-            const string marker = "__RT_RAPID_DONE__";
             await control.StartSessionAsync(options);
-            control.SendInput("$PSStyle.OutputRendering='Ansi'; Get-ChildItem; Write-Output '" + marker + "'\r");
 
             Assert.True(
                 await WaitUntilAsync(
