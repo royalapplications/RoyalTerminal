@@ -10,7 +10,7 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-public sealed class TerminalInputAdapterTests
+public sealed partial class TerminalInputAdapterTests
 {
     [Theory]
     [InlineData(false)]
@@ -2131,6 +2131,8 @@ public sealed class TerminalInputAdapterTests
         public bool IsRunning { get; private set; }
 
         public byte[]? LastInput { get; private set; }
+        public int InputCount { get; private set; }
+        public Action<byte[]>? InputObserver { get; set; }
 
         public ValueTask StartAsync(ITerminalTransportOptions options, CancellationToken cancellationToken = default)
         {
@@ -2142,7 +2144,9 @@ public sealed class TerminalInputAdapterTests
 
         public void SendInput(ReadOnlySpan<byte> utf8)
         {
+            InputCount++;
             LastInput = utf8.ToArray();
+            InputObserver?.Invoke(LastInput);
             _dataReceived?.Invoke(LastInput, LastInput.Length);
         }
 
@@ -2164,7 +2168,7 @@ public sealed class TerminalInputAdapterTests
         }
     }
 
-    private sealed class FakeVtProcessor : IVtProcessor, IKittyKeyboardStateSource, ITerminalKeySequenceEncoderSource
+    private sealed class FakeVtProcessor : IVtProcessor, IKittyKeyboardStateSource, ITerminalKeySequenceEncoderSource, ITerminalKeyEncodingPolicy
     {
         private TerminalModeState _modeState = new(
             CursorVisible: true,
@@ -2174,7 +2178,8 @@ public sealed class TerminalInputAdapterTests
             BracketedPaste: false);
         private int _kittyKeyboardFlags;
         public List<TerminalKeyEncodingRequest> EncodedKeyRequests { get; } = [];
-        public byte[]? EncodedKeySequence { get; init; }
+        public byte[]? EncodedKeySequence { get; set; }
+        public bool IsKeyEncodingAuthoritative { get; set; }
 
         public int CursorCol => 0;
         public int CursorRow => 0;

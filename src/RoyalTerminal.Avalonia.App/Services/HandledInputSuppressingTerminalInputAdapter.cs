@@ -15,17 +15,10 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
     private const int KittyReportEvents = 0x02;
     private const int KittyReportAllKeysAsEscapeCodes = 0x08;
 
-    private const uint EnhancedKey = 0x0100;
-    private const uint LeftAltPressed = 0x0002;
-    private const uint RightAltPressed = 0x0001;
-    private const uint LeftCtrlPressed = 0x0008;
-    private const uint RightCtrlPressed = 0x0004;
-    private const uint ShiftPressed = 0x0010;
-
     private readonly ITerminalInputAdapter _inner;
     private bool _isComposing;
     private readonly HashSet<Key> _compositionKeys = [];
-    private KeyModifiers _kittyReportedModifierKeyDown;
+    private readonly HashSet<Key> _forwardedModifierKeys = [];
     private KeyModifiers _terminalModifierKeyState;
 
     public HandledInputSuppressingTerminalInputAdapter(ITerminalInputAdapter inner)
@@ -49,10 +42,12 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
         {
             TrackTerminalModifierKeyState(e.Key, isKeyDown: true, sessionService, vtProcessor);
 
-            if (TrySendWin32InputSequence(e, sessionService, keyDown: true))
+            if (IsWin32InputModeEnabled(sessionService) && GetKittyKeyboardFlags(sessionService, vtProcessor) == 0)
             {
-                e.Handled = true;
-                return true;
+                _forwardedModifierKeys.Add(e.Key);
+                bool accepted = _inner.HandleKeyDown(e, sessionService, vtProcessor);
+                if (accepted) e.Handled = true;
+                return accepted;
             }
 
             if (!ShouldReportKittyIsolatedModifierKeys(sessionService, vtProcessor))
@@ -61,7 +56,7 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
                 return false;
             }
 
-            TrackKittyReportedModifierKeyDown(e.Key);
+            _forwardedModifierKeys.Add(e.Key);
             terminalKeyEventArgs = CreateNormalizedKeyEventArgs(e, isKeyDown: true);
         }
         else
@@ -78,31 +73,36 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
 
     public bool HandleKeyUp(KeyEventArgs e, ITerminalSessionService sessionService)
     {
+        bool forwardedModifier = _forwardedModifierKeys.Remove(e.Key);
+        if (IsIsolatedModifierKey(e.Key))
+            TrackTerminalModifierKeyState(e.Key, isKeyDown: false, sessionService, vtProcessor: null);
         bool compositionKey = _compositionKeys.Remove(e.Key);
         if (_isComposing || compositionKey)
             return _inner is ITerminalCompositionInputAdapter && _inner.HandleKeyUp(e, sessionService);
-        if (e.Handled && !CanForwardHandledKeyUp(e.Key, sessionService))
+        if (e.Handled && !forwardedModifier && !CanForwardHandledKeyUp(e.Key, sessionService))
             return false;
 
         KeyEventArgs terminalKeyEventArgs;
         if (IsIsolatedModifierKey(e.Key))
         {
-            if (TrySendWin32InputSequence(e, sessionService, keyDown: false))
+            // A forwarded press updates the inner adapter's physical state even
+            // when an encoder emits no bytes. Always deliver its release; the
+            // current encoder decides whether the protocol permits output.
+            if (forwardedModifier ||
+                IsWin32InputModeEnabled(sessionService) && GetKittyKeyboardFlags(sessionService) == 0)
             {
-                TrackTerminalModifierKeyState(e.Key, isKeyDown: false, sessionService, vtProcessor: null);
+                bool accepted = _inner.HandleKeyUp(CreateNormalizedKeyEventArgs(e, isKeyDown: false), sessionService);
                 e.Handled = true;
-                return true;
+                return accepted;
             }
 
-            if (!ShouldReportKittyIsolatedModifierKeys(sessionService) && !WasKittyReportedModifierKeyDown(e.Key))
+            if (!ShouldReportKittyIsolatedModifierKeys(sessionService))
             {
                 e.Handled = true;
                 return false;
             }
 
-            ClearKittyReportedModifierKeyDown(e.Key);
             terminalKeyEventArgs = CreateNormalizedKeyEventArgs(e, isKeyDown: false);
-            TrackTerminalModifierKeyState(e.Key, isKeyDown: false, sessionService, vtProcessor: null);
         }
         else
         {
@@ -128,7 +128,7 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
     {
         _isComposing = false;
         _compositionKeys.Clear();
-        _kittyReportedModifierKeyDown = KeyModifiers.None;
+        _forwardedModifierKeys.Clear();
         _terminalModifierKeyState = KeyModifiers.None;
 
         if (_inner is IResettableTerminalInputAdapter resettableInner)
@@ -150,22 +150,6 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
             or Key.RightAlt
             or Key.LWin
             or Key.RWin;
-
-    private static bool TrySendWin32InputSequence(KeyEventArgs e, ITerminalSessionService sessionService, bool keyDown)
-    {
-        if (!IsWin32InputModeEnabled(sessionService))
-            return false;
-
-        KeyModifiers modifiers = IsIsolatedModifierKey(e.Key)
-            ? NormalizeModifierKeyState(e.KeyModifiers, e.Key, keyDown)
-            : e.KeyModifiers;
-
-        if (!TryCreateWin32InputSequence(e.Key, modifiers, keyDown, out string sequence))
-            return false;
-
-        sessionService.SendInput(sequence);
-        return true;
-    }
 
     private static KeyEventArgs CreateNormalizedKeyEventArgs(KeyEventArgs source, bool isKeyDown) =>
         new()
@@ -234,107 +218,11 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
     private bool CanForwardHandledIsolatedModifierKeyUp(Key key, ITerminalSessionService sessionService) =>
         IsIsolatedModifierKey(key) &&
         (IsWin32InputModeEnabled(sessionService) ||
-         ShouldReportKittyIsolatedModifierKeys(sessionService) ||
-         WasKittyReportedModifierKeyDown(key));
+         ShouldReportKittyIsolatedModifierKeys(sessionService));
 
     private bool CanForwardHandledTrackedModifierKey(ITerminalSessionService sessionService, IVtProcessor? vtProcessor) =>
         _terminalModifierKeyState != KeyModifiers.None &&
         ShouldForwardModifierKeyState(sessionService, vtProcessor);
-
-    private static bool TryCreateWin32InputSequence(
-        Key key,
-        KeyModifiers modifiers,
-        bool keyDown,
-        out string sequence)
-    {
-        sequence = string.Empty;
-
-        if (!TryGetWin32ModifierKeyInfo(key, out ushort virtualKey, out ushort scanCode, out uint keyControlState))
-            return false;
-
-        uint controlState = GetControlKeyState(key, modifiers);
-        if (keyDown)
-            controlState |= keyControlState;
-        else
-            controlState &= ~keyControlState;
-
-        controlState |= keyControlState & EnhancedKey;
-        int keyDownValue = keyDown ? 1 : 0;
-        sequence = $"\u001b[{virtualKey};{scanCode};0;{keyDownValue};{controlState};1_";
-        return true;
-    }
-
-    private static bool TryGetWin32ModifierKeyInfo(
-        Key key,
-        out ushort virtualKey,
-        out ushort scanCode,
-        out uint controlState)
-    {
-        virtualKey = 0;
-        scanCode = 0;
-        controlState = 0;
-
-        switch (key)
-        {
-            case Key.LeftShift:
-                virtualKey = 0x10;
-                scanCode = 0x2A;
-                controlState = ShiftPressed;
-                return true;
-            case Key.RightShift:
-                virtualKey = 0x10;
-                scanCode = 0x36;
-                controlState = ShiftPressed;
-                return true;
-            case Key.LeftCtrl:
-                virtualKey = 0x11;
-                scanCode = 0x1D;
-                controlState = LeftCtrlPressed;
-                return true;
-            case Key.RightCtrl:
-                virtualKey = 0x11;
-                scanCode = 0x1D;
-                controlState = RightCtrlPressed | EnhancedKey;
-                return true;
-            case Key.LeftAlt:
-                virtualKey = 0x12;
-                scanCode = 0x38;
-                controlState = LeftAltPressed;
-                return true;
-            case Key.RightAlt:
-                virtualKey = 0x12;
-                scanCode = 0x38;
-                controlState = RightAltPressed | EnhancedKey;
-                return true;
-            case Key.LWin:
-                virtualKey = 0x5B;
-                scanCode = 0x5B;
-                controlState = EnhancedKey;
-                return true;
-            case Key.RWin:
-                virtualKey = 0x5C;
-                scanCode = 0x5C;
-                controlState = EnhancedKey;
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    private static uint GetControlKeyState(Key key, KeyModifiers modifiers)
-    {
-        uint controlState = 0;
-        modifiers = RemoveCurrentModifierKeyState(modifiers, key);
-
-        if (modifiers.HasFlag(KeyModifiers.Shift))
-            controlState |= ShiftPressed;
-        if (modifiers.HasFlag(KeyModifiers.Control))
-            controlState |= LeftCtrlPressed;
-        if (modifiers.HasFlag(KeyModifiers.Alt))
-            controlState |= LeftAltPressed;
-
-        return controlState;
-    }
 
     private static KeyModifiers NormalizeModifierKeyState(KeyModifiers modifiers, Key key, bool isKeyDown)
     {
@@ -347,14 +235,6 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
             : modifiers & ~changedModifier;
     }
 
-    private static KeyModifiers RemoveCurrentModifierKeyState(KeyModifiers modifiers, Key key)
-    {
-        KeyModifiers changedModifier = GetModifierKeyState(key);
-        return changedModifier == KeyModifiers.None
-            ? modifiers
-            : modifiers & ~changedModifier;
-    }
-
     private static KeyModifiers GetModifierKeyState(Key key) =>
         key switch
         {
@@ -364,22 +244,6 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
             Key.LWin or Key.RWin => KeyModifiers.Meta,
             _ => KeyModifiers.None,
         };
-
-    private void TrackKittyReportedModifierKeyDown(Key key)
-    {
-        _kittyReportedModifierKeyDown |= GetModifierKeyState(key);
-    }
-
-    private void ClearKittyReportedModifierKeyDown(Key key)
-    {
-        _kittyReportedModifierKeyDown &= ~GetModifierKeyState(key);
-    }
-
-    private bool WasKittyReportedModifierKeyDown(Key key)
-    {
-        KeyModifiers modifier = GetModifierKeyState(key);
-        return modifier != KeyModifiers.None && _kittyReportedModifierKeyDown.HasFlag(modifier);
-    }
 
     private void TrackTerminalModifierKeyState(
         Key key,
@@ -394,6 +258,8 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
         if (!isKeyDown)
         {
             _terminalModifierKeyState &= ~modifier;
+            foreach (Key heldKey in _forwardedModifierKeys)
+                _terminalModifierKeyState |= GetModifierKeyState(heldKey);
             return;
         }
 

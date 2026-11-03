@@ -85,7 +85,7 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
     }
 
     [Fact]
-    public void HandleKeyDown_SendsWin32InputSequenceForIsolatedShift_WhenWin32InputModeIsEnabled()
+    public void HandleKeyDown_DelegatesWin32IsolatedShift_WhenWin32InputModeIsEnabled()
     {
         RecordingTerminalInputAdapter inner = new();
         HandledInputSuppressingTerminalInputAdapter adapter = new(inner);
@@ -97,12 +97,12 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
 
         Assert.True(handled);
         Assert.True(args.Handled);
-        Assert.Equal(0, inner.KeyDownCount);
-        Assert.Equal(["\u001b[16;42;0;1;16;1_"], sessionService.SentText);
+        Assert.Equal(1, inner.KeyDownCount);
+        Assert.Empty(sessionService.SentText);
     }
 
     [Fact]
-    public void HandleKeyUp_SendsWin32InputSequenceForIsolatedShift_WhenWin32InputModeIsEnabled()
+    public void HandleKeyUp_DelegatesWin32IsolatedShift_WhenWin32InputModeIsEnabled()
     {
         RecordingTerminalInputAdapter inner = new();
         HandledInputSuppressingTerminalInputAdapter adapter = new(inner);
@@ -114,12 +114,12 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
 
         Assert.True(handled);
         Assert.True(args.Handled);
-        Assert.Equal(0, inner.KeyUpCount);
-        Assert.Equal(["\u001b[16;42;0;0;0;1_"], sessionService.SentText);
+        Assert.Equal(1, inner.KeyUpCount);
+        Assert.Empty(sessionService.SentText);
     }
 
     [Fact]
-    public void HandleKeyDown_SendsWin32InputSequenceAndHandlesEventForIsolatedAlt_WhenWin32InputModeIsEnabled()
+    public void HandleKeyDown_DelegatesWin32IsolatedAlt_WhenWin32InputModeIsEnabled()
     {
         RecordingTerminalInputAdapter inner = new();
         HandledInputSuppressingTerminalInputAdapter adapter = new(inner);
@@ -131,12 +131,12 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
 
         Assert.True(handled);
         Assert.True(args.Handled);
-        Assert.Equal(0, inner.KeyDownCount);
-        Assert.Equal(["\u001b[18;56;0;1;2;1_"], sessionService.SentText);
+        Assert.Equal(1, inner.KeyDownCount);
+        Assert.Empty(sessionService.SentText);
     }
 
     [Fact]
-    public void HandleKeyDown_SendsRightAltOnlyWin32InputSequence_WhenAvaloniaReportsGenericAltModifier()
+    public void HandleKeyDown_DelegatesWin32RightAlt_WhenAvaloniaReportsGenericAltModifier()
     {
         RecordingTerminalInputAdapter inner = new();
         HandledInputSuppressingTerminalInputAdapter adapter = new(inner);
@@ -148,8 +148,8 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
 
         Assert.True(handled);
         Assert.True(args.Handled);
-        Assert.Equal(0, inner.KeyDownCount);
-        Assert.Equal(["\u001b[18;56;0;1;257;1_"], sessionService.SentText);
+        Assert.Equal(1, inner.KeyDownCount);
+        Assert.Empty(sessionService.SentText);
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public sealed class HandledInputSuppressingTerminalInputAdapterTests
         bool keyHandled = adapter.HandleKeyDown(CreateKeyEventArgs(Key.A), sessionService, vtProcessor: null);
 
         Assert.True(keyHandled);
-        Assert.Equal(1, inner.KeyDownCount);
+        Assert.Equal(2, inner.KeyDownCount);
         Assert.Equal(Key.A, inner.LastKeyDownKey);
         Assert.Equal(KeyModifiers.Alt, inner.LastKeyDownModifiers);
     }

@@ -29,7 +29,8 @@ internal static partial class TerminalWin32InputSequenceEncoder
         KeyModifiers modifiers,
         string? keySymbol,
         bool keyDown,
-        out string sequence)
+        out string sequence,
+        TerminalWin32ModifierState modifierState = default)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -44,9 +45,25 @@ internal static partial class TerminalWin32InputSequenceEncoder
             return false;
         }
 
-        ushort scanCode = GetScanCode(virtualKey);
-        int unicodeChar = keyDown ? ResolveUnicodeChar(key, modifiers, keySymbol) : 0;
-        uint controlState = GetControlKeyState(key, modifiers, virtualKey);
+        modifierState.Update(key, keyDown);
+        uint controlState = modifierState.GetControlState(key, modifiers);
+        if ((controlState & ShiftPressed) != 0) modifiers |= KeyModifiers.Shift;
+        if ((controlState & (LeftCtrlPressed | RightCtrlPressed)) != 0) modifiers |= KeyModifiers.Control;
+        if ((controlState & (LeftAltPressed | RightAltPressed)) != 0) modifiers |= KeyModifiers.Alt;
+        ushort scanCode = key switch
+        {
+            Key.LeftShift => 0x2A,
+            Key.RightShift => 0x36,
+            Key.LeftCtrl or Key.RightCtrl => 0x1D,
+            Key.LeftAlt or Key.RightAlt => 0x38,
+            Key.LWin => 0x5B,
+            Key.RWin => 0x5C,
+            _ => GetScanCode(virtualKey),
+        };
+        int unicodeChar = keyDown && !TerminalWin32ModifierState.IsModifier(key)
+            ? ResolveUnicodeChar(key, modifiers, keySymbol) : 0;
+        if (IsEnhancedVirtualKey(virtualKey) || key is Key.RightCtrl or Key.RightAlt or Key.LWin or Key.RWin)
+            controlState |= EnhancedKey;
 
         sequence = $"{Escape}[{virtualKey};{scanCode};{unicodeChar};{(keyDown ? 1 : 0)};{controlState};1_";
         return true;
@@ -126,12 +143,12 @@ internal static partial class TerminalWin32InputSequenceEncoder
             Key.OemComma => 0xBC,
             Key.OemPeriod => 0xBE,
             Key.Oem2 => 0xBF,
-            Key.LeftShift => 0xA0,
-            Key.RightShift => 0xA1,
-            Key.LeftCtrl => 0xA2,
-            Key.RightCtrl => 0xA3,
-            Key.LeftAlt => 0xA4,
-            Key.RightAlt => 0xA5,
+            Key.LeftShift => 0x10,
+            Key.RightShift => 0x10,
+            Key.LeftCtrl => 0x11,
+            Key.RightCtrl => 0x11,
+            Key.LeftAlt => 0x12,
+            Key.RightAlt => 0x12,
             Key.LWin => 0x5B,
             Key.RWin => 0x5C,
             _ => 0,
@@ -141,7 +158,7 @@ internal static partial class TerminalWin32InputSequenceEncoder
     private static ushort GetScanCode(ushort virtualKey)
     {
         uint mapped = MapVirtualKey(virtualKey, MapVkToVscEx);
-        return (ushort)(mapped & 0xFFFF);
+        return (ushort)(mapped & 0xFF);
     }
 
     private static int ResolveUnicodeChar(Key key, KeyModifiers modifiers, string? keySymbol)
@@ -287,51 +304,6 @@ internal static partial class TerminalWin32InputSequenceEncoder
         };
 
         return unicodeChar != 0;
-    }
-
-    private static uint GetControlKeyState(Key key, KeyModifiers modifiers, ushort virtualKey)
-    {
-        uint state = 0;
-
-        if (modifiers.HasFlag(KeyModifiers.Shift) || key is Key.LeftShift or Key.RightShift)
-        {
-            state |= ShiftPressed;
-        }
-
-        if (modifiers.HasFlag(KeyModifiers.Control))
-        {
-            state |= key == Key.RightCtrl ? RightCtrlPressed : LeftCtrlPressed;
-        }
-
-        if (modifiers.HasFlag(KeyModifiers.Alt))
-        {
-            state |= key == Key.RightAlt ? RightAltPressed : LeftAltPressed;
-        }
-
-        if (key == Key.LeftCtrl)
-        {
-            state |= LeftCtrlPressed;
-        }
-        else if (key == Key.RightCtrl)
-        {
-            state |= RightCtrlPressed;
-        }
-
-        if (key == Key.LeftAlt)
-        {
-            state |= LeftAltPressed;
-        }
-        else if (key == Key.RightAlt)
-        {
-            state |= RightAltPressed;
-        }
-
-        if (IsEnhancedVirtualKey(virtualKey))
-        {
-            state |= EnhancedKey;
-        }
-
-        return state;
     }
 
     private static bool IsEnhancedVirtualKey(ushort virtualKey)
