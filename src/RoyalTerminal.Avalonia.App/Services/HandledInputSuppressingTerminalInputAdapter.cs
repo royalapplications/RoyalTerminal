@@ -42,11 +42,11 @@ internal sealed class HandledInputSuppressingTerminalInputAdapter : ITerminalInp
         {
             TrackTerminalModifierKeyState(e.Key, isKeyDown: true, sessionService, vtProcessor);
 
-            if (IsWin32InputModeEnabled(sessionService) && GetKittyKeyboardFlags(sessionService, vtProcessor) == 0)
+            if (IsWin32InputModeEnabled(sessionService))
             {
                 _forwardedModifierKeys.Add(e.Key);
-                bool accepted = _inner.HandleKeyDown(e, sessionService, vtProcessor);
-                if (accepted) e.Handled = true;
+                bool accepted = _inner.HandleKeyDown(CreateNormalizedKeyEventArgs(e, isKeyDown: true), sessionService, vtProcessor);
+                e.Handled = true;
                 return accepted;
             }
 

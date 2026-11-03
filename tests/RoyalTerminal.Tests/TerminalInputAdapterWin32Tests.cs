@@ -255,6 +255,27 @@ public sealed partial class TerminalInputAdapterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task Win32AppWrapperTracksPressesSuppressedByKitty(bool bothShifts)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await WithWin32Session((adapter, session, processor, transport) =>
+        {
+            HandledInputSuppressingTerminalInputAdapter wrapper = new(adapter);
+            processor.SetKittyKeyboardFlags(1);
+            processor.IsKeyEncodingAuthoritative = true;
+            wrapper.HandleKeyDown(new() { Key = bothShifts ? Key.LeftShift : Key.RightAlt }, session, processor);
+            if (bothShifts) wrapper.HandleKeyDown(new() { Key = Key.RightShift }, session, processor);
+            Assert.Equal(0, transport.InputCount);
+            processor.SetKittyKeyboardFlags(0);
+            if (bothShifts) wrapper.HandleKeyUp(new() { Key = Key.LeftShift }, session);
+            wrapper.HandleKeyDown(new() { Key = Key.A, KeySymbol = "a" }, session, processor);
+            Assert.Equal(bothShifts ? "16" : "1", ParseWin32InputFields(transport.LastInput!)[4]);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Win32ModifierEventsPreferKittyThroughBothAdapters(bool useAppWrapper)
     {
         await WithWin32Session((adapter, session, processor, transport) =>
