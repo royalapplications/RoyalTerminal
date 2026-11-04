@@ -469,6 +469,115 @@ public class PtyContractTests
         Assert.False(pty.IsRunning);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    public void WindowsPty_ProcessExited_DrainsOutputAndReportsExitCode(int expectedExitCode)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        if (!TryResolveWindowsCmdPath(out string? cmdPath))
+        {
+            Assert.Skip("cmd.exe is required for the ConPTY integration test.");
+        }
+
+        using ManualResetEventSlim sawExit = new(false);
+        using WindowsPty pty = new();
+        StringBuilder output = new();
+        const string marker = "__ROYALTERMINAL_FINAL_OUTPUT__";
+        int actualExitCode = -1;
+        string outputAtExit = string.Empty;
+        pty.DataReceived += (data, length) =>
+        {
+            lock (output)
+            {
+                output.Append(Encoding.UTF8.GetString(data, 0, length));
+            }
+        };
+        pty.ProcessExited += exitCode =>
+        {
+            actualExitCode = exitCode;
+            lock (output)
+            {
+                outputAtExit = output.ToString();
+            }
+            sawExit.Set();
+        };
+
+        // A real console client must write through ConPTY even when the test
+        // runner has redirected handles. Closing ConPTY after the client exits
+        // must let the reader drain that output before notifying consumers.
+        pty.Start(shell: cmdPath, arguments: ["/d", "/c", $"echo {marker}&exit /b {expectedExitCode}"]);
+
+        Assert.True(sawExit.Wait(ContractTimeout), "PTY did not report the child's natural exit.");
+        Assert.Equal(expectedExitCode, actualExitCode);
+        Assert.Contains(marker, outputAtExit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WindowsPty_ResizeAndStatusPollingDuringExit_DrainFinalOutput()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (!TryResolveWindowsCmdPath(out string? cmdPath))
+        {
+            Assert.Skip("cmd.exe is required for the ConPTY integration test.");
+        }
+
+        using ManualResetEventSlim resized = new(false);
+        using ManualResetEventSlim sawExit = new(false);
+        using CancellationTokenSource stopResize = new();
+        using WindowsPty pty = new();
+        StringBuilder output = new();
+        const string marker = "__ROYALTERMINAL_CONCURRENT_EXIT__";
+        int exitCode = -1;
+        pty.DataReceived += (data, length) =>
+        {
+            if (OperatingSystem.IsWindows()) _ = pty.IsRunning;
+            lock (output)
+            {
+                output.Append(Encoding.UTF8.GetString(data, 0, length));
+            }
+        };
+        pty.ProcessExited += code =>
+        {
+            exitCode = code;
+            sawExit.Set();
+        };
+        pty.Start(shell: cmdPath, arguments: ["/d", "/q"]);
+        Task resize = Task.Run(() =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            int iteration = 0;
+            while (!stopResize.IsCancellationRequested)
+            {
+                pty.Resize(80 + iteration % 3, 24 + iteration % 2);
+                resized.Set();
+                iteration++;
+                Thread.Sleep(1);
+            }
+        });
+
+        try
+        {
+            Assert.True(resized.Wait(ContractTimeout));
+            pty.Write($"echo {marker}\r\nexit /b 7\r\n");
+            Assert.True(sawExit.Wait(ContractTimeout), "Concurrent resize and status polling prevented natural exit.");
+            Assert.Equal(7, exitCode);
+            lock (output)
+            {
+                Assert.Contains(marker, output.ToString(), StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            stopResize.Cancel();
+            await resize.WaitAsync(ContractTimeout);
+        }
+    }
+
     [Fact]
     public void WindowsPty_StartWithArguments_ExecutesCommand()
     {

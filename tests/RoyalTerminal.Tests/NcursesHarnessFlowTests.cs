@@ -12,6 +12,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using RoyalTerminal.Avalonia.Controls;
+using RoyalTerminal.Avalonia.Rendering;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Terminal;
 using RoyalTerminal.Terminal.Services;
@@ -245,11 +246,7 @@ public sealed class NcursesHarnessFlowTests
             Assert.Contains("x=", mouse, StringComparison.Ordinal);
 
             int resizeStartLineIndex = await GetLogLineCountAsync(logPath).ConfigureAwait(false);
-            Dispatcher.UIThread.Invoke(() =>
-            {
-                control.Columns = 100;
-                control.Rows = 40;
-            });
+            Dispatcher.UIThread.Invoke(() => ArrangeTerminalGrid(control, window, columns: 100, rows: 40));
 
             string resize = await WaitForLogLineAsync(
                 logPath,
@@ -335,11 +332,7 @@ public sealed class NcursesHarnessFlowTests
                 timeout: EventTimeout);
             Assert.Contains("action=", mouse, StringComparison.Ordinal);
 
-            Dispatcher.UIThread.Invoke(() =>
-            {
-                control.Columns = 100;
-                control.Rows = 40;
-            });
+            Dispatcher.UIThread.Invoke(() => ArrangeTerminalGrid(control, window, columns: 100, rows: 40));
 
             string resize = await WaitForLogLineAsync(
                 logPath,
@@ -360,6 +353,22 @@ public sealed class NcursesHarnessFlowTests
         {
             await CleanupWindowAsync(window, control);
         }
+    }
+
+    private static void ArrangeTerminalGrid(TerminalControl control, Window window, int columns, int rows)
+    {
+        // Layout derives the grid from the control's bounds. Resize the window
+        // as well so a subsequent layout pass cannot restore its previous grid.
+        SkiaTerminalRenderer renderer = Assert.IsType<SkiaTerminalRenderer>(control.Renderer);
+        double width = (columns + 0.25) * renderer.CellWidth + control.Padding.Left + control.Padding.Right;
+        double height = (rows + 0.25) * renderer.CellHeight + control.Padding.Top + control.Padding.Bottom;
+        control.Width = window.Width = width;
+        control.Height = window.Height = height;
+        control.Measure(new Size(width, height));
+        control.Arrange(new Rect(0, 0, width, height));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(columns, control.Columns);
+        Assert.Equal(rows, control.Rows);
     }
 
     private static async Task RunMouseMatrixCaseAsync(

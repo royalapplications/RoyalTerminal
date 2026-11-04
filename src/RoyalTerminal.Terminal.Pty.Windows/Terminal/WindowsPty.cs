@@ -24,7 +24,7 @@ public sealed class WindowsPty : IPty
     private const int PipeBufferSize = 128 * 1024;
     private const int MaxManagedPayloadSize = 64 * 1024;
 
-    private nint _ptyHandle;
+    private SafePseudoConsoleHandle? _ptyHandle;
     private SafeFileHandle? _pipeIn;   // write to child stdin
     private SafeFileHandle? _pipeOut;  // read from child stdout
     private FileStream? _inputStream;
@@ -82,7 +82,7 @@ public sealed class WindowsPty : IPty
 
         // Create the pseudo-console
         var size = new COORD { X = (short)columns, Y = (short)rows };
-        var hr = CreatePseudoConsole(size, pipeInRead.DangerousGetHandle(), pipeOutWrite.DangerousGetHandle(), 0, out _ptyHandle);
+        var hr = CreatePseudoConsole(size, pipeInRead.DangerousGetHandle(), pipeOutWrite.DangerousGetHandle(), 0, out nint ptyHandle);
         if (hr != 0)
         {
             pipeInRead.Dispose();
@@ -91,6 +91,7 @@ public sealed class WindowsPty : IPty
             pipeOutWrite.Dispose();
             throw new Win32Exception(hr, $"CreatePseudoConsole failed: 0x{hr:X8}");
         }
+        _ptyHandle = new SafePseudoConsoleHandle(ptyHandle, ClosePseudoConsole);
 
         // Close the handles the ConPTY now owns
         pipeInRead.Dispose();
@@ -102,6 +103,12 @@ public sealed class WindowsPty : IPty
 
         // Launch the shell process attached to the ConPTY
         _process = LaunchProcess(shell, arguments, workingDirectory, environment);
+
+        // Register before delivering output: a consumer can query IsRunning
+        // inside DataReceived, and HasExited may raise Exited synchronously.
+        // Native close is deferred so the reader can start and drain output.
+        _process.Exited += (_, _) => ClosePseudoConsoleHandle();
+        _process.EnableRaisingEvents = true;
 
         // Start writing to the PTY input on a dedicated worker so caller
         // threads never block on back-pressured stdin.
@@ -165,9 +172,18 @@ public sealed class WindowsPty : IPty
     /// </summary>
     public void Resize(int columns, int rows)
     {
-        if (_disposed || _ptyHandle == 0) return;
+        SafePseudoConsoleHandle? handle = _ptyHandle;
+        if (_disposed || handle is null || handle.IsClosed) return;
         var size = new COORD { X = (short)columns, Y = (short)rows };
-        ResizePseudoConsole(_ptyHandle, size);
+        try
+        {
+            // Safe-handle marshalling pins ConPTY for the entire native call.
+            ResizePseudoConsole(handle, size);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Process exit won the race before the native call acquired its lease.
+        }
     }
 
     /// <summary>
@@ -199,11 +215,7 @@ public sealed class WindowsPty : IPty
         _pipeOut?.Dispose();
         _pipeOut = null;
 
-        if (_ptyHandle != 0)
-        {
-            ClosePseudoConsole(_ptyHandle);
-            _ptyHandle = 0;
-        }
+        ClosePseudoConsoleHandle();
 
         _writeThread?.Join(TimeSpan.FromSeconds(2));
         _readThread?.Join(TimeSpan.FromSeconds(2));
@@ -217,6 +229,11 @@ public sealed class WindowsPty : IPty
     }
 
     #region Private Implementation
+
+    private void ClosePseudoConsoleHandle()
+    {
+        Interlocked.Exchange(ref _ptyHandle, null)?.Dispose();
+    }
 
     private void WriteLoop()
     {
@@ -417,21 +434,31 @@ public sealed class WindowsPty : IPty
     {
         var startupInfo = new STARTUPINFOEX();
         startupInfo.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
+        // Match Windows Terminal's ConptyConnection: leave the standard handles
+        // null explicitly so the child attaches to ConPTY instead of inheriting
+        // the parent's redirected handles (for example, a test runner's pipes).
+        // https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalConnection/ConptyConnection.cpp
+        startupInfo.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 
         // Initialize the thread attribute list with the pseudo-console handle
         nint attrList = 0;
         nuint attrListSize = 0;
         InitializeProcThreadAttributeList(0, 1, 0, ref attrListSize);
         attrList = Marshal.AllocHGlobal((int)attrListSize);
+        SafePseudoConsoleHandle ptyHandle = _ptyHandle!;
+        bool handleRefAdded = false;
 
         try
         {
+            // The attribute list retains the raw pointer until CreateProcessW
+            // returns, so hold a lease across the complete launch operation.
+            ptyHandle.DangerousAddRef(ref handleRefAdded);
             if (!InitializeProcThreadAttributeList(attrList, 1, 0, ref attrListSize))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
             if (!UpdateProcThreadAttribute(
                 attrList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-                _ptyHandle, (nuint)nint.Size, 0, 0))
+                ptyHandle.DangerousGetHandle(), (nuint)nint.Size, 0, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
             startupInfo.lpAttributeList = attrList;
@@ -470,6 +497,7 @@ public sealed class WindowsPty : IPty
         {
             DeleteProcThreadAttributeList(attrList);
             Marshal.FreeHGlobal(attrList);
+            if (handleRefAdded) ptyHandle.DangerousRelease();
         }
     }
 
@@ -709,13 +737,14 @@ public sealed class WindowsPty : IPty
 
     private const int EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     private const int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+    private const int STARTF_USESTDHANDLES = 0x00000100;
     private static readonly nint PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (nint)0x00020016;
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int CreatePseudoConsole(COORD size, nint hInput, nint hOutput, uint dwFlags, out nint phPC);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern int ResizePseudoConsole(nint hPC, COORD size);
+    private static extern int ResizePseudoConsole(SafePseudoConsoleHandle hPC, COORD size);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern void ClosePseudoConsole(nint hPC);

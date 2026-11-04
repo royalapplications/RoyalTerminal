@@ -20,6 +20,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     private readonly HashSet<int> _pressedKeys = [];
     private readonly HashSet<int> _compositionKeys = [];
     private readonly HashSet<int> _layoutEncodedKeys = [];
+    private TerminalWin32ModifierState _win32Modifiers;
     private bool _isComposing;
     private bool _compositionCommitPending;
 
@@ -79,6 +80,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
             _layoutEncodedKeys.Add(identity);
         }
 
+        if (!_isComposing) _win32Modifiers.Update(e.Key, keyDown: true);
+
         ITerminalInputSink? inputSink = sessionService.InputSink;
         if (inputSink is not null)
         {
@@ -119,7 +122,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                     e.KeyModifiers,
                     e.KeySymbol,
                     keyDown: true,
-                    out string win32Sequence))
+                    out string win32Sequence,
+                    _win32Modifiers))
             {
                 sessionService.SendInput(win32Sequence);
                 return true;
@@ -159,6 +163,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
         TerminalModeState modeState = ResolveModeState(sessionService, vtProcessor: null);
         TerminalKeyboardInputAction normalization = _keyboardInputNormalizer.HandleKeyUp(e, modeState);
         bool encodedLayoutKey = _layoutEncodedKeys.Remove(identity);
+        _win32Modifiers.Update(e.Key, keyDown: false);
         if (_compositionKeys.Remove(identity)) return true;
         if (normalization == TerminalKeyboardInputAction.SuppressForTextInput && !_isComposing &&
             !encodedLayoutKey)
@@ -194,7 +199,8 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
                         e.KeyModifiers,
                         keySymbol: null,
                         keyDown: false,
-                        out string win32Sequence))
+                        out string win32Sequence,
+                        _win32Modifiers))
                 {
                     sessionService.SendInput(win32Sequence);
                     return true;
@@ -265,6 +271,7 @@ public sealed class DefaultTerminalInputAdapter : ITerminalInputAdapter, IResett
     /// <inheritdoc />
     public void ResetInputState()
     {
+        _win32Modifiers = default;
         _pressedKeys.Clear();
         _compositionKeys.Clear();
         _layoutEncodedKeys.Clear();
