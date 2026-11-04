@@ -186,9 +186,61 @@ This is the core release invariant:
 - every package in `artifacts/*.nupkg` is pushed to NuGet.org explicitly
 - the GitHub release is created only after package publishing succeeds
 
-The workflow requires the `NUGET_API_KEY` repository secret. Re-runs continue past an existing package only after verifying that the exact package ID and version are already visible in the NuGet.org feed.
+The workflow uses GitHub Actions OIDC and `NuGet/login@v1` to obtain a temporary
+NuGet API key immediately before publishing. Only the `pack-and-publish` job has
+`id-token: write` permission. The existing push script receives the temporary key
+through `NUGET_API_KEY`; no long-lived API key secret is required. Re-runs continue
+past an existing package only after verifying that the exact package ID and
+version are already visible in the NuGet.org feed.
 
 The package version comes from the tag without the leading `v`; the repository `VersionPrefix` remains the local/default development version.
+
+### nuget.org trusted publishing setup
+
+1. Sign in to [nuget.org](https://www.nuget.org/) with the account that will create
+   the policy. This user must own the packages or be an active member of the
+   nuget.org organization that owns them.
+2. Open your account menu, select **Trusted Publishing**, and add a GitHub policy:
+
+   | Field | Value |
+   | --- | --- |
+   | Policy name | `RoyalTerminal releases` |
+   | Package owner | The nuget.org user or organization that owns the packages |
+   | Repository owner | `royalapplications` |
+   | Repository | `RoyalTerminal` |
+   | Workflow file | `release.yml` (filename only) |
+   | Environment | Leave empty; the publishing job does not use a GitHub environment |
+   | Package glob | `RoyalApps.RoyalTerminal.*` |
+   | Scopes | Push new packages and package versions |
+
+   Allow new packages as well as versions so future packable projects can be
+   published under the same prefix. All current package IDs match this glob.
+3. In the repository's
+   [Actions variables settings](https://github.com/royalapplications/RoyalTerminal/settings/variables/actions),
+   create the repository variable `NUGET_USER`. Set it to the **nuget.org username
+   of the user who created the policy**, including when the policy belongs to an
+   organization. Use the profile username, not an email address, GitHub username,
+   or organization name. A username is not a credential, so this is an Actions
+   variable rather than a secret.
+4. Commit and push the workflow change before creating the next release tag. The
+   tagged commit must contain the trusted publishing workflow; re-running a tag
+   created before this change still uses the old workflow.
+5. Publish the next intended release using a fresh `vMAJOR.MINOR.PATCH` or
+   prerelease tag. In the workflow, confirm **NuGet login (trusted publishing)**
+   and **Push to NuGet.org** succeed. If nuget.org shows the policy as pending
+   activation, complete the first publish within its seven-day activation window
+   or reactivate the policy before publishing.
+6. After the first successful trusted publish, remove the old `NUGET_API_KEY`
+   repository secret if present. Revoke its long-lived key on nuget.org if no
+   other publishing workflow uses it.
+
+For troubleshooting, verify the policy owner has access to every package being
+pushed, the workflow filename matches, and the environment is empty. If a GitHub
+environment is added later, set the same environment in the nuget.org policy.
+The temporary key is valid for one hour, so keep login directly before the push.
+
+See [NuGet trusted publishing documentation](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)
+and the [NuGet login action](https://github.com/NuGet/login).
 
 ## Documentation release
 

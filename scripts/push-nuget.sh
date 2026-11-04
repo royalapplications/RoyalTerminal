@@ -129,7 +129,7 @@ PY
 }
 
 if [[ "$dry_run" != "true" && -z "$api_key" ]]; then
-  echo "::error::NUGET_API_KEY secret is required to publish release packages."
+  echo "::error::A NuGet API key is required via NUGET_API_KEY or --api-key. The release workflow obtains it through trusted publishing."
   exit 1
 fi
 

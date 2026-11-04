@@ -961,7 +961,11 @@ NuGet publishing is handled by the `Release` GitHub Actions workflow in
 does not publish from ordinary branch pushes. It runs only when a `v*` tag is
 pushed, builds native artifacts for all supported platforms, packs every
 packable project, pushes packages to NuGet.org, and then creates the GitHub
-release. The repository must have the `NUGET_API_KEY` secret configured.
+release. Publishing uses nuget.org trusted publishing (GitHub Actions OIDC),
+with the `NUGET_USER` repository variable identifying the nuget.org account.
+No long-lived NuGet API key is required. Complete the
+[trusted publishing setup](docs/articles/build-test-release.md#nugetorg-trusted-publishing-setup)
+before pushing a release tag.
 
 Release tags must use one of these forms:
 
