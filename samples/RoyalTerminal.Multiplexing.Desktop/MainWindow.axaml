@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RoyalTerminal.Multiplexing.Desktop" xmlns:controls="using:RoyalTerminal.Multiplexing.Desktop.Controls"
+        x:Class="RoyalTerminal.Multiplexing.Desktop.MainWindow" x:DataType="vm:WorkspaceViewModel"
+        Title="RoyalTerminal · Workspaces" Width="1180" Height="790" MinWidth="800" MinHeight="570" Background="#14171C">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10" RowSpacing="7">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><TextBlock Text="›_" FontSize="19" Foreground="#9DDAC1"/><TextBlock Text="RoyalTerminal" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel><Button Grid.Column="1" Content="Workspace overview" Click="OpenOverview" ToolTip.Tip="Show the selected workspace’s tabs and panes"/></Grid>
+    <Expander Grid.Row="1" Header="Server connection" IsExpanded="True" HorizontalContentAlignment="Stretch" Padding="8,2">
+      <Grid ColumnDefinitions="2*,3*,Auto" ColumnSpacing="8" Margin="4">
+        <StackPanel Spacing="3"><TextBlock Text="Server URL" FontSize="11" Foreground="#AFBAC4"/><TextBox Text="{Binding Endpoint, Mode=TwoWay}" PlaceholderText="http://127.0.0.1:7331/" AutomationProperties.Name="Server URL"/></StackPanel>
+        <StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="Access token" FontSize="11" Foreground="#AFBAC4"/><TextBox Text="{Binding Token, Mode=TwoWay}" PasswordChar="●" PlaceholderText="Server or share token" AutomationProperties.Name="Server access token"/></StackPanel>
+        <Button Grid.Column="2" Content="Refresh sessions" Command="{Binding RefreshCommand}" VerticalAlignment="Bottom"/>
+      </Grid>
+    </Expander>
+    <Grid Grid.Row="2" ColumnDefinitions="212,*" ColumnSpacing="8">
+      <Border Background="#1C2026" CornerRadius="4" Padding="9"><Grid RowDefinitions="Auto,Auto,*,Auto,1.4*" RowSpacing="6">
+        <TextBlock Text="Sessions" FontWeight="SemiBold"/>
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="4"><TextBox Text="{Binding NewSessionLabel, Mode=TwoWay}" PlaceholderText="Session name" AutomationProperties.Name="New session name"/><Button Grid.Column="1" Content="+" Command="{Binding NewSessionCommand}" AutomationProperties.Name="Create session" ToolTip.Tip="Create session"/></Grid>
+        <ListBox Grid.Row="2" ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession, Mode=TwoWay}" AutomationProperties.Name="Sessions"><ListBox.ItemTemplate><DataTemplate x:DataType="vm:WorkspaceSession"><TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"/></DataTemplate></ListBox.ItemTemplate></ListBox>
+        <Grid Grid.Row="3" ColumnDefinitions="*,Auto"><TextBlock Text="Terminals" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Content="+ Shell" Command="{Binding NewShellCommand}"/></Grid>
+        <ListBox Grid.Row="4" ItemsSource="{Binding Blocks}" SelectedItem="{Binding SelectedBlock, Mode=TwoWay}" AutomationProperties.Name="Terminals"><ListBox.ItemTemplate><DataTemplate x:DataType="vm:WorkspaceBlock"><StackPanel Spacing="2"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding State}" Foreground="#A3B9AF" FontSize="11"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
+      </Grid></Border>
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" RowSpacing="5">
+        <Expander Header="Connect by ID" IsExpanded="False" HorizontalContentAlignment="Stretch" Padding="5,0"><Grid ColumnDefinitions="*,*" ColumnSpacing="6"><TextBox Text="{Binding SessionId, Mode=TwoWay}" PlaceholderText="Session ID" AutomationProperties.Name="Session ID"/><TextBox Grid.Column="1" Text="{Binding BlockId, Mode=TwoWay}" PlaceholderText="Terminal ID" AutomationProperties.Name="Terminal ID"/></Grid></Expander>
+        <!-- Outer viewport pans the fixed pixel grid. Inner logical viewer owns terminal scrollback. -->
+        <Border Grid.Row="1" Background="#0E1217" BorderBrush="#46554F" BorderThickness="1" CornerRadius="3" Padding="5" ClipToBounds="True"><ScrollViewer x:Name="TerminalViewport" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"><Border><ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"><controls:RemoteTerminalControl x:Name="Terminal" TerminalFontSize="12"/></ScrollViewer></Border></ScrollViewer></Border>
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6"><CheckBox Content="Observe only" IsChecked="{Binding Observer, Mode=TwoWay}" ToolTip.Tip="Read output without taking keyboard control"/><Button Grid.Column="1" Content="Attach" Command="{Binding AttachCommand}"/><Button Grid.Column="2" Content="Detach" Command="{Binding DetachCommand}" ToolTip.Tip="Leave the process running"/></Grid>
+      </Grid>
+    </Grid>
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto" ColumnSpacing="8"><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Error}" Foreground="#FFA9A5" TextWrapping="Wrap"/><TextBlock x:Name="OverviewError" Foreground="#FFA9A5" TextWrapping="Wrap"/></StackPanel>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"><NumericUpDown Value="{Binding Columns, Mode=TwoWay}" Minimum="2" Maximum="512" Width="76" FormatString="0" AutomationProperties.Name="Terminal columns"/><TextBlock Text="×" VerticalAlignment="Center"/><NumericUpDown Value="{Binding Rows, Mode=TwoWay}" Minimum="1" Maximum="256" Width="76" FormatString="0" AutomationProperties.Name="Terminal rows"/><Button Content="Resize remote" Command="{Binding ResizeCommand}"/></StackPanel>
+    </Grid>
+  </Grid>
+</Window>

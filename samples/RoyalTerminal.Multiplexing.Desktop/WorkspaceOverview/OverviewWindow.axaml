@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:views="using:RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview" x:Class="RoyalTerminal.Multiplexing.Desktop.WorkspaceOverview.OverviewWindow" Title="Workspace overview" Width="1080" Height="720" MinWidth="450" MinHeight="300" Background="#14171C" Opened="InitializeEditing" SizeChanged="AdaptNavigation">
+  <Window.Styles>
+    <Style Selector="Border.workspace-active-pane > DockPanel > TextBlock"><Setter Property="Foreground" Value="#BDEBD6"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  </Window.Styles>
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="7" RowSpacing="5">
+    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Background="#1C2026">
+      <ComboBox x:Name="WindowsList" MinWidth="88" HorizontalAlignment="Stretch" VerticalAlignment="Center" AutomationProperties.Name="Workspace window"/>
+      <ScrollViewer x:Name="TabViewport" IsVisible="False" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <TabStrip x:Name="WindowTabs" ItemsSource="{Binding #WindowsList.ItemsSource}" SelectedItem="{Binding #WindowsList.SelectedItem,Mode=TwoWay}" AutoScrollToSelectedItem="True" AutomationProperties.Name="Workspace windows"><TabStrip.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></TabStrip.ItemsPanel></TabStrip>
+      </ScrollViewer>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+        <Button Content="Zoom" Click="ToggleLocalZoom" ToolTip.Tip="Zoom this view only (Alt+Z)"/>
+        <Button x:Name="ViewConsent" Content="Allow remote focus" Click="ToggleRemoteView" ToolTip.Tip="Let an administrator navigate this observer. Does not grant terminal input."/>
+        <Button x:Name="EditToggle" Content="Edit layout…" Click="ToggleEditing" ToolTip.Tip="Edit shared placement without taking terminal control"/>
+      </StackPanel>
+    </Grid>
+    <StackPanel x:Name="EditBar" Grid.Row="1" IsVisible="False" Spacing="4"><WrapPanel>
+      <ComboBox x:Name="EditSource" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Source terminal"/>
+      <ComboBox x:Name="EditOperation" MinWidth="125" Margin="0,0,5,3" AutomationProperties.Name="Layout operation"/>
+      <ComboBox x:Name="EditTarget" MinWidth="120" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Target terminal"/>
+      <ComboBox x:Name="EditDestination" MinWidth="125" MaxWidth="200" Margin="0,0,5,3" AutomationProperties.Name="Destination window"/>
+      <TextBox x:Name="EditLabel" PlaceholderText="Name" Width="135" MaxLength="256" Margin="0,0,5,3" AutomationProperties.Name="Terminal or window name"/>
+      <Button x:Name="ApplyEdit" Content="Apply" Click="ApplyLayoutEdit" Margin="0,0,0,3"/>
+    </WrapPanel>
+      <!-- A short 'Dragging' hint must not shrink a previously wrapped instruction and change the gesture coordinate system. -->
+      <TextBlock x:Name="EditHint" Foreground="#B4C3BC" Height="40" TextWrapping="Wrap" TextTrimming="WordEllipsis" ToolTip.Tip="{Binding #EditHint.Text}"/>
+    </StackPanel>
+    <Grid Grid.Row="2" ClipToBounds="True"><views:OverviewPanel x:Name="Surface" Editing="{Binding #EditBar.IsVisible}"/><Border x:Name="GestureLayer" Background="Transparent" IsVisible="{Binding #EditBar.IsVisible}" Focusable="True" PointerPressed="BeginDrag" PointerMoved="MoveDrag" PointerReleased="EndDrag" PointerCaptureLost="GestureCaptureLost"/></Grid>
+    <StackPanel Grid.Row="3" Spacing="2"><TextBlock x:Name="ShelfText" TextWrapping="Wrap" Foreground="#B4C3BC"/><TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="11"/></StackPanel>
+  </Grid>
+</Window>

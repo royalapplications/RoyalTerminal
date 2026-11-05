@@ -1,0 +1,20 @@
+name: Workspace archive protection
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/archive/*']
+permissions: {contents: read}
+concurrency: {group: 'workspace-archive-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - run: sudo apt-get update -qq && sudo apt-get install -y age
+      - run: |
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+      - run: bash scripts/workspace/smoke-protected-archive.sh

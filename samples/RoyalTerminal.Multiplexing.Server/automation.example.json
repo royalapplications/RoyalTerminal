@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "actions": [
+    {
+      "id": "open_build_shell",
+      "steps": [
+        {
+          "method": "block.create",
+          "arguments": {
+            "sessionId": "${sessionId}",
+            "block": { "label": "Build", "transport": "pty", "windowId": "${windowId}" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "capture_focused",
+      "steps": [
+        {
+          "method": "terminal.format",
+          "arguments": { "sessionId": "${sessionId}", "blockId": "${blockId}", "format": "text" }
+        }
+      ]
+    }
+  ],
+  "modes": [{ "name": "workspace", "exclusive": true }],
+  "bindings": [
+    { "sequence": "ctrl+g", "enterMode": "workspace", "once": true },
+    { "mode": "workspace", "sequence": "b", "actionId": "open_build_shell" },
+    { "mode": "workspace", "sequence": "s", "actionId": "capture_focused" },
+    { "mode": "workspace", "sequence": "escape", "exitAllModes": true }
+  ]
+}

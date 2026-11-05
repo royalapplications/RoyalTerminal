@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <AssemblyName>RoyalTerminal.BrowserReplica</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <PublishTrimmed>true</PublishTrimmed>
+    <WasmFingerprintAssets>false</WasmFingerprintAssets>
+    <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <BlazorEnableCompression>false</BlazorEnableCompression>
+    <CompressionEnabled>false</CompressionEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" VersionOverride="10.0.14" />
+    <TrimmerRootAssembly Include="RoyalTerminal.BrowserReplica" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Vt.Managed/RoyalTerminal.Terminal.Vt.Managed.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark">
+<title>RoyalTerminal · Workspaces</title>
+<link rel="stylesheet" href="workspace.css"><link rel="stylesheet" href="workspace-shell.css">
+<script src="vendor/xterm.js" defer></script><script src="vendor/addon-fit.js" defer></script><script type="module" src="workspace.js"></script>
+</head><body>
+<div id="connect-screen" class="connect-screen">
+  <form id="connect-form" class="connect-card" aria-labelledby="connect-title">
+    <div class="connect-brand"><span class="terminal-glyph" aria-hidden="true">›_</span><strong>RoyalTerminal</strong></div>
+    <h1 id="connect-title">Connect to a server</h1><p class="connect-endpoint">Host <code id="connect-host"></code></p>
+    <label for="access-token">Server access token</label><input id="access-token" type="password" autocomplete="off" spellcheck="false" required minlength="32" placeholder="Paste a server or share token" aria-describedby="connect-note">
+    <button type="submit" class="primary">Open workspaces <span aria-hidden="true">→</span></button><p id="connect-error" role="alert" class="error-text"></p>
+    <div id="connect-note" class="connect-note">Disconnecting leaves your shells running on this server.</div>
+  </form>
+</div>
+<div id="application" class="application" hidden>
+  <button id="drawer-shade" type="button" aria-label="Close workspace picker" tabindex="-1" hidden></button>
+  <aside id="sidebar" class="sidebar" aria-label="Workspace picker">
+    <div class="brand"><span class="terminal-glyph" aria-hidden="true">›_</span><strong>RoyalTerminal</strong></div>
+    <button id="palette-button" class="search-button"><span>Commands</span><kbd id="command-hint">Ctrl K</kbd></button>
+    <div class="section-label"><span>Workspaces</span><button id="new-session" class="icon-button" title="New workspace" aria-label="New workspace">+</button></div>
+    <nav id="session-list" aria-label="Workspaces"></nav>
+    <div class="sidebar-bottom"><span class="connection-dot" aria-hidden="true"></span><code id="server-host"></code><button id="disconnect" class="icon-button" title="Disconnect without stopping processes" aria-label="Disconnect">↗</button></div>
+  </aside>
+  <main class="main">
+    <header class="workspace-header"><button id="toggle-sidebar" class="icon-button mobile" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="false">☰</button><h2 id="workspace-title">Workspaces</h2><span id="workspace-meta" class="meta"></span><div class="header-actions"><button id="share-session">Share</button><button id="workspace-menu" title="Workspace settings" aria-label="Workspace settings">•••</button></div></header>
+    <div class="workspace-toolbar"><div id="window-tabs" class="window-tabs" role="tablist" aria-label="Windows"></div><button id="new-window" class="icon-button" title="New window" aria-label="New window">+</button><div class="toolbar-spacer"></div><button id="new-shell">＋ Shell</button><button id="split-horizontal" aria-label="Split side by side" title="Split side by side"><svg viewBox="0 0 16 16" class="tool-icon" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M8 3v10"/></svg></button><button id="split-vertical" aria-label="Split above and below" title="Split above and below"><svg viewBox="0 0 16 16" class="tool-icon" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2 8h12"/></svg></button><button id="zoom-block" title="Zoom focused terminal" aria-label="Zoom focused terminal" aria-pressed="false"><svg viewBox="0 0 16 16" class="tool-icon" aria-hidden="true"><path d="M2 6V2h4m4 0h4v4m0 4v4h-4m-4 0H2v-4"/></svg></button></div>
+    <div id="unplaced-blocks" class="unplaced-blocks" aria-label="Unplaced terminals" hidden></div>
+    <div id="workspace-content" class="workspace-content" role="tabpanel"><section id="empty-state" class="empty-state"><h2 id="empty-title">No workspaces yet</h2><p id="empty-detail"></p><button id="empty-create" class="primary">Create workspace</button></section><div id="pane-layout" class="pane-layout"></div></div>
+    <footer class="statusbar"><span class="connection-dot" aria-hidden="true"></span><span id="status-text" role="status">Ready</span><span id="chord-hint" aria-live="polite"></span><span class="status-spacer"></span><span id="role-label"></span><button id="help-button" aria-label="Open command palette">Commands</button></footer>
+  </main>
+</div>
+<dialog id="dialog" class="dialog" aria-labelledby="dialog-heading"><form id="dialog-form"><div id="dialog-content"></div><div class="dialog-actions"><button type="button" id="dialog-cancel">Cancel</button><button type="submit" id="dialog-submit" class="primary">Continue</button></div></form></dialog>
+<dialog id="palette" class="palette" aria-label="Command palette"><input id="palette-query" role="combobox" aria-label="Search commands" aria-controls="palette-results" aria-expanded="false" aria-autocomplete="list" placeholder="Search commands…" autocomplete="off"><div id="palette-results" role="listbox" aria-label="Matching commands"></div><div class="palette-footer"><span>↑ ↓ Select</span><span>↵ Run</span><span>Esc Close</span></div></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+</body></html>

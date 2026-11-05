@@ -1,0 +1,17 @@
+[Unit]
+Description=RoyalTerminal authorized local entry for %i (experimental)
+Documentation=man:systemd.socket(5)
+
+[Socket]
+ListenStream=/run/royalterminal-login/%i.sock
+DirectoryMode=0755
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+RemoveOnStop=yes
+Accept=no
+Backlog=64
+ExecStartPost=/usr/bin/python3 -I /usr/local/libexec/royalterminal-account/access.py acl %i
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,394 @@
+// Copyright (c) Royal Apps. All rights reserved.
+// Licensed under the MIT license. See LICENSE file in the project root for details.
+
+using System.Text;
+using System.Text.Json;
+using RoyalTerminal.Multiplexing.Automation;
+using RoyalTerminal.Terminal.Transport.Multiplexing;
+
+namespace RoyalTerminal.Multiplexing.Cli;
+
+internal static class MultiplexingCli
+{
+    private const string Usage = """
+        RoyalTerminal experimental multiplexer CLI
+
+        Usage: royalterminal-mux [--endpoint URL] COMMAND
+
+          sessions                          List durable sessions
+          new [LABEL]                       Create a session
+          show SESSION                      Describe a session, windows, and blocks
+          close SESSION                     Explicitly terminate a session
+          run SESSION [OPTIONS] -- EXE ARGS  Start an independent terminal block
+              --label TEXT --cwd PATH --pipe
+          stop SESSION BLOCK                Explicitly close a terminal block
+          send SESSION BLOCK TEXT           Send UTF-8 text to a block
+          capture SESSION BLOCK             Read the current block screen
+          config show                       Read effective automation configuration
+          config load FILE|-                Replace server configuration with JSON
+          actions                           List configured action IDs
+          do ACTION [SESSION [BLOCK [WINDOW]]] Invoke a configured action
+          api list                          List discoverable automation methods
+          api describe METHOD               Show one method's contract
+          api call METHOD [JSON|-]          Call a method with JSON arguments
+
+        Authentication: ROYALTERMINAL_MUX_TOKEN environment variable (never a URL or command argument).
+        Endpoint: --endpoint, then ROYALTERMINAL_MUX_URL, then http://127.0.0.1:7331/.
+        Targets: full GUID, case-insensitive label, 1-based index, then unique ID suffix (4+ characters).
+        An ambiguous label/suffix is an error. Indices follow the host listing order.
+        Action context defaults to ROYALTERMINAL_MUX_SESSION, ROYALTERMINAL_MUX_BLOCK,
+        and ROYALTERMINAL_MUX_WINDOW when no explicit action SESSION is supplied.
+        An explicit action SESSION replaces the entire environment context.
+        All management output is JSON. '-' reads bounded JSON from standard input.
+        Closing a CLI invocation never terminates a session. Use close/stop explicitly.
+        """;
+
+    public static async Task<int> RunAsync(string[] args, string? accessToken, string? configuredEndpoint,
+        TextReader input, TextWriter output, TextWriter error, HttpClient http, CancellationToken cancellationToken,
+        CliCurrentContext? currentContext = null)
+    {
+        try
+        {
+            int index = 0;
+            string endpoint = configuredEndpoint ?? "http://127.0.0.1:7331/";
+            if (args.Length > 0 && args[0] == "--endpoint")
+            {
+                Require(args, 2);
+                endpoint = args[1];
+                index = 2;
+            }
+
+            string[] command = args[index..];
+            if (command.Length == 0 || command[0] is "help" or "--help" or "-h")
+            {
+                await output.WriteLineAsync(Usage);
+                return 0;
+            }
+
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                throw new ArgumentException("Set ROYALTERMINAL_MUX_TOKEN to the host's bearer credential.");
+            }
+
+            MultiplexingApiClient client = new(http, new Uri(endpoint, UriKind.Absolute), accessToken);
+            CliTargetResolver targets = new(client);
+            JsonElement result = command[0] switch
+            {
+                "sessions" => await ListAsync(client, command, cancellationToken),
+                "new" => await NewAsync(client, command, cancellationToken),
+                "show" => await SessionAsync(client, targets, command, HttpMethod.Get, cancellationToken),
+                "close" => await SessionAsync(client, targets, command, HttpMethod.Delete, cancellationToken),
+                "stop" => await BlockAsync(client, targets, command, HttpMethod.Delete, "", cancellationToken),
+                "capture" => await BlockAsync(client, targets, command, HttpMethod.Get, "/capture", cancellationToken),
+                "send" => await SendAsync(client, targets, command, cancellationToken),
+                "run" => await RunBlockAsync(client, targets, command, cancellationToken),
+                "config" => await ConfigurationAsync(client, command, input, cancellationToken),
+                "actions" => await ActionsAsync(client, command, cancellationToken),
+                "do" => await DoAsync(client, targets, command, currentContext, cancellationToken),
+                "api" => await ApiAsync(client, command, input, cancellationToken),
+                _ => throw new ArgumentException($"Unknown command '{command[0]}'. Run --help for usage."),
+            };
+            await output.WriteLineAsync(Pretty(result));
+            return 0;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await error.WriteLineAsync("Cancelled.");
+            return 130;
+        }
+        catch (ArgumentException exception)
+        {
+            await error.WriteLineAsync(exception.Message);
+            return 2;
+        }
+        catch (UriFormatException exception)
+        {
+            await error.WriteLineAsync(exception.Message);
+            return 2;
+        }
+        catch (JsonException exception)
+        {
+            await error.WriteLineAsync("Invalid JSON: " + exception.Message);
+            return 2;
+        }
+        catch (MultiplexerAutomationException exception)
+        {
+            await error.WriteLineAsync($"{exception.Code}: {exception.Message}");
+            return 2;
+        }
+        catch (MultiplexingApiException exception)
+        {
+            await error.WriteLineAsync(exception.Code is { } code ? $"{exception.Message} Code: {code}." : exception.Message);
+            return 1;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or OperationCanceledException or UnauthorizedAccessException)
+        {
+            await error.WriteLineAsync(exception.Message);
+            return 1;
+        }
+    }
+
+    private static async ValueTask<JsonElement> ListAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    {
+        Require(args, 1, 1);
+        return await client.SendAsync(HttpMethod.Get, "api/sessions", cancellationToken: token);
+    }
+
+    private static async ValueTask<JsonElement> NewAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    {
+        Require(args, 1, 2);
+        JsonElement body = BuildJson(writer => writer.WriteString("label", args.Length == 2 ? args[1] : "New session"));
+        return await client.SendAsync(HttpMethod.Post, "api/sessions", body, token);
+    }
+
+    private static async ValueTask<JsonElement> SessionAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args,
+        HttpMethod method, CancellationToken token)
+    {
+        Require(args, 2, 2);
+        Guid session = await targets.SessionAsync(args[1], token);
+        return await client.SendAsync(method, $"api/sessions/{session:D}", cancellationToken: token);
+    }
+
+    private static async ValueTask<JsonElement> BlockAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args,
+        HttpMethod method, string suffix, CancellationToken token)
+    {
+        Require(args, 3, 3);
+        Guid session = await targets.SessionAsync(args[1], token);
+        Guid block = await targets.BlockAsync(session, args[2], token);
+        return await client.SendAsync(method, $"api/sessions/{session:D}/blocks/{block:D}{suffix}", cancellationToken: token);
+    }
+
+    private static async ValueTask<JsonElement> SendAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args, CancellationToken token)
+    {
+        Require(args, 4, 4);
+        Guid session = await targets.SessionAsync(args[1], token);
+        Guid block = await targets.BlockAsync(session, args[2], token);
+        JsonElement body = BuildJson(writer => writer.WriteString("data", Convert.ToBase64String(Encoding.UTF8.GetBytes(args[3]))));
+        return await client.SendAsync(HttpMethod.Post, $"api/sessions/{session:D}/blocks/{block:D}/input", body, token);
+    }
+
+    private static async ValueTask<JsonElement> RunBlockAsync(MultiplexingApiClient client, CliTargetResolver targets, string[] args, CancellationToken token)
+    {
+        Require(args, 4);
+        string label = "Terminal";
+        string? directory = null;
+        string transport = "pty";
+        int index = 2;
+        while (index < args.Length && args[index] != "--")
+        {
+            switch (args[index])
+            {
+                case "--pipe": transport = "pipe"; index++; break;
+                case "--label":
+                    if (++index >= args.Length) { throw new ArgumentException("--label requires a value."); }
+                    label = args[index++]; break;
+                case "--cwd":
+                    if (++index >= args.Length) { throw new ArgumentException("--cwd requires a path."); }
+                    directory = args[index++]; break;
+                default: throw new ArgumentException("Expected --label, --cwd, --pipe, or -- before the executable.");
+            }
+        }
+
+        if (index >= args.Length - 1 || args[index++] != "--")
+        {
+            throw new ArgumentException("run requires -- followed by an executable and optional arguments.");
+        }
+
+        string executable = args[index++];
+        string[] arguments = args[index..];
+        Guid session = await targets.SessionAsync(args[1], token);
+        JsonElement body = BuildJson(writer =>
+        {
+            writer.WriteString("label", label);
+            writer.WriteString("transport", transport);
+            if (directory is not null) { writer.WriteString("workingDirectory", directory); }
+            writer.WriteStartObject("command");
+            writer.WriteString("fileName", executable);
+            writer.WriteStartArray("arguments");
+            foreach (string argument in arguments) { writer.WriteStringValue(argument); }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.WriteStartObject("dimensions");
+            writer.WriteNumber("columns", 120);
+            writer.WriteNumber("rows", 32);
+            writer.WriteNumber("widthPixels", 0);
+            writer.WriteNumber("heightPixels", 0);
+            writer.WriteEndObject();
+        });
+        return await client.SendAsync(HttpMethod.Post, $"api/sessions/{session:D}/blocks", body, token);
+    }
+
+    private static async ValueTask<JsonElement> ConfigurationAsync(MultiplexingApiClient client, string[] args,
+        TextReader input, CancellationToken token)
+    {
+        Require(args, 2);
+        if (args[1] == "show")
+        {
+            Require(args, 2, 2);
+            return await client.SendAsync(HttpMethod.Get, "api/config", cancellationToken: token);
+        }
+        if (args[1] != "load") throw new ArgumentException("Expected config show or config load FILE|-.");
+        Require(args, 3, 3);
+        string json;
+        if (args[2] == "-") json = await ReadBoundedAsync(input, token);
+        else
+        {
+            using StreamReader file = new(args[2], new UTF8Encoding(false, true));
+            json = await ReadBoundedAsync(file, token);
+        }
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("Automation configuration must be a JSON object.");
+        return await client.SendAsync(HttpMethod.Put, "api/config", document.RootElement, token);
+    }
+
+    private static async ValueTask<JsonElement> ActionsAsync(MultiplexingApiClient client, string[] args, CancellationToken token)
+    {
+        Require(args, 1, 1);
+        JsonElement resolved = await client.SendAsync(HttpMethod.Get, "api/config", cancellationToken: token);
+        if (resolved.ValueKind != JsonValueKind.Object || !resolved.TryGetProperty("configuration", out JsonElement config)
+            || config.ValueKind != JsonValueKind.Object || !config.TryGetProperty("actions", out JsonElement actions)
+            || actions.ValueKind != JsonValueKind.Array || actions.GetArrayLength() > 4096)
+            throw new IOException("The host returned an invalid action configuration.");
+        return BuildJson(writer =>
+        {
+            writer.WriteStartArray("actions");
+            foreach (JsonElement action in actions.EnumerateArray())
+            {
+                if (action.ValueKind != JsonValueKind.Object || !action.TryGetProperty("id", out JsonElement id)
+                    || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()))
+                    throw new IOException("The host returned an invalid action descriptor.");
+                writer.WriteStringValue(id.GetString());
+            }
+            writer.WriteEndArray();
+        });
+    }
+
+    private static async ValueTask<JsonElement> DoAsync(MultiplexingApiClient client, CliTargetResolver targets,
+        string[] args, CliCurrentContext? context, CancellationToken token)
+    {
+        Require(args, 2, 5);
+        string action = args[1];
+        if (string.IsNullOrEmpty(action) || action == "." || action.Length > 128 || action.Contains("..", StringComparison.Ordinal)
+            || action.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')))
+            throw new ArgumentException("Action IDs must use 1–128 ASCII letters, digits, periods, underscores, or hyphens, without '..'.");
+
+        // An explicit session starts a new context; never mix in the previous environment's block/window.
+        string? sessionSelector = args.Length > 2 ? args[2] : NullIfBlank(context?.Session);
+        string? blockSelector = args.Length > 3 ? args[3] : args.Length > 2 ? null : NullIfBlank(context?.Block);
+        string? windowSelector = args.Length > 4 ? args[4] : args.Length > 2 ? null : NullIfBlank(context?.Window);
+        if (sessionSelector is null && (blockSelector is not null || windowSelector is not null))
+            throw new ArgumentException("Action block/window context requires a session.");
+        Guid? session = sessionSelector is null ? null : await targets.SessionAsync(sessionSelector, token);
+        Guid? block = blockSelector is null ? null : await targets.BlockAsync(session!.Value, blockSelector, token);
+        Guid? window = windowSelector is null ? null : await targets.WindowAsync(session!.Value, windowSelector, token);
+        JsonElement body = BuildJson(writer =>
+        {
+            if (session is { } sessionId) writer.WriteString("sessionId", sessionId);
+            if (block is { } blockId) writer.WriteString("blockId", blockId);
+            if (window is { } windowId) writer.WriteString("windowId", windowId);
+        });
+        return await client.SendAsync(HttpMethod.Post, $"api/actions/{action}/invoke", body, token);
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static async ValueTask<JsonElement> ApiAsync(MultiplexingApiClient client, string[] args,
+        TextReader input, CancellationToken token)
+    {
+        Require(args, 2);
+        if (args[1] == "list")
+        {
+            Require(args, 2, 2);
+            return await client.GetMethodsAsync(token);
+        }
+
+        if (args[1] == "describe")
+        {
+            Require(args, 3, 3);
+            JsonElement catalog = await client.GetMethodsAsync(token);
+            JsonElement methods;
+            if (catalog.ValueKind == JsonValueKind.Array) { methods = catalog; }
+            else if (catalog.ValueKind == JsonValueKind.Object && catalog.TryGetProperty("methods", out JsonElement listed)
+                && listed.ValueKind == JsonValueKind.Array) { methods = listed; }
+            else { throw new IOException("The host returned an invalid API method catalog."); }
+            foreach (JsonElement method in methods.EnumerateArray())
+            {
+                if (method.TryGetProperty("name", out JsonElement name) && name.GetString() == args[2])
+                {
+                    return method.Clone();
+                }
+            }
+
+            throw new ArgumentException($"No method named '{args[2]}' is advertised by this host.");
+        }
+
+        if (args[1] == "call")
+        {
+            Require(args, 3, 4);
+            string json = args.Length == 3 ? "{}" : args[3] == "-" ? await ReadBoundedAsync(input, token) : args[3];
+            ValidateJsonSize(json);
+            using JsonDocument document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new ArgumentException("API arguments must be a JSON object.");
+            }
+
+            return await client.CallAsync(args[2], document.RootElement, token);
+        }
+
+        throw new ArgumentException("Expected api list, api describe, or api call.");
+    }
+
+    private static async Task<string> ReadBoundedAsync(TextReader input, CancellationToken token)
+    {
+        StringBuilder content = new();
+        char[] buffer = new char[4096];
+        while (true)
+        {
+            int read = await input.ReadAsync(buffer.AsMemory(), token);
+            if (read == 0)
+            {
+                string result = content.ToString();
+                ValidateJsonSize(result);
+                return result;
+            }
+            if (content.Length + read > 1024 * 1024) { throw new ArgumentException("JSON input exceeds one MiB."); }
+            content.Append(buffer, 0, read);
+        }
+    }
+
+    private static JsonElement BuildJson(Action<Utf8JsonWriter> writeProperties)
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            writeProperties(writer);
+            writer.WriteEndObject();
+        }
+        using JsonDocument document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static string Pretty(JsonElement value)
+    {
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true })) { value.WriteTo(writer); }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void ValidateJsonSize(string json)
+    {
+        if (json.Length > 1024 * 1024 || Encoding.UTF8.GetByteCount(json) > 1024 * 1024)
+            throw new ArgumentException("JSON input exceeds one MiB.");
+    }
+
+    private static void Require(string[] args, int minimum, int? maximum = null)
+    {
+        if (args.Length < minimum || (maximum is { } max && args.Length > max))
+        {
+            throw new ArgumentException("Incorrect command arguments. Run --help for usage.");
+        }
+    }
+}

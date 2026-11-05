@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><IsPackable>false</IsPackable><JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault></PropertyGroup>
+  <ItemGroup>
+    <Content Update="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Lua/config-*.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../src/RoyalTerminal.Multiplexing.Automation/Lua/*.lua" Link="Lua/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Both hosts use one argv/pipe implementation. This is source sharing, not an executable dependency. -->
+    <Compile Include="../RoyalTerminal.Multiplexing.Cli/LuaLocalProcesses.cs" Link="Lua/Internal/LuaLocalProcesses.cs" />
+    <None Include="../RoyalTerminal.Multiplexing.Cli/Lua/process.lua" Link="Lua/config-process.lua" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Inspection/RoyalTerminal.Multiplexing.Inspection.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing.Automation/RoyalTerminal.Multiplexing.Automation.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pty/RoyalTerminal.Terminal.Transport.Pty.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Pipe/RoyalTerminal.Terminal.Transport.Pipe.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Multiplexing/RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+  </ItemGroup>
+</Project>

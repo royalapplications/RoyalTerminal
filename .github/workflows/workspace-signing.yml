@@ -1,0 +1,57 @@
+name: Workspace bundle and signature acceptance
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/signing/*']
+permissions: {contents: read}
+concurrency: {group: 'workspace-sign-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - run: bash deploy/macos/ci.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: personal-macos-adhoc-preview
+          path: |
+            ${{ runner.temp }}/personal-mac/*.zip
+            ${{ runner.temp }}/personal-mac/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - name: Verify with an ephemeral certificate and reject tampering
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=Join-Path $env:RUNNER_TEMP 'publish';$out=Join-Path $env:RUNNER_TEMP 'sealed'
+          dotnet publish samples/RoyalTerminal.Multiplexing.Desktop -r win-x64 -c Release --self-contained false -o $src; if ($LASTEXITCODE) {exit 1}
+          $cert=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Disposable CI test only' -CertStoreLocation Cert:\CurrentUser\My
+          try {
+            $cer=Export-Certificate -Cert $cert -FilePath (Join-Path $env:RUNNER_TEMP 'test.cer');Import-Certificate -FilePath $cer.FullName -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+            ./deploy/signing/Sign-Workspace.ps1 -PublishDirectory $src -OutputDirectory $out -Thumbprint $cert.Thumbprint -TestIdentity
+            Add-Content -LiteralPath (Join-Path $out 'payload\RoyalTerminal.Multiplexing.Desktop.dll') -Value tamper
+            if ((Test-FileCatalog -Path (Join-Path $out 'payload') -CatalogFilePath (Join-Path $out 'workspace.cat')) -eq 'Valid') {throw 'Tamper was accepted'}
+          } finally {Remove-Item "Cert:\CurrentUser\Root\$($cert.Thumbprint)" -ErrorAction SilentlyContinue;Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue}
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify detached signature, revision binding and corruption detection
+        run: |
+          set -euo pipefail; umask 077; src=$PWD; cd "$RUNNER_TEMP"; git -C "$src" archive --format=tar.gz -o "$PWD/workspace.tar.gz" HEAD
+          openssl genpkey -algorithm Ed25519 -out key; openssl pkey -in key -pubout -out verification.pem
+          sha=$(git -C "$src" rev-parse HEAD); tool="$src/deploy/signing/workspace-manifest.py"
+          python3 "$tool" sign workspace.tar.gz "$sha" key artifact.sig; python3 "$tool" verify workspace.tar.gz "$sha" verification.pem artifact.sig
+          if python3 "$tool" verify workspace.tar.gz 0000000000000000000000000000000000000000 verification.pem artifact.sig;then exit 1;fi
+          printf changed >>workspace.tar.gz; if python3 "$tool" verify workspace.tar.gz "$sha" verification.pem artifact.sig;then exit 1;fi

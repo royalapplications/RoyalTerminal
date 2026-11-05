@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {floatingScenes,sharedTarget} from '../wwwroot/frame-scene.js';
+test('compound float produces one frame in original stacking position',()=>{const tree={orientation:'Horizontal',first:{blockId:'a'},second:{orientation:'Vertical',first:{blockId:'b'},second:{blockId:'c'}}};const g={id:'g',bounds:{x:12,y:15,width:65,height:70},layout:tree};const blocks=['below','a','b','c','above'].map(id=>({id,floatingLayerId:id.length===1?'g':null}));const frames=floatingScenes({floatingLayers:[g]},blocks);assert.deepEqual(frames.map(f=>f.id),['below','g','above']);assert.equal(frames[1].tree,tree);assert.equal(frames[1].bounds,g.bounds);});
+test('shared zoom only projects a visible leaf and does not mutate topology',()=>{const w=Object.freeze({zoomedBlockId:'a'});assert.equal(sharedTarget(w,['a','b']),'a');assert.equal(sharedTarget(w,['b']),null);assert.equal(sharedTarget({},['a']),null);});

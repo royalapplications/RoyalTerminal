@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsPackable>false</IsPackable><AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RoyalTerminal.Avalonia/RoyalTerminal.Avalonia.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Multiplexing/RoyalTerminal.Multiplexing.csproj" />
+    <ProjectReference Include="../../src/RoyalTerminal.Terminal.Transport.Multiplexing/RoyalTerminal.Terminal.Transport.Multiplexing.csproj" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <!-- Shared sources and geometry, never the desktop application runtime. -->
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/Controls/RemoteTerminalControl.cs" Link="Shared/RemoteTerminalControl.cs" />
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/Services/*.cs" Link="Shared/%(Filename)%(Extension)" />
+    <Compile Include="../RoyalTerminal.Multiplexing.Desktop/WorkspaceClient.cs;../RoyalTerminal.Multiplexing.Desktop/WorkspaceContracts.cs;../RoyalTerminal.Multiplexing.Desktop/WorkspaceOverview/LayoutProjection.cs;../RoyalTerminal.Multiplexing.Desktop/WorkspaceOverview/PaneNavigation.cs" Link="Shared/%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="RoyalTerminal.Multiplexing.MobileTests" />
+  </ItemGroup>
+</Project>
