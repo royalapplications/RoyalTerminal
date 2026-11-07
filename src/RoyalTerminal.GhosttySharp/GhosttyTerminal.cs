@@ -503,30 +503,18 @@ public sealed partial class GhosttyTerminal : IDisposable
     /// <summary>Sets or removes the native scrollback byte limit.</summary>
     public void SetScrollbackMaxBytes(nuint? bytes)
     {
-        if (bytes is null)
-        {
-            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
-            return;
-        }
-
         SetStructOption(
             GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes,
-            bytes.Value,
+            bytes is null ? ulong.MaxValue : (ulong)bytes.Value,
             "ghostty_terminal_set(scrollback_max_bytes)");
     }
 
     /// <summary>Sets or removes the native scrollback physical-line limit.</summary>
     public void SetScrollbackMaxLines(nuint? lines)
     {
-        if (lines is null)
-        {
-            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
-            return;
-        }
-
         SetStructOption(
             GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines,
-            lines.Value,
+            lines is null ? ulong.MaxValue : (ulong)lines.Value,
             "ghostty_terminal_set(scrollback_max_lines)");
     }
 

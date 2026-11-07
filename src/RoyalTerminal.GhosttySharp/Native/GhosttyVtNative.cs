@@ -682,69 +682,90 @@ public static partial class GhosttyVtNative
     // ────────────────────── Key Event Functions ─────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventNew(nint allocator, out nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_free")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void KeyEventFree(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_action")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetAction(nint keyEvent, GhosttyVtKeyAction action);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_action")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyVtKeyAction KeyEventGetAction(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_key")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetKey(nint keyEvent, GhosttyVtKey key);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_key")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyVtKey KeyEventGetKey(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_mods")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetMods(nint keyEvent, GhosttyVtMods mods);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_mods")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyVtMods KeyEventGetMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_consumed_mods")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetConsumedMods(nint keyEvent, GhosttyVtMods consumedMods);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_consumed_mods")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyVtMods KeyEventGetConsumedMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_composing")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetComposing(nint keyEvent, [MarshalAs(UnmanagedType.U1)] bool composing);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_composing")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool KeyEventGetComposing(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_utf8")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult KeyEventSetUtf8(nint keyEvent, GhosttyString utf8);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_utf8")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyString KeyEventGetUtf8(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_unshifted_codepoint")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEventSetUnshiftedCodepoint(nint keyEvent, uint codepoint);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_unshifted_codepoint")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial uint KeyEventGetUnshiftedCodepoint(nint keyEvent);
 
     // ────────────────────── Key Encoder Functions ───────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEncoderNew(nint allocator, out nint encoder);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_free")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void KeyEncoderFree(nint encoder);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_set")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult KeyEncoderSetopt(nint encoder, int option, void* value);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_set_from_terminal")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult KeyEncoderSetoptFromTerminal(nint encoder, nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_encode")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult KeyEncoderEncode(
         nint encoder, nint keyEvent,
         byte* outBuf, nuint outBufSize, out nuint outLen);
@@ -752,9 +773,11 @@ public static partial class GhosttyVtNative
     // ────────────────────── OSC Parser Functions ────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult OscNew(nint allocator, out nint parser);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_free")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void OscFree(nint parser);
 
     /// <summary>Configures a standalone OSC parser; options survive reset.</summary>
@@ -763,48 +786,62 @@ public static partial class GhosttyVtNative
     public static unsafe partial GhosttyResult OscSet(nint parser, GhosttyOscOption option, void* value);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_reset")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void OscReset(nint parser);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_next")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void OscNext(nint parser, byte b);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_end")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial nint OscEnd(nint parser, byte terminator);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_command_type")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyOscCommandType OscCommandType(nint command);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_command_data")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult OscCommandData(nint command, GhosttyOscCommandData dataType, void* outPtr);
 
     // ────────────────────── SGR Parser Functions ────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_new")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult SgrNew(nint allocator, out nint parser);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_free")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void SgrFree(nint parser);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_reset")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void SgrReset(nint parser);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_set_params")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult SgrSetParams(nint parser, ushort* param, byte* separators, nuint len);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_next")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool SgrNext(nint parser, void* attr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_full")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial nuint SgrUnknownFull(GhosttySgrUnknown unknown, ushort** ptr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_unknown_partial")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial nuint SgrUnknownPartial(GhosttySgrUnknown unknown, ushort** ptr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_tag")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttySgrAttributeTag SgrAttributeTag(in GhosttySgrAttribute attr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_value")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttySgrAttributeValue* SgrAttributeValue(GhosttySgrAttribute* attr);
 
     // ────────────────────── Paste Functions ─────────────────────────
@@ -852,6 +889,7 @@ public static partial class GhosttyVtNative
         [MarshalAs(UnmanagedType.U1)] out bool written);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_paste_is_safe")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     [return: MarshalAs(UnmanagedType.U1)]
     public static unsafe partial bool PasteIsSafe(byte* data, nuint len);
 
@@ -868,6 +906,7 @@ public static partial class GhosttyVtNative
     // ────────────────────── Color Functions ─────────────────────────
 
     [LibraryImport(LibName, EntryPoint = "ghostty_color_rgb_get")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial void ColorRgbGet(
         in GhosttyColorRgb color,
         byte* r,
@@ -875,5 +914,6 @@ public static partial class GhosttyVtNative
         byte* b);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_type_json")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial nint TypeJson();
 }

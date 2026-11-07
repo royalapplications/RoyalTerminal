@@ -9,7 +9,7 @@ Callback signatures: **31** (including four allocator vtable entries).
 
 Header-only constants: **17** modifier/Kitty-key flags and **43** terminal modes (packed value, mode number, ANSI flag).
 
-Public native VT entry points: **209**, each matched to a `LibraryImport` and verified in the built library. Wasm-only helpers are excluded because native libraries do not export them.
+Public native VT entry points: **209**, each matched to a `LibraryImport`, signature-audited, and verified in the built library. Wasm-only helpers are excluded because native libraries do not export them.
 
 All enum members are named compile-time C# references compared with the runtime
 manifest's numeric values; enum-width sentinels are checked as `int.MaxValue`.
