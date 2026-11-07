@@ -339,11 +339,15 @@ public sealed partial class ManagedScrollOrchestrationTests
             Assert.True(row.IsWrapContinuation == rows[index].IsWrapContinuation,
                 $"Row {index}: wrap continuation expected {row.IsWrapContinuation}, actual {rows[index].IsWrapContinuation}; cursor {cursor.CursorX},{cursor.CursorY}");
             AssertRow(row, rows[index]);
-            // PAGE serializes logical row count, not a grown page's unused
-            // reserved row slots. Its metadata hints remain directly comparable.
+            // PAGE serializes logical row count, not unused reserved row slots.
             GhosttySnapshotPageCapacity actualCapacity = rows[index].SnapshotAllocation!.Capacity;
             Assert.True(actualCapacity.Rows >= page.Capacity.Rows);
-            Assert.Equal(page.Capacity with { Rows = actualCapacity.Rows }, actualCapacity);
+            // PAGE v1 combines the independent hyperlink set/map capacities.
+            Assert.Equal(page.Capacity with { Rows = actualCapacity.Rows }, actualCapacity with
+            {
+                HyperlinkBytes = actualCapacity.HyperlinkWireBytes,
+                HyperlinkCells = page.Capacity.HyperlinkCells,
+            });
             for (int column = 0; column < 8; column++)
             {
                 int expectedToken = row.ReadOnlyCells[column].HyperlinkId;
