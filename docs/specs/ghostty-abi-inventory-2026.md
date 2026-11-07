@@ -7,7 +7,7 @@ Regenerate with a freshly built native package; `--check` rejects stale output.
 Types: **216** (7 alias, 31 callback, 87 enum, 21 opaque, 2 packed, 62 struct, 6 union).
 Callback signatures: **31** (including four allocator vtable entries).
 
-Header-only constants: **17** modifier/Kitty-key flags and **43** terminal modes (packed value, mode number, ANSI flag).
+Header-only constants: **20** modifier/Kitty-key/image-layer flags and **43** terminal modes (packed value, mode number, ANSI flag).
 
 Public native VT entry points: **209**, each matched to a `LibraryImport`, signature-audited, and verified in the built library. Wasm-only helpers are excluded because native libraries do not export them.
 

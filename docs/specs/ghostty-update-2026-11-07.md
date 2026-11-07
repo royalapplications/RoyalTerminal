@@ -40,7 +40,7 @@ rejected. CI runs this audit in addition to the generated runtime layout tests.
 | Graphemes use `GhosttyCodepointBuffer` | Pass pointer and capacity together; bounded copy cannot overrun caller storage. | Exact and undersized-buffer integration tests. |
 | Frozen grid references, selections and effect callback payloads | Remove obsolete size fields/checks; allocator vtable includes four reserved pointer slots. | All field offsets/sizes and callback signatures; effects integration. |
 | Compact style colors and flags | Four-byte tagged colors, 16-byte C style, explicit flags/reserved fields; preserve ergonomic style properties. | Packed-field independence, styles, rendering, generated ABI checks. |
-| Unified cursor-style and image-layer enums | Replace duplicate enum declarations and update consumers. | Compile-time named enum references; rendering/overscan tests. |
+| Unified cursor-style and image-layer enums | Replace duplicate enum declarations and update consumers. The placement iterator consumes a separate `uint32` layer mask, not the ordinal render-state layer value; `SetLayer` converts one layer and `SetLayers` accepts combinations. | Compile-time named enum references; rendering/overscan tests; all eight filter masks, individual layers, z-index boundaries, reset and rejected-value preservation. Header mask macros are included in the ABI audit. |
 | Formatter creation takes three arguments; options move to `formatter_set/get` | Wrapper translates its options into keyed settings and extras flags, frees failed initialization, retains selection ownership rules. | Formatter round trips, defaults/reset/unknown keys. |
 | Removed terminal selection-format buffer/alloc exports | Existing high-level selection formatting routes through the formatter object. | Selection/formatting integration tests. |
 | Search next/previous become dedicated exported functions | Existing search wrapper calls `search_select_next/prev`. | Search selection integration suite. |
@@ -128,3 +128,26 @@ Reproduction uses `scripts/build-native.sh`, `scripts/audit-ghostty-abi.py`,
 `scripts/test-audit-ghostty-abi.py`, `dotnet build -c Release`,
 `scripts/run-unit-test-batches.sh`, and the integration/history projects.
 Set `ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1` for the native-backed local runs.
+
+## Follow-up review and preview
+
+The complete PR diff at `b729e427` was reviewed across native overlays,
+managed bindings and ownership, terminal behavior, metadata allocation,
+selection/rendering, tests, generated ABI checks, benchmarks and documentation.
+One correctness finding was reproduced and fixed: ordinal image-layer values
+were passed to the new bit-mask iterator option. A below-background request
+returned all three layers (placement set 14 instead of 8). The wrapper now
+distinguishes the native layer enum from `GhosttyImageLayerMask`, and the ABI
+audit covers the header-only mask constants. The app's unfiltered traversal
+remains supported. No other actionable findings remained in that review.
+
+The correction passes all 308 native integration cases, including three new
+filter tests, and the Release solution builds with zero warnings/errors.
+The source audit has three tests, including rejection of a missing mask binding.
+Final CI and publication evidence is recorded in PR #128.
+
+The branch version is `0.8.0-preview.1`, reflecting the public ABI migration.
+The preview tag is created from the reviewed PR branch after its CI passes.
+The existing tag-driven release workflow rebuilds and tests the native/managed
+packages, validates runtime contents, publishes through NuGet trusted publishing,
+and creates a GitHub prerelease. It does not require merging the PR.

@@ -42,5 +42,23 @@ class ExportSignatureTests(unittest.TestCase):
         self.assertTrue(self.findings('[return: MarshalAs(UnmanagedType.U1)] public static partial bool Test(ushort count, nint text);', convention=False))
 
 
+class ImageLayerMaskTests(unittest.TestCase):
+    def test_header_only_layer_masks_require_distinct_managed_bindings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            header = root / "external/ghostty/include/ghostty/vt/types.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define GHOSTTY_IMAGE_LAYER_MASK_BELOW_TEXT \\\n  (1u << GHOSTTY_IMAGE_LAYER_BELOW_TEXT)\n", encoding="utf-8")
+            enums = {"GhosttyImageLayer": {"belowtext": "BelowText"}}
+            with patch.object(audit, "ROOT", root):
+                self.assertTrue(audit.flags_checks(enums)[1])
+                enums["GhosttyImageLayerMask"] = {"belowtext": "BelowText"}
+                checks, findings = audit.flags_checks(enums)
+                self.assertEqual([], findings)
+                self.assertEqual(1, len(checks))
+                self.assertIn("1L << (int)GhosttyVtNative.GhosttyImageLayer.BelowText", checks[0])
+                self.assertIn("GhosttyImageLayerMask.BelowText", checks[0])
+
+
 if __name__ == "__main__":
     unittest.main()

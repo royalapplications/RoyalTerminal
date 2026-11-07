@@ -2653,6 +2653,9 @@ public sealed class GhosttyAbiManifestTests : IDisposable
         Assert.Equal((long)((1 << 7)), (long)GhosttyVtNative.GhosttyVtMods.CtrlSide);
         Assert.Equal((long)((1 << 8)), (long)GhosttyVtNative.GhosttyVtMods.AltSide);
         Assert.Equal((long)((1 << 9)), (long)GhosttyVtNative.GhosttyVtMods.SuperSide);
+        Assert.Equal(1L << (int)GhosttyVtNative.GhosttyImageLayer.BelowBackground, (long)GhosttyVtNative.GhosttyImageLayerMask.BelowBackground);
+        Assert.Equal(1L << (int)GhosttyVtNative.GhosttyImageLayer.BelowText, (long)GhosttyVtNative.GhosttyImageLayerMask.BelowText);
+        Assert.Equal(1L << (int)GhosttyVtNative.GhosttyImageLayer.AboveText, (long)GhosttyVtNative.GhosttyImageLayerMask.AboveText);
     }
     [GhosttyNativeFact]
     public unsafe void HeaderModeConstants()
