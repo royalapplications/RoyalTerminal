@@ -68,7 +68,7 @@ No PowerShell startup, invocation, environment or ConPTY behavior is changed.
 
 | Upstream behavior/change | Native disposition | Managed/shared disposition and evidence |
 | --- | --- | --- |
-| DECIC, DECDC, DECBI, DECFI (`86d97211a`) | Included in pin. | Add CSI apostrophe `}`/`~`, ESC 6/9; margin, cursor, delayed-wrap, metadata and held-publication comparisons across 24 positions per scenario. `ManagedCharacterEditParityTests.Columns`. |
+| DECIC, DECDC, DECBI, DECFI (`86d97211a`) | Included in pin. | Add CSI apostrophe `}`/`~`, ESC 6/9; margin, cursor, delayed-wrap, metadata and held-publication comparisons across 24 positions per scenario. Match `cursorAbsolute` pen/link transfers on each edited page and on cursor restoration; 128 multi-page scenarios cover both screens, margins, explicit/implicit links and synchronized output. `ManagedCharacterEditParityTests.Columns`, `ManagedScrollOrchestrationTests.Columns`. |
 | Pending wrap at right margin (`9781c0afc`) | Included in formatter. | Existing edge-glyph replay already supports margins; new `NovemberFormatterParityTests` covers narrow, wide and physical-edge-outside-margin cases with both export and replay engines. Blank-cell replay remains covered. |
 | Input-only semantic prompt tracking and copied cursor state (`9bfa8ee9a`) | Prompt scans may be skipped only when prompt/input has never occurred. | Set Seen for input, cursor copy and snapshot restoration; existing processor-state differential cases cover primary/alternate transitions. |
 | Apply all SGR attributes once (`2f967e3a6`) | Included. | Capture the old pen once and commit the final pen once per CSI. Update pressure tests to distinguish one sequence from separate mutations; do not allocate discarded intermediate styles. |
@@ -114,13 +114,13 @@ control-mode orchestration are not libghostty-vt features to port into Avalonia.
 | Release solution | Pass, zero warnings/errors. |
 | Native integration | 305 passed, zero skips, fresh macOS ARM64 library; wide-overwrite bulk/scalar snapshots compared at 360 checkpoints. |
 | Bounded history project | 45 passed, zero skips. |
-| Focused parity reruns | 249 printing, character/column edits, scroll, hyperlink lifecycle, reflow-refusal and formatter cases pass on the final optimized library. The target-alignment correction also passes all 18 macOS cursor-resize cases. |
-| Local Linux guest | 1,364 snapshot, allocation, reflow, printing, character/column-edit, scroll and formatter parity tests pass on Ubuntu 24.04 ARM64, zero skips. Reproduced the two 4 KiB fixture failures before correcting their expected capacities. |
+| Focused parity reruns | 249 printing, character/column edits, scroll, hyperlink lifecycle, reflow-refusal and formatter cases pass on the final optimized library. The target-alignment correction also passes all 18 macOS cursor-resize cases. Final multi-page column metadata regression coverage passes all 118 scroll/character-edit tests on macOS. |
+| Local Linux guest | 1,368 snapshot, allocation, reflow, printing, character/column-edit, scroll and formatter parity tests pass on Ubuntu 24.04 ARM64, zero skips. Reproduced the two 4 KiB fixture failures before correcting their expected capacities. The four new multi-page column cases reproduced the missing cursor-link transfers before the fix and pass with it. |
 | Native history/metadata/target tests | Pass with Zig 0.17.0. |
 | Native local builds | macOS ARM64 VT + renderer; Linux x64 and ARM64 VT cross-builds. |
 | Linux consumer packaging | Shared and static C consumers link; ELF exports use `GHOSTTY_VT_1.0`, including RoyalTerminal extensions. |
 | ABI | 216 types, 31 callbacks, 209 exports/signatures checked; audit mutation checks pass. |
-| Complete local unit/headless suite | 8,354 passed, 23 existing platform/harness skips, zero remaining failures across 8,377 unique discovered cases. Includes the complete 113-batch repository-local run plus focused reruns of 59 corrected legacy-fixture failures. No skips were added. |
+| Complete local unit/headless suite | Before the four final column cases: 8,354 passed, 23 existing platform/harness skips, zero remaining failures across 8,377 unique discovered cases in a complete 113-batch repository-local run. The final revision is rerun locally and in CI; exact final results are recorded in the PR. No skips were added. |
 | Performance | No material regression in measured CPU workloads. Identical-harness measurements, the resolved upstream wide-overwrite regression, bounded metadata allocation costs and raw data are in the [performance report](ghostty-performance-2026-11-07.md). |
 | CI | All six native OS/architecture builds passed. Windows audit encoding failure fixed with explicit UTF-8 and non-ASCII mutation fixtures. Linux/Windows resize-fixture expectations corrected for 4 KiB target alignment and verified locally. Final PR revision must pass before review. |
 
