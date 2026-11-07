@@ -6761,7 +6761,7 @@ public class TerminalControlTests
     }
 
     [AvaloniaFact]
-    public async Task Control_NativeTransportEcho_RendersImmediately_AfterTypedInput()
+    public async Task Control_NativeTransportEcho_RendersAfterTypedInput()
     {
         if (!GhosttyVtProcessor.IsAvailable())
         {
@@ -6789,21 +6789,31 @@ public class TerminalControlTests
         {
             await control.StartSessionAsync(new FakeTransportOptions("fake"));
             control.Focus();
+            // A blinking cursor must not satisfy the frame-change assertion or
+            // supply the invalidation that should come from transport output.
+            control.WriteOutput("\x1b[?25l"u8);
             HeadlessTerminalTestCleanup.RunDispatcherJobs();
 
-            byte[] before = CaptureFramePng(window);
+            // Repeat after the first echo has rendered so an initial composition
+            // update cannot be mistaken for the typed output's frame update.
+            foreach (string text in new[] { "x", "y" })
+            {
+                byte[] before = CaptureFramePng(window);
+                window.KeyTextInput(text);
 
-            window.KeyTextInput("x");
+                bool echoed = await WaitUntilAsync(
+                    () => ContainsScreenText(control, text),
+                    TimeSpan.FromSeconds(2));
+                Assert.True(echoed);
 
-            bool echoed = await WaitUntilAsync(
-                () => ContainsScreenText(control, "x"),
-                TimeSpan.FromSeconds(2));
-            Assert.True(echoed);
-
-            byte[] after = CaptureFramePng(window);
-            Assert.False(
-                before.AsSpan().SequenceEqual(after),
-                "Expected typed native transport echo to trigger a visible frame update immediately.");
+                // The worker publishes screen state before UI finalization and
+                // the compositor commit. Wait for that observable result too.
+                bool rendered = await WaitUntilAsync(
+                    () => !before.AsSpan().SequenceEqual(CaptureFramePng(window)),
+                    TimeSpan.FromSeconds(2));
+                Assert.True(rendered,
+                    "Expected typed native transport echo to trigger a visible frame update.");
+            }
         }
         finally
         {
@@ -7589,7 +7599,7 @@ public class TerminalControlTests
     private static byte[] CaptureFramePng(Window window)
     {
         HeadlessTerminalTestCleanup.RunDispatcherJobs();
-        Bitmap? frame = window.CaptureRenderedFrame();
+        using Bitmap? frame = window.CaptureRenderedFrame();
         Assert.NotNull(frame);
 
         using MemoryStream stream = new();

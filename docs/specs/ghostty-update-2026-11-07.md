@@ -146,6 +146,16 @@ filter tests, and the Release solution builds with zero warnings/errors.
 The source audit has three tests, including rejection of a missing mask binding.
 Final CI and publication evidence is recorded in PR #128.
 
+The follow-up Linux CI run also exposed a timing race in the existing typed-echo
+headless test: the background worker publishes screen state before posting UI
+finalization and its compositor update. The test now waits for the rendered
+frame within its bounded timeout, hides the cursor to prevent blink-driven
+false positives, verifies two successive echoes, and disposes captured bitmaps.
+It does not force terminal invalidation or change production rendering behavior.
+This follows [Avalonia's headless capture implementation](https://github.com/AvaloniaUI/Avalonia/blob/12.1.3/src/Headless/Avalonia.Headless/HeadlessWindowExtensions.cs),
+which pumps dispatcher/render work but cannot wait for a background producer
+that has not yet posted its UI callback.
+
 The branch version is `0.8.0-preview.1`, reflecting the public ABI migration.
 The preview tag is created from the reviewed PR branch after its CI passes.
 The existing tag-driven release workflow rebuilds and tests the native/managed
