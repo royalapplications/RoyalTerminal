@@ -56,7 +56,7 @@ public sealed class GhosttySnapshotMetadataGrowthTests
         Assert.True(layout.TryIncreaseCapacity(capacity, GhosttySnapshotCapacityDimension.GraphemeBytes, 8192, 1, out var graphemes));
         Assert.Equal(8192U * 32, graphemes.GraphemeBytes);
         Assert.True(layout.TryIncreaseCapacity(capacity, GhosttySnapshotCapacityDimension.StringBytes, 2048, 1, out var strings));
-        Assert.Equal(4096U, strings.StringBytes); // No projection for strings/links.
+        Assert.Equal(204800U, strings.StringBytes); // Per-row URI floor bounds the projection.
     }
 
     [Theory]
@@ -92,7 +92,8 @@ public sealed class GhosttySnapshotMetadataGrowthTests
         Assert.True(layout.TryFitMetadata(capacity, full with { Styles = 104 }, 4, out var styles));
         Assert.Equal((ushort)256, styles.Styles);
         Assert.True(layout.TryFitMetadata(capacity, full with { HyperlinkCells = 103 }, 4, out var cells));
-        Assert.Equal((ushort)384, cells.HyperlinkBytes);
+        Assert.Equal((ushort)192, cells.HyperlinkBytes);
+        Assert.Equal((ushort)128, cells.HyperlinkCells);
         Assert.True(layout.TryFitMetadata(capacity, full with { Hyperlinks = 3 }, 4, out var links));
         Assert.Equal((ushort)384, links.HyperlinkBytes);
         Assert.True(layout.TryFitMetadata(capacity, full with { StringBytes = 2049 }, 4, out var strings));
@@ -153,7 +154,7 @@ public sealed class GhosttySnapshotMetadataGrowthTests
         {
             0 => resident.Capacity with { Styles = 16 },
             1 => resident.Capacity with { GraphemeBytes = 1024 },
-            _ => resident.Capacity with { HyperlinkBytes = 192, StringBytes = 4096 },
+            _ => resident.Capacity with { HyperlinkBytes = 192, HyperlinkCells = 64, StringBytes = 4096 },
         };
         ulong boundary = layout.AllocatedBytes(expected) + layout.AllocatedBytes(history.Capacity);
         byte[] input = Encoding.UTF8.GetBytes(variant switch

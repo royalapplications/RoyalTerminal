@@ -16,7 +16,7 @@ public struct GhosttyRenderImagePlacement
     /// <summary>Image contents generation; compare for equality only.</summary>
     public ulong ImageGeneration;
     /// <summary>Drawing layer relative to backgrounds and text.</summary>
-    public GhosttyRenderStateImageLayer Layer;
+    public GhosttyImageLayer Layer;
     /// <summary>Z-index within the layer.</summary>
     public int Z;
     /// <summary>Signed cell column relative to the viewport.</summary>

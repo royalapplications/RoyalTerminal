@@ -62,12 +62,12 @@ public sealed class ManagedSnapshotMetadataPressureTests
         GhosttySnapshotStyleStorage storage = row.SnapshotAllocation!.CopyRestoredStyles();
         Assert.Equal(1, storage.Count);
         Assert.Equal(Italic, storage.CellStyle(0));
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, storage.ChangeCursor(Faint));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ChangeCursor(Faint));
         Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.Rebuild(page.Capacity.Styles, out GhosttySnapshotStyleStorage? rehashed));
         Assert.Equal(GhosttySnapshotSetAddResult.Success, rehashed!.ChangeCursor(Faint));
         // A second fork must see the original dead slot, not the first fork's rehash.
         GhosttySnapshotStyleStorage untouched = row.SnapshotAllocation.CopyRestoredStyles();
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, untouched.ChangeCursor(Faint));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, untouched.ChangeCursor(Faint));
         Assert.Equal(2, page.StyleCount);
         Assert.True(page.TryGetStyle(1, out GhosttySnapshotStyle raw));
         Assert.Equal(Bold, raw);

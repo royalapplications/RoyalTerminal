@@ -136,7 +136,7 @@ public sealed class TerminalCursorParityTests(ITestOutputHelper output)
         managed.InstallSnapshotCursorPolicy(ready.Terminal.Header);
         foreach (GhosttySnapshotScreen screen in ready.Screens) managed.InstallSnapshotCursorStyle(screen.State);
         CompareSnapshot(native, managed);
-        native.SetDefaultCursorStyle(GhosttyVtNative.GhosttyTerminalCursorStyle.BlockHollow);
+        native.SetDefaultCursorStyle(GhosttyVtNative.GhosttyCursorStyle.BlockHollow);
         managed.SetDefaultCursorStyle(TerminalCursorStyle.BlockHollow); CompareSnapshot(native, managed);
         foreach (string command in new[] { "\u001b[0 q", "\u001b[?1049h", "\u001b[5 q", "\u001b[?1049l", "\u001bc" })
         {

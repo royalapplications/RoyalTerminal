@@ -14,12 +14,13 @@ internal static class GhosttySnapshotMetadataHash
 {
     internal static ulong Style(GhosttySnapshotStyle style)
     {
-        UInt128 packed = (UInt128)style.Foreground.Kind | (UInt128)style.Background.Kind << 8 |
-            (UInt128)style.UnderlineColor.Kind << 16 | Data(style.Foreground) << 24 |
-            Data(style.Background) << 48 | Data(style.UnderlineColor) << 72 | (UInt128)style.Flags << 96;
+        UInt128 packed = (UInt128)style.Foreground.Kind | Data(style.Foreground) << 8 |
+            (UInt128)style.Background.Kind << 32 | Data(style.Background) << 40 |
+            (UInt128)style.UnderlineColor.Kind << 64 | Data(style.UnderlineColor) << 72 |
+            (UInt128)style.Flags << 96;
         unchecked
         {
-            ulong value = (ulong)packed ^ (ulong)(packed >> 64);
+            ulong value = (ulong)packed ^ ((ulong)(packed >> 64) * 0x9e3779b97f4a7c15UL);
             const ulong multiplier = 0xbea225f9eb34556d;
             value = (value ^ (value >> 32)) * multiplier;
             value = (value ^ (value >> 29)) * multiplier;

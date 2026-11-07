@@ -11,7 +11,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttySelectionRange
     {
-        public nuint Size;
         public GhosttyGridRef Start;
         public GhosttyGridRef End;
 
@@ -22,7 +21,7 @@ public static partial class GhosttyVtNative
         {
             return new GhosttySelectionRange
             {
-                Size = (nuint)Marshal.SizeOf<GhosttySelectionRange>(),
+
                 Start = GhosttyGridRef.CreateSized(),
                 End = GhosttyGridRef.CreateSized(),
             };
@@ -167,11 +166,13 @@ public static partial class GhosttyVtNative
 
     public enum GhosttySelectionGestureData : int
     {
-        ClickCount = 0,
-        Dragged = 1,
-        Autoscroll = 2,
-        Behavior = 3,
-        Anchor = 4,
+        ClickCount = 1,
+        Dragged = 2,
+        Autoscroll = 3,
+        Behavior = 4,
+        Anchor = 5,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttySelectionGestureEventType : int
@@ -185,16 +186,18 @@ public static partial class GhosttyVtNative
 
     public enum GhosttySelectionGestureEventOption : int
     {
-        Reference = 0,
-        Position = 1,
-        RepeatDistance = 2,
-        TimeNanoseconds = 3,
-        RepeatIntervalNanoseconds = 4,
-        WordBoundaryCodepoints = 5,
-        Behaviors = 6,
-        Rectangle = 7,
-        Geometry = 8,
-        Viewport = 9,
+        Reference = 1,
+        Position = 2,
+        RepeatDistance = 3,
+        TimeNanoseconds = 4,
+        RepeatIntervalNanoseconds = 5,
+        WordBoundaryCodepoints = 6,
+        Behaviors = 7,
+        Rectangle = 8,
+        Geometry = 9,
+        Viewport = 10,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -298,26 +301,10 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial GhosttyResult TerminalSelectOutput(
         nint terminal,
-        GhosttyGridRef reference,
+        in GhosttyGridRef reference,
         ref GhosttySelectionRange selection);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_selection_format_buf")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe partial GhosttyResult TerminalSelectionFormatBuffer(
-        nint terminal,
-        GhosttyTerminalSelectionFormatOptions options,
-        byte* buffer,
-        nuint bufferLength,
-        out nuint written);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_terminal_selection_format_alloc")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe partial GhosttyResult TerminalSelectionFormatAlloc(
-        nint terminal,
-        nint allocator,
-        GhosttyTerminalSelectionFormatOptions options,
-        byte** output,
-        nuint* outputLength);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_selection_adjust")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

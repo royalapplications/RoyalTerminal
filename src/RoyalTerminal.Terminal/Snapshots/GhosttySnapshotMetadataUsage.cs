@@ -8,6 +8,7 @@ internal enum GhosttySnapshotCapacityDimension
     Styles,
     GraphemeBytes,
     HyperlinkBytes,
+    HyperlinkCells,
     StringBytes,
 }
 

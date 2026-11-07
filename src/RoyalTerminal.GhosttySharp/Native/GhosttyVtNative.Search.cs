@@ -23,22 +23,25 @@ public static partial class GhosttyVtNative
 
     public enum GhosttySearchData : int
     {
-        Status = 0,
-        Needle = 1,
-        TotalMatches = 2,
-        SelectedIndex = 3,
-        SelectedMatch = 4,
-        Matches = 5,
-        ViewportMatches = 6,
-        SelectScroll = 7,
+        Status = 1,
+        Needle = 2,
+        TotalMatches = 3,
+        SelectedIndex = 4,
+        SelectedMatch = 5,
+        Matches = 6,
+        ViewportMatches = 7,
+        SelectScroll = 8,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttySearchOption : int
     {
-        Needle = 0,
-        SelectNext = 1,
-        SelectPrevious = 2,
-        SelectScroll = 3,
+        Needle = 1,
+
+        SelectScroll = 4,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     [StructLayout(LayoutKind.Sequential)]

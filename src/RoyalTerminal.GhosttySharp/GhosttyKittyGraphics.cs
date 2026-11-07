@@ -172,16 +172,17 @@ public readonly struct GhosttyKittyGraphicsImage
     private unsafe ReadOnlySpan<byte> GetData()
     {
         _ = _terminal.Handle;
-        nint dataPtr = nint.Zero;
+        GhosttyVtNative.GhosttyString pixels = default;
         GhosttyVtNative.GhosttyResult result = GhosttyVtNative.KittyGraphicsImageGet(
-            _handle, GhosttyVtNative.GhosttyKittyGraphicsImageData.DataPtr, &dataPtr);
+            _handle, GhosttyVtNative.GhosttyKittyGraphicsImageData.Pixels, &pixels);
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
         {
             return [];
         }
 
-        ThrowIfFailed(result, "ghostty_kitty_graphics_image_get(data_ptr)");
-        nuint dataLength = GetValue<nuint>(GhosttyVtNative.GhosttyKittyGraphicsImageData.DataLength);
+        ThrowIfFailed(result, "ghostty_kitty_graphics_image_get(pixels)");
+        nuint dataLength = pixels.Len;
+        nint dataPtr = pixels.Ptr;
         if (dataPtr == nint.Zero || dataLength == 0)
         {
             return [];
@@ -256,11 +257,20 @@ public sealed class GhosttyKittyGraphicsPlacementIterator : IDisposable
         _handle = iterator;
     }
 
-    /// <summary>Filters placements by z-layer.</summary>
-    public unsafe void SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer layer)
+    /// <summary>Filters placements to one z-layer.</summary>
+    public void SetLayer(GhosttyVtNative.GhosttyImageLayer layer)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.GhosttyKittyPlacementLayer copy = layer;
+        if (layer is < GhosttyVtNative.GhosttyImageLayer.BelowBackground or > GhosttyVtNative.GhosttyImageLayer.AboveText)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+        SetLayers((GhosttyVtNative.GhosttyImageLayerMask)(1u << (int)layer));
+    }
+
+    /// <summary>Filters placements to a combination of z-layers; zero or All visits every layer.</summary>
+    public unsafe void SetLayers(GhosttyVtNative.GhosttyImageLayerMask layers)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        GhosttyVtNative.GhosttyImageLayerMask copy = layers;
         ThrowIfFailed(
             GhosttyVtNative.KittyGraphicsPlacementIteratorSet(
                 _handle,
