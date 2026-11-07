@@ -103,7 +103,8 @@ this pin. It does not require identical allocations or copying an upstream leak.
 The existing `ManagedSnapshotCursorResizeTests` intentionally release an orphaned
 cursor hyperlink that certain native resize layouts retain; content, cursor and
 continuation remain compared, and the capacity divergence is explicit in that
-test. Ghostty application windows, configuration UI, Raylib rendering and tmux
+test. Its projected native capacity is target-specific: 600 bytes on 4 KiB
+layouts and 6000 bytes on macOS ARM64’s 16 KiB layout. Both are asserted exactly. Ghostty application windows, configuration UI, Raylib rendering and tmux
 control-mode orchestration are not libghostty-vt features to port into Avalonia.
 
 ## Validation ledger
@@ -113,14 +114,15 @@ control-mode orchestration are not libghostty-vt features to port into Avalonia.
 | Release solution | Pass, zero warnings/errors. |
 | Native integration | 305 passed, zero skips, fresh macOS ARM64 library; wide-overwrite bulk/scalar snapshots compared at 360 checkpoints. |
 | Bounded history project | 45 passed, zero skips. |
-| Focused parity reruns | 249 printing, character/column edits, scroll, hyperlink lifecycle, reflow-refusal and formatter cases pass on the final optimized library. |
+| Focused parity reruns | 249 printing, character/column edits, scroll, hyperlink lifecycle, reflow-refusal and formatter cases pass on the final optimized library. The target-alignment correction also passes all 18 macOS cursor-resize cases. |
+| Local Linux guest | 1,364 snapshot, allocation, reflow, printing, character/column-edit, scroll and formatter parity tests pass on Ubuntu 24.04 ARM64, zero skips. Reproduced the two 4 KiB fixture failures before correcting their expected capacities. |
 | Native history/metadata/target tests | Pass with Zig 0.17.0. |
-| Native local builds | macOS ARM64 VT + renderer; Linux x64 VT cross-build. |
+| Native local builds | macOS ARM64 VT + renderer; Linux x64 and ARM64 VT cross-builds. |
 | Linux consumer packaging | Shared and static C consumers link; ELF exports use `GHOSTTY_VT_1.0`, including RoyalTerminal extensions. |
 | ABI | 216 types, 31 callbacks, 209 exports/signatures checked; audit mutation checks pass. |
 | Complete local unit/headless suite | 8,354 passed, 23 existing platform/harness skips, zero remaining failures across 8,377 unique discovered cases. Includes the complete 113-batch repository-local run plus focused reruns of 59 corrected legacy-fixture failures. No skips were added. |
 | Performance | No material regression in measured CPU workloads. Identical-harness measurements, the resolved upstream wide-overwrite regression, bounded metadata allocation costs and raw data are in the [performance report](ghostty-performance-2026-11-07.md). |
-| CI | All six native OS/architecture builds passed. Windows audit encoding failure fixed with explicit UTF-8 and non-ASCII mutation fixtures. Final PR revision must pass before review. |
+| CI | All six native OS/architecture builds passed. Windows audit encoding failure fixed with explicit UTF-8 and non-ASCII mutation fixtures. Linux/Windows resize-fixture expectations corrected for 4 KiB target alignment and verified locally. Final PR revision must pass before review. |
 
 Reproduction uses `scripts/build-native.sh`, `scripts/audit-ghostty-abi.py`,
 `scripts/test-audit-ghostty-abi.py`, `dotnet build -c Release`,
