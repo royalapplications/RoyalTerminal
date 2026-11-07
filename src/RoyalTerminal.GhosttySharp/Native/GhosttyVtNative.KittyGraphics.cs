@@ -32,12 +32,29 @@ public static partial class GhosttyVtNative
         Z = 12,
     }
 
+    /// <summary>Drawing layer reported by the native render state.</summary>
     public enum GhosttyImageLayer : int
     {
-        All = 0,
+        /// <summary>Below cell backgrounds (z less than -1,073,741,824).</summary>
         BelowBackground = 0,
+        /// <summary>Between backgrounds and text (negative z at or above -1,073,741,824).</summary>
         BelowText = 1,
+        /// <summary>Above text (nonnegative z).</summary>
         AboveText = 2,
+    }
+
+    /// <summary>Mask for the Kitty placement iterator; zero also disables filtering.</summary>
+    [Flags]
+    public enum GhosttyImageLayerMask : uint
+    {
+        /// <summary>Placements below cell backgrounds.</summary>
+        BelowBackground = 1u << (int)GhosttyImageLayer.BelowBackground,
+        /// <summary>Placements between backgrounds and text.</summary>
+        BelowText = 1u << (int)GhosttyImageLayer.BelowText,
+        /// <summary>Placements above text.</summary>
+        AboveText = 1u << (int)GhosttyImageLayer.AboveText,
+        /// <summary>Placements in every layer.</summary>
+        All = BelowBackground | BelowText | AboveText,
     }
 
     public enum GhosttyKittyGraphicsPlacementIteratorOption : int

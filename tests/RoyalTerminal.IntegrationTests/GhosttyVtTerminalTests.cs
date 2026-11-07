@@ -166,7 +166,7 @@ public class GhosttyVtTerminalTests
         Assert.Equal(6, image.CopyData().Length);
 
         using GhosttyKittyGraphicsPlacementIterator iterator = graphics.CreatePlacementIterator();
-        iterator.SetLayer(GhosttyVtNative.GhosttyImageLayer.All);
+        iterator.SetLayers(GhosttyVtNative.GhosttyImageLayerMask.All);
         graphics.Populate(iterator);
 
         Assert.True(iterator.MoveNext());

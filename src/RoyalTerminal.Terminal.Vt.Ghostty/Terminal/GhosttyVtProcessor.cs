@@ -2233,7 +2233,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         bool imagesChanged = false;
         TerminalRenderOverscan capturedOverscan = _screen.GetRenderViewport(EffectiveRenderOverscan).CapturedOverscan;
 
-        _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyImageLayer.All);
+        _kittyPlacementIterator.SetLayers(GhosttyVtNative.GhosttyImageLayerMask.All);
         graphics.Populate(_kittyPlacementIterator);
 
         while (_kittyPlacementIterator.MoveNext())
