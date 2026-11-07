@@ -1939,6 +1939,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 _state = ParserState.Ground;
                 break;
 
+            case (byte)'6': // DECBI — Back index
+                HorizontalIndex(forward: false);
+                _state = ParserState.Ground;
+                break;
+
+            case (byte)'9': // DECFI — Forward index
+                HorizontalIndex(forward: true);
+                _state = ParserState.Ground;
+                break;
+
             case (byte)'D': // IND — Index (move cursor down, scroll if at bottom)
                 ResetDelayedWrap();
                 LineFeed(wrapForced: false);
@@ -3254,6 +3264,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
         {
             if (p0 is 0 or 2) SetCharacterProtection(CharacterProtectionMode.Off);
             else if (p0 == 1) SetCharacterProtection(CharacterProtectionMode.Dec);
+            return;
+        }
+        if (_intermediateChar == '\'' && finalByte is '}' or '~')
+        {
+            if (_params.Count <= 1) EditColumns(Math.Max(1, p0), insert: finalByte == '}');
             return;
         }
         if (_intermediateChar != '\0') return;

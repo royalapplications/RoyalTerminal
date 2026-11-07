@@ -71,11 +71,11 @@ public sealed class KittyStorageQuotaParityTests
         Assert.Equal("\x1b_Gi=1,r=2;EINVAL: base frame not found\x1b\\", session.LastReply);
         Assert.Equal(new byte[] { 255, 0, 0, 255 }, session.Pixels(1));
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, session.Pixels(2));
-        // Promotion stamps image 1 even on this failure. With both placed,
-        // image 2 is now older and is the next admission's eviction victim.
+        // Promotion changes pixel generation, but not transmission age.
+        // The first transmission remains the next admission's victim.
         session.Send("a=T,i=3,f=24,s=1,v=1,C=1;BQYH");
-        Assert.True(session.Exists(1));
-        Assert.False(session.Exists(2));
+        Assert.False(session.Exists(1));
+        Assert.True(session.Exists(2));
         Assert.True(session.Exists(3));
     }
 
