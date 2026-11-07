@@ -241,7 +241,9 @@ public sealed class ManagedSnapshotReflowFailureTests
             {
                 byte[] uri = Encoding.ASCII.GetBytes("collision-" + candidate);
                 TerminalHyperlink link = new(uri, default, candidate);
-                if ((GhosttySnapshotMetadataHash.Hyperlink(GhosttySnapshotHyperlink.Read(link.SnapshotEncoding, out _)) & 127) != 0) continue;
+                // Link-set density now projects over all reserved rows too.
+                // Preserve collisions through the maximum replacement table.
+                if ((GhosttySnapshotMetadataHash.Hyperlink(GhosttySnapshotHyperlink.Read(link.SnapshotEncoding, out _)) & 2047) != 0) continue;
                 pressure[accepted].HyperlinkId = owner.RegisterHyperlink(uri, default, candidate);
                 Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, pressureStorage.Hyperlinks.ObserveCell(accepted, link.SnapshotEncoding));
             }
@@ -276,7 +278,10 @@ public sealed class ManagedSnapshotReflowFailureTests
         int run = 0;
         reflow.CopyMetadata(destination, 0, [new(0, pressure.SnapshotAllocation!, 0)], ref run, 0, 32);
         GhosttySnapshotCapacityDimension dimension = hyperlinks ? GhosttySnapshotCapacityDimension.HyperlinkBytes : GhosttySnapshotCapacityDimension.Styles;
-        Assert.True(layout.TryIncreaseCapacity(destination.SnapshotAllocation!.Capacity, dimension, 32, 1, out GhosttySnapshotPageCapacity expected));
+        // 32 links require 41 set slots (including the sentinel/load factor),
+        // at 48 bytes each. Styles are counted in items rather than bytes.
+        Assert.True(layout.TryIncreaseCapacity(destination.SnapshotAllocation!.Capacity, dimension,
+            hyperlinks ? 1968UL : 32UL, 1, out GhosttySnapshotPageCapacity expected));
         destination[32] = incoming.ReadOnlyCells[0];
         run = 0;
 
