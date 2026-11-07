@@ -129,7 +129,7 @@ public sealed class ManagedSnapshotRebuildAddressTests
         TerminalRow tail = new(8);
         fixture.Rows.Add(tail);
 
-        Assert.True(fixture.Tracker.AssignTailRow(fixture.Rows, 3, fixture.Layout));
+        Assert.True(fixture.Tracker.AssignTailRow(fixture.Rows, 3, fixture.Layout, 0));
 
         Assert.Same(row.SnapshotAllocation, tail.SnapshotAllocation);
         Assert.Equal(3, tail.SnapshotAllocationRow); // Old physical slot 5 must not force a new page.

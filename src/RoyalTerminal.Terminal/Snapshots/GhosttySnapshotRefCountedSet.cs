@@ -32,7 +32,7 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
     private readonly Dictionary<int, int> _buckets = [];
     private readonly List<Item?> _items = [null];
     private readonly int[] _probes = new int[32];
-    private int _nextId = 1, _maximumProbe, _living;
+    private int _nextId = 1, _freeCursor = 1, _maximumProbe, _living;
     // Native items live in reusable page storage. Keep one cleared CLR wrapper
     // for churn without allocating densely from an untrusted capacity hint.
     // It is scratch, never a live/dead table entry and never shared by Copy().
@@ -46,7 +46,7 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
     internal GhosttySnapshotRefCountedSet<T> Copy(IGhosttySnapshotSetContext<T> replacementContext)
     {
         GhosttySnapshotRefCountedSet<T> copy = new(_requested, replacementContext)
-        { _nextId = _nextId, _maximumProbe = _maximumProbe, _living = _living };
+        { _nextId = _nextId, _freeCursor = _freeCursor, _maximumProbe = _maximumProbe, _living = _living };
         foreach ((int bucket, int id) in _buckets) copy._buckets.Add(bucket, id);
         for (int id = 1; id < _items.Count; id++)
             copy._items.Add(_items[id] is { } item
@@ -74,13 +74,18 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
             id = existing;
             return GhosttySnapshotSetAddResult.Success;
         }
-        // Snapshot decode drops either failure, but live mutation must distinguish
-        // native's same-capacity rehash from a capacity increase. Match its f64
-        // threshold (including truncation) rather than rounding to a percentage.
+        // At least 10% dead IDs permit in-place reclamation. Match upstream's
+        // truncated f64 threshold; reaching the probe bound still requires growth.
         if (_probes[31] > 0) return GhosttySnapshotSetAddResult.OutOfMemory;
         if (_nextId >= _itemCapacity)
-            return _living < (int)(_itemCapacity * 0.9)
-                ? GhosttySnapshotSetAddResult.NeedsRehash : GhosttySnapshotSetAddResult.OutOfMemory;
+        {
+            if (_living >= (int)(_itemCapacity * 0.9)) return GhosttySnapshotSetAddResult.OutOfMemory;
+            int deadId = ReclaimDeadId();
+            if (deadId == 0) return GhosttySnapshotSetAddResult.OutOfMemory;
+            id = Insert(value, deadId);
+            if (id != deadId) _freeCursor = deadId;
+            return GhosttySnapshotSetAddResult.Success;
+        }
         id = Insert(value, _nextId);
         if (id == _nextId) _nextId++;
         return GhosttySnapshotSetAddResult.Success;
@@ -136,7 +141,7 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
             int id = Bucket(bucket);
             if (id == 0) { Place(bucket, heldId, held); break; }
             Item item = _items[id]!;
-            if (item.References == 0)
+            if (item.References == 0 && item.Probe <= held.Probe)
             {
                 context.Deleted(item.Value);
                 _probes[item.Probe]--;
@@ -237,6 +242,20 @@ internal sealed class GhosttySnapshotRefCountedSet<T>(ushort requested, IGhostty
         _buckets.Remove(previous);
         while (_maximumProbe > 0 && _probes[_maximumProbe] == 0) _maximumProbe--;
         RecycleItem(item);
+    }
+
+    private int ReclaimDeadId()
+    {
+        int id = _freeCursor;
+        for (int scanned = 1; scanned < _nextId; scanned++, id++)
+        {
+            if (id <= 0 || id >= _nextId) id = 1;
+            if (_items[id] is { References: > 0 }) continue;
+            Delete(id);
+            _freeCursor = id + 1;
+            return id;
+        }
+        return 0;
     }
 
     private void RecycleItem(Item item)

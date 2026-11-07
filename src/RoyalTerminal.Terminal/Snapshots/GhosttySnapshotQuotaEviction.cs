@@ -39,16 +39,13 @@ internal static class GhosttySnapshotQuotaEviction
             }
         }
 
-        bool growth = checkpoint == GhosttySnapshotQuotaCheckpoint.PageGrowth;
-        // Native grow tests old page_size + one pooled item, and prunes at most
-        // one old page. A sole old page is retained even when oversized.
-        bool recycle = growth && bytes && pages.Count > 2 &&
-            charge - Charge(rows[rows.Count - 1].SnapshotAllocation!) + layout.StandardPageBytes > maximumBytes;
+        // Carried pages can be larger than the page they replace. Upstream
+        // now enforces the byte limit after growth, removing every eligible
+        // historical page needed to fit, while retaining the active boundary.
         int removed = 0;
-        while ((ulong)(history - removed) > maximumRows || (!growth && bytes && charge > maximumBytes) || recycle)
+        while ((ulong)(history - removed) > maximumRows || (bytes && charge > maximumBytes))
         {
             int end = pages[rows[removed].SnapshotAllocation!].Last;
-            int componentPages = 0;
             // Host row rotation may interleave logical allocations. Keep that
             // connected prefix indivisible; never retire a surviving page's
             // partial identity, or reorder visible content for accounting.
@@ -56,21 +53,14 @@ internal static class GhosttySnapshotQuotaEviction
             {
                 (int First, int Last) range = pages[rows[index].SnapshotAllocation!];
                 end = Math.Max(end, range.Last);
-                if (range.First == index) componentPages++;
             }
             if (end >= history) break;
-            bool linesExceeded = (ulong)(history - removed) > maximumRows;
-            // A growth-time byte recycle is exactly one page, not an arbitrary
-            // multi-page purge. Interleaved host allocations must wait until a
-            // line/runtime-limit checkpoint can remove the whole component.
-            if (recycle && !linesExceeded && componentPages != 1) break;
             for (int index = removed; index <= end; index++)
             {
                 GhosttySnapshotPageAllocation page = rows[index].SnapshotAllocation!;
                 if (pages[page].First == index) charge -= Charge(page);
             }
             removed = end + 1;
-            recycle = false;
             if (removed >= history) break;
         }
         return removed;

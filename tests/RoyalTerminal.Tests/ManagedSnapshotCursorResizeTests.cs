@@ -97,7 +97,7 @@ public sealed class ManagedSnapshotCursorResizeTests
         processor.ResizeScreen(8, 3, 0, 0);
         row = screen.GetViewportRow(0);
         Assert.NotSame(previous, row.SnapshotAllocation);
-        Assert.Equal(4096U, row.SnapshotAllocation!.Capacity.StringBytes);
+        Assert.Equal(6720U, row.SnapshotAllocation!.Capacity.StringBytes);
         Assert.Equal((1, 1UL, 0UL, 2016UL), Usage(screen, row));
         AssertCursor(processor, 0, Bold, uri, 0, 0);
         Process(processor, "A" + Close + "\u001b[0m");
@@ -298,7 +298,7 @@ public sealed class ManagedSnapshotCursorResizeTests
                 Assert.Equal(1UL, Usage(managed.Screen, cursor, state.Key).Links);
                 Assert.Equal((ushort)192, cursor.SnapshotAllocation.Capacity.HyperlinkBytes);
                 bool afterNativeGrowth = state.Key == 1 && nativeRetainedOrphan;
-                Assert.Equal((ushort)(afterNativeGrowth ? 384 : 192), expectedCapacity.HyperlinkBytes);
+                Assert.Equal((ushort)(afterNativeGrowth ? 6000 : 192), expectedCapacity.HyperlinkBytes);
                 Assert.Equal(expectedCapacity.StringBytes, cursor.SnapshotAllocation.Capacity.StringBytes);
                 nativeRetainedOrphan |= nativePage.HyperlinkCount == 2;
             }

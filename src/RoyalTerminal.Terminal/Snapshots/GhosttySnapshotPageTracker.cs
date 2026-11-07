@@ -51,6 +51,7 @@ internal sealed partial class GhosttySnapshotPageTracker
     // Rebuild can drop a cursor pen without a processor-initiated SGR. Keep
     // this notification with the COW owner until its registers observe it.
     private byte _cursorStyleDrops;
+    private GhosttySnapshotPageGrowth _primaryGrowth = new(), _alternateGrowth = new();
 
     internal byte TakeCursorStyleDrops()
     {
@@ -71,6 +72,7 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     internal void DiscardCursor(int key)
     {
+        if (key == 0) _primaryGrowth = new(); else _alternateGrowth = new();
         AcknowledgeCursorStyle(key);
         EndCursorHyperlink(key);
         if (key == 0) _primaryLinkPage = null; else _alternateLinkPage = null;
@@ -88,7 +90,7 @@ internal sealed partial class GhosttySnapshotPageTracker
 
     // Streaming LF at the tail must not measure/rescan all history per row.
     // The slot watermark belongs to this COW owner, not the shared identity.
-    internal bool AssignTailRow(TerminalRowBuffer rows, int index, GhosttySnapshotAllocation layout)
+    internal bool AssignTailRow(TerminalRowBuffer rows, int index, GhosttySnapshotAllocation layout, int key)
     {
         if (index != rows.Count - 1 || index == 0 || rows[index].SnapshotAllocation is not null ||
             rows[index].PreservedColumns is < 1 or > ushort.MaxValue || rows[index - 1].SnapshotAllocation is not { } previous)
@@ -110,7 +112,9 @@ internal sealed partial class GhosttySnapshotPageTracker
         }
         else
         {
-            row.SnapshotAllocation = new(layout.InitialCapacity(row.PreservedColumns));
+            GhosttySnapshotPageGrowth growth = key == 0 ? _primaryGrowth : _alternateGrowth;
+            row.SnapshotAllocation = new(previous.MetadataOverflow ? layout.InitialCapacity(row.PreservedColumns)
+                : growth.Next(previous.Capacity, state.Storage, state.NextRowSlot, row.PreservedColumns, layout));
             row.SnapshotAllocationRow = 0;
         }
         row.SnapshotAllocationUnmodified = false;
@@ -133,6 +137,7 @@ internal sealed partial class GhosttySnapshotPageTracker
         GhosttySnapshotPageTracker copy = new()
         {
             _primaryCursor = _primaryCursor, _alternateCursor = _alternateCursor,
+            _primaryGrowth = _primaryGrowth.Copy(), _alternateGrowth = _alternateGrowth.Copy(),
             _primaryLinkPage = _primaryLinkPage, _alternateLinkPage = _alternateLinkPage,
             _primaryLinkToken = _primaryLinkToken, _alternateLinkToken = _alternateLinkToken,
             _cursorStyleDrops = _cursorStyleDrops,
