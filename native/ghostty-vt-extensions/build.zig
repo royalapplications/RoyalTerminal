@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) !void {
             b.pathJoin(&.{ "terminal", "c", "terminal.zig" }),
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "68b23d077e45ec680e158691409705bdfbf6d2fc45322cd30c7153265b8aad70", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "03ef3a999a2b195746195933ce3cd945b4a9f188e53198b073a4de581d6096ef", &.{
         .{
             .before = "            assert(self.screens.active_key == .alternate);\n            self.eraseDisplay(.complete, false);",
             .after = "            assert(self.screens.active_key == .alternate);\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
@@ -103,7 +103,7 @@ pub fn build(b: *std.Build) !void {
             .after = "            screen.cursor.page_row.semantic_prompt = .prompt_continuation;\n            screen.cursorMarkDirty();",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "33e5bd5515e96a059cbb2c438fb2634333c0a712f29134ffdd2509923f97aa1f", &.{
+    try addOverlay(b, sources, ghostty, "terminal/Screen.zig", "3fe5a4c22d76c28a6a478fe553b460d3edd734408a379f646791eb6e0f5f8796", &.{
         .{
             // PageList pruning can remap the cursor before cursorReload gets
             // a chance to migrate its page-local style and hyperlink IDs.
@@ -123,7 +123,7 @@ pub fn build(b: *std.Build) !void {
             .after = "    // On the new page, we need to migrate our hyperlink\n    if (self.cursor.hyperlink) |link| {\n        if (self.cursor.hyperlink_id != 0) {\n            const page = self.cursor.page_pin.node.page();\n            page.hyperlink_set.release(page.memory, self.cursor.hyperlink_id);\n            self.cursor.hyperlink_id = 0;\n        }\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "1c7faa54173b0f3156e4e2ba2df06fb2601fa14a32650aef9a5594508228097f", &.{
+    try addOverlay(b, sources, ghostty, "terminal/PageList.zig", "8e136b9dd5787e553006b44b2e37920f65ec21d2476ea24fa2ee9685c7258c04", &.{
         .{
             .before = "page_serial_epoch: u64,",
             .after = "page_serial_epoch: u64,\n\n// Bounded history coordinates: prefix eviction preserves layout identity.\nroyal_history_epoch: u64 = 1,\nroyal_history_origin: u64 = 0,\n",
@@ -199,7 +199,7 @@ pub fn build(b: *std.Build) !void {
         .before = "            // If the number of available chunks at the start of this bitmap\n",
         .after = "            if (i >= bitmaps.len) return null;\n\n            // If the number of available chunks at the start of this bitmap\n",
     }});
-    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "1c1f3b5cfdbdc26e65fbd42576cc85b18bede7919ec2004e264732cf11afdeb9", &.{
+    try addOverlay(b, sources, ghostty, "terminal/kitty/graphics_storage.zig", "911af8620239d4135d240573abef89392552849c84c9ba6ee332d19ec70b60e6", &.{
         .{
             .before = "        const removed_idx: u32 = if (number == 1) 0 else number - 2;",
             .after = "        const removed_idx: u32 = number - 1;",
@@ -221,14 +221,14 @@ pub fn build(b: *std.Build) !void {
     });
     // Route the already-validated upstream OSC 99 command to our shared host.
     // Deliberately do not add an Action enum member: that would change upstream's C ABI.
-    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "084e0d3f5d10bd84f9eef31a97ceb976d2abb54e8b4fe139f403a5af91539055", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/stream.zig", "e2b3b39458af262cf40ff8eec4e39f157606c42b4d2cdc9b815c156c47a623af", &.{ .{
         .before = "                .kitty_desktop_notification,\n",
         .after = "",
     }, .{
         .before = "                .conemu_sleep,\n",
         .after = "                .kitty_desktop_notification => |v| {\n                    if (comptime @hasDecl(T, \"royalDesktopNotification\")) self.handler.royalDesktopNotification(v);\n                },\n\n                .conemu_sleep,\n",
     } });
-    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "1b58936b58f1b553e800fcd1390ed2c62f9ec600998c73ddabc71529131786fd", &.{
+    try addOverlay(b, sources, ghostty, "terminal/stream_terminal.zig", "09f0dd833b45fdb27888581491319960f8499a09cd098f5127213800b68ccddd", &.{
         .{
             .before = "    pub const Effects = struct {\n",
             .after = "    pub const Effects = struct {\n        royal_notification: ?*const fn (*Handler, ?osc.Command.KittyDesktopNotification) void = null,\n",
@@ -244,7 +244,7 @@ pub fn build(b: *std.Build) !void {
             .after = "                self.terminal.fullReset();\n                self.royalDesktopNotification(null);\n",
         },
     });
-    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "af9cffc06f9c0d6323a4071c2a3ba14fe41b3f061d7bc4725e046441ca0688f0", &.{ .{
+    try addOverlay(b, sources, ghostty, "terminal/c/terminal.zig", "978df257d7574034cb3bbc6fec66af683ed5fc58a76528a85ffe5c902c2bae8b", &.{ .{
         .before = "const Effects = struct {\n",
         .after = "const Effects = struct {\n    royal_notification: ?*const fn (Terminal, ?*anyopaque, ?[*]const u8, usize, ?[*]const u8, usize, u8) callconv(.c) void = null,\n    royal_notification_userdata: ?*anyopaque = null,\n",
     }, .{
@@ -308,8 +308,8 @@ fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void
         }),
     });
     var found: usize = 0;
-    const shared_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt.pc" });
-    const static_path = b.pathJoin(&.{ "share", "pkgconfig", "libghostty-vt-static.pc" });
+    const shared_path = b.pathJoin(&.{ "pkgconfig", "libghostty-vt.pc" });
+    const static_path = b.pathJoin(&.{ "pkgconfig", "libghostty-vt-static.pc" });
     for (upstream_install.dependencies.items) |step| {
         const original = step.cast(std.Build.Step.InstallFile) orelse continue;
         const is_static = std.mem.eql(u8, original.dest_rel_path, static_path);
@@ -317,7 +317,7 @@ fn installLinuxPkgConfig(b: *std.Build, upstream_install: *std.Build.Step) !void
         const run = b.addRunArtifact(generator);
         run.addFileArg(original.source);
         run.addArg(if (is_static) "static" else "shared");
-        const install = b.addInstallFileWithDir(run.captureStdOut(.{}), .prefix, original.dest_rel_path);
+        const install = b.addInstallFileWithDir(run.captureStdOut(.{}), .lib, original.dest_rel_path);
         // Retain every upstream field and finish its installation first, then
         // replace only the two package descriptions with corrected link flags.
         install.step.dependOn(upstream_install);
