@@ -2233,7 +2233,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         bool imagesChanged = false;
         TerminalRenderOverscan capturedOverscan = _screen.GetRenderViewport(EffectiveRenderOverscan).CapturedOverscan;
 
-        _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
+        _kittyPlacementIterator.SetLayer(GhosttyVtNative.GhosttyImageLayer.All);
         graphics.Populate(_kittyPlacementIterator);
 
         while (_kittyPlacementIterator.MoveNext())
@@ -2766,8 +2766,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
     {
         TerminalClipboardWriteReply managedReply = new(TerminalClipboardWriteResult.Unsupported);
         if ((ClipboardWriteRequestCallback is null && ClipboardWriteCallback is null) ||
-            write is null ||
-            write->Size < (nuint)sizeof(GhosttyVtNative.GhosttyClipboardWrite))
+            write is null)
         {
             ReplyToClipboardWrite(write, managedReply);
             return;
@@ -2832,8 +2831,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             TerminalClipboardReadResult.Unsupported,
             []);
         if (ClipboardReadCallback is not null &&
-            read is not null &&
-            read->Size >= (nuint)sizeof(GhosttyVtNative.GhosttyClipboardRead))
+            read is not null)
         {
             try
             {
@@ -2994,9 +2992,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyTerminalDesktopNotification* notification)
     {
-        if (notification is null ||
-            notification->Size <
-            (nuint)sizeof(GhosttyVtNative.GhosttyTerminalDesktopNotification))
+        if (notification is null)
         {
             return;
         }
@@ -3019,8 +3015,7 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
         nint userdata,
         GhosttyVtNative.GhosttyTerminalProgressReport* report)
     {
-        if (report is null ||
-            report->Size < (nuint)sizeof(GhosttyVtNative.GhosttyTerminalProgressReport))
+        if (report is null)
         {
             return;
         }
@@ -3199,13 +3194,13 @@ public sealed partial class GhosttyVtProcessor : IVtProcessor,
             checked((nuint)s_answerbackBytes.Length));
     }
 
-    private static TerminalCursorStyle ConvertCursorStyle(GhosttyVtNative.GhosttyRenderStateCursorVisualStyle style)
+    private static TerminalCursorStyle ConvertCursorStyle(GhosttyVtNative.GhosttyCursorStyle style)
     {
         return style switch
         {
-            GhosttyVtNative.GhosttyRenderStateCursorVisualStyle.Bar => TerminalCursorStyle.Bar,
-            GhosttyVtNative.GhosttyRenderStateCursorVisualStyle.Underline => TerminalCursorStyle.Underline,
-            GhosttyVtNative.GhosttyRenderStateCursorVisualStyle.BlockHollow => TerminalCursorStyle.BlockHollow,
+            GhosttyVtNative.GhosttyCursorStyle.Bar => TerminalCursorStyle.Bar,
+            GhosttyVtNative.GhosttyCursorStyle.Underline => TerminalCursorStyle.Underline,
+            GhosttyVtNative.GhosttyCursorStyle.BlockHollow => TerminalCursorStyle.BlockHollow,
             _ => TerminalCursorStyle.Block,
         };
     }

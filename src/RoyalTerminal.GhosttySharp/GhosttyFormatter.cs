@@ -179,14 +179,44 @@ public sealed class GhosttyFormatter : IDisposable
         _terminalLease.Dispose();
     }
 
-    private void Initialize(
+    private unsafe void Initialize(
         GhosttyTerminal terminal,
         GhosttyVtNative.GhosttyFormatterTerminalOptions options)
     {
         ThrowIfFailed(
-            GhosttyVtNative.FormatterTerminalNew(nint.Zero, out _handle, terminal.Handle, options),
+            GhosttyVtNative.FormatterTerminalNew(nint.Zero, out _handle, terminal.Handle),
             "ghostty_formatter_terminal_new");
+        try
+        {
+            SetOption(GhosttyVtNative.GhosttyFormatterOption.Emit, &options.Emit);
+            SetOption(GhosttyVtNative.GhosttyFormatterOption.Unwrap, &options.Unwrap);
+            SetOption(GhosttyVtNative.GhosttyFormatterOption.Trim, &options.Trim);
+            SetOption(GhosttyVtNative.GhosttyFormatterOption.Selection, options.Selection);
+            uint extras = 0;
+            if (options.Extra.Palette) extras |= 1u << 0;
+            if (options.Extra.Modes) extras |= 1u << 1;
+            if (options.Extra.ScrollingRegion) extras |= 1u << 2;
+            if (options.Extra.Tabstops) extras |= 1u << 3;
+            if (options.Extra.Pwd) extras |= 1u << 4;
+            if (options.Extra.Keyboard) extras |= 1u << 5;
+            if (options.Extra.Screen.Cursor) extras |= 1u << 6;
+            if (options.Extra.Screen.Style) extras |= 1u << 7;
+            if (options.Extra.Screen.Hyperlink) extras |= 1u << 8;
+            if (options.Extra.Screen.Protection) extras |= 1u << 9;
+            if (options.Extra.Screen.KittyKeyboard) extras |= 1u << 10;
+            if (options.Extra.Screen.Charsets) extras |= 1u << 11;
+            SetOption(GhosttyVtNative.GhosttyFormatterOption.Extras, &extras);
+        }
+        catch
+        {
+            GhosttyVtNative.FormatterFree(_handle);
+            _handle = nint.Zero;
+            throw;
+        }
     }
+
+    private unsafe void SetOption(GhosttyVtNative.GhosttyFormatterOption option, void* value)
+        => ThrowIfFailed(GhosttyVtNative.FormatterSet(_handle, option, value), "ghostty_formatter_set");
 
     private static unsafe GhosttyVtNative.GhosttyFormatterTerminalOptions CreateNativeOptions(
         in GhosttyFormatterOptions options,
