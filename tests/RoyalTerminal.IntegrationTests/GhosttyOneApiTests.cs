@@ -13,6 +13,18 @@ namespace RoyalTerminal.IntegrationTests;
 public sealed class GhosttyOneApiTests
 {
     [GhosttyNativeFact]
+    public void NullableScrollbackLimitsRemoveLimitsInsteadOfRestoringDefaults()
+    {
+        using GhosttyTerminal terminal = new(80, 2);
+        terminal.SetScrollbackMaxBytes(null);
+        terminal.SetScrollbackMaxLines(null);
+        Assert.False(terminal.TryGetScrollbackMaxBytes(out _));
+        Assert.False(terminal.TryGetScrollbackMaxLines(out _));
+        terminal.ClearOption(GhosttyTerminalOption.ScrollbackMaxBytes);
+        Assert.True(terminal.TryGetScrollbackMaxBytes(out _));
+    }
+
+    [GhosttyNativeFact]
     public unsafe void VersionAndSizedInitializationFollowTheReleasedContract()
     {
         Assert.StartsWith("1.", Marshal.PtrToStringUTF8(Version()));
