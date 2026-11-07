@@ -1,0 +1,2 @@
+scenario,engine,iterations,median_ms,min_ms,max_ms,allocated_bytes,checksum
+wide,native-core,1000000,1064.1118,1055.3353,1081.0646,0,24

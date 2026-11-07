@@ -29,6 +29,18 @@ if (args.Contains("--history-compression", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--terminal-wide-overwrite", StringComparer.Ordinal))
+{
+    TerminalUpdateBenchmark.RunWideOverwrite();
+    return;
+}
+
+if (args.Contains("--terminal-update-long", StringComparer.Ordinal))
+{
+    TerminalUpdateBenchmark.Run(250_000);
+    return;
+}
+
 if (args.Contains("--terminal-update", StringComparer.Ordinal))
 {
     TerminalUpdateBenchmark.Run();
