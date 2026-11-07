@@ -19,10 +19,10 @@ class ExportSignatureTests(unittest.TestCase):
             source = root / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Test.cs"
             header.parent.mkdir(parents=True)
             source.parent.mkdir(parents=True)
-            header.write_text("GHOSTTY_API bool ghostty_test(uint16_t count, const GhosttyString* text);")
-            source.write_text('[LibraryImport(LibName, EntryPoint = "ghostty_test")]\n'
+            header.write_text("// UTF-8 comment: \u201cVT\u201d\nGHOSTTY_API bool ghostty_test(uint16_t count, const GhosttyString* text);", encoding="utf-8")
+            source.write_text('// UTF-8 comment: \u201cVT\u201d\n[LibraryImport(LibName, EntryPoint = "ghostty_test")]\n'
                               + ('[UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]\n' if convention else '')
-                              + signature)
+                              + signature, encoding="utf-8")
             with patch.object(audit, "ROOT", root), patch.object(audit.ctypes, "CDLL"):
                 return audit.export_inventory("unused", {"types": {}})[1]
 

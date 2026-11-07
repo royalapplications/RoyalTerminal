@@ -55,7 +55,7 @@ def bodies(source: str, pattern: str):
 def declarations():
     enums, structs = {}, {}
     for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")):
-        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(), flags=re.S)
+        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)
         for match, body in bodies(source, r"public enum (\w+)(?:\s*:\s*(\w+))?\s*"):
             members = {}
             for item in body.split(","):
@@ -71,7 +71,7 @@ def declarations():
             ):
                 fields[normalized(field["name"])] = dict(field.groupdict())
             structs[match[1]] = fields
-    desktop = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/Enums.cs").read_text()
+    desktop = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/Enums.cs").read_text(encoding="utf-8")
     for match, body in bodies(desktop, r"public enum (GhosttyColorScheme)\s*"):
         body = re.sub(r"//[^\n]*", "", body)
         enums[match[1]] = {normalized(item.split("=")[0].strip()): item.split("=")[0].strip() for item in body.split(",") if item.strip()}
@@ -86,11 +86,11 @@ def manifest(library: str):
 
 def export_inventory(library: str, abi):
     """Check every native VT entry point; wasm.h explicitly targets Wasm only."""
-    headers = "\n".join(path.read_text() for path in sorted(
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted(
         (ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")) if path.name != "wasm.h")
     headers = re.sub(r"/\*.*?\*/|//[^\n]*", "", headers, flags=re.S)
     exports = sorted(set(re.findall(r"GHOSTTY_API\s+[^;]*?\b(ghostty_\w+)\s*\(", headers, re.S)))
-    source = "\n".join(path.read_text() for path in sorted(
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(
         (ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
     imports = set(re.findall(r'EntryPoint\s*=\s*"(ghostty_\w+)"', source))
     lib = ctypes.CDLL(str(Path(library).resolve()))
@@ -159,9 +159,9 @@ def export_inventory(library: str, abi):
 
 
 def callback_inventory(abi):
-    headers = "\n".join(path.read_text() for path in sorted((ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")))
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")))
     headers = re.sub(r"/\*.*?\*/|//[^\n]*", "", headers, flags=re.S)
-    source = "\n".join(path.read_text() for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
     source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
     callbacks = {}
     for match in re.finditer(r"((?:\s*\[[^]]+\])*)\s*public\s+(?:unsafe\s+)?delegate\s+(\w+)\s+(Ghostty\w+)\s*\((.*?)\);", source, re.S):
@@ -226,7 +226,7 @@ def callback_inventory(abi):
 
 
 def flags_checks(enums):
-    headers = "\n".join(path.read_text() for path in sorted((ROOT / "external/ghostty/include/ghostty/vt/key").glob("*.h")))
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "external/ghostty/include/ghostty/vt/key").glob("*.h")))
     macros = dict(re.findall(r"^#define (GHOSTTY_(?:MODS|KITTY_KEY)_\w+) (.+)$", headers, re.M))
     checks, findings = [], []
     for name, expression in macros.items():
@@ -245,8 +245,8 @@ def flags_checks(enums):
 
 
 def mode_checks():
-    header = (ROOT / "external/ghostty/include/ghostty/vt/modes.h").read_text()
-    source = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Core.cs").read_text()
+    header = (ROOT / "external/ghostty/include/ghostty/vt/modes.h").read_text(encoding="utf-8")
+    source = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Core.cs").read_text(encoding="utf-8")
     members = {normalized(name[4:]): name for name in re.findall(r"public static GhosttyMode (Mode\w+) =>", source)}
     renamed = {"DISABLE_KEYBOARD": "KeyboardAction", "SEND_RECEIVE_MODE": "SendReceive", "CURSOR_KEYS": "Decckm", "MOUSE_EVENT_X10": "X10Mouse", "ENABLE_LEFT_AND_RIGHT_MARGIN": "LeftRightMargin", "MOUSE_EVENT_NORMAL": "NormalMouse", "MOUSE_EVENT_BUTTON": "ButtonMouse", "MOUSE_EVENT_ANY": "AnyMouse", "MOUSE_FORMAT_UTF8": "Utf8Mouse", "MOUSE_FORMAT_SGR": "SgrMouse", "MOUSE_ALTERNATE_SCROLL": "AltScroll", "MOUSE_FORMAT_URXVT": "UrxvtMouse", "MOUSE_FORMAT_SGR_PIXELS": "SgrPixelsMouse", "IGNORE_KEYPAD_WITH_NUMLOCK": "NumlockKeypad", "ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER": "AltScreenSave", "REPORT_COLOR_SCHEME": "ColorSchemeReport", "REPORT_VISIBILITY": "VisibilityReport", "IN_BAND_SIZE_REPORTS": "InBandResize", "KITTY_PASTE_EVENTS": "PasteEvents", "KAM": "KeyboardAction", "SRM": "SendReceive", "REVERSE_WRAP_EXT": "ReverseWrapExtended", "SYNC_OUTPUT": "SynchronizedOutput"}
     checks, findings = [], []
@@ -350,11 +350,11 @@ def main():
     output = ROOT / "tests/RoyalTerminal.IntegrationTests/GhosttyAbiManifestTests.Generated.cs"
     generated = HEADER + "\n".join(enum_checks + struct_checks) + method("HeaderModifierAndKittyFlagConstants", flags) + method("HeaderModeConstants", modes) + method("PrimitiveAliasesAndOpaqueHandles", primitive_checks) + FOOTER.replace("TYPE_COUNT", str(len(abi["types"])))
     if args.check:
-        if not output.exists() or output.read_text() != generated:
+        if not output.exists() or output.read_text(encoding="utf-8") != generated:
             print(f"Generated tests are stale: {output}")
             return 1
     else:
-        output.write_text(generated)
+        output.write_text(generated, encoding="utf-8")
     inventory = "# Ghostty ABI binding inventory\n\nGenerated by `scripts/audit-ghostty-abi.py` from the pinned native\n`ghostty_type_json` manifest and all public VT headers. No .NET reflection.\nRegenerate with a freshly built native package; `--check` rejects stale output.\n\n"
     inventory += f"Types: **{len(abi['types'])}** ({', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}).\nCallback signatures: **{len(callbacks)}** (including four allocator vtable entries).\n\n"
     inventory += f"Header-only constants: **{len(flags)}** modifier/Kitty-key flags and **{len(modes) // 3}** terminal modes (packed value, mode number, ANSI flag).\n\n"
@@ -367,11 +367,11 @@ def main():
     inventory += "\n## Native VT entry points\n\n" + "\n".join(f"- `{export}`" for export in exports) + "\n"
     inventory_path = ROOT / "docs/specs/ghostty-abi-inventory-2026.md"
     if args.check:
-        if not inventory_path.exists() or inventory_path.read_text() != inventory:
+        if not inventory_path.exists() or inventory_path.read_text(encoding="utf-8") != inventory:
             print(f"Generated inventory is stale: {inventory_path}")
             return 1
     else:
-        inventory_path.write_text(inventory)
+        inventory_path.write_text(inventory, encoding="utf-8")
     print(f"Validated source coverage and {'checked' if args.check else 'generated'} all {len(abi['types'])} ABI type checks and {len(callbacks)} callback signatures.")
     return 0
 
