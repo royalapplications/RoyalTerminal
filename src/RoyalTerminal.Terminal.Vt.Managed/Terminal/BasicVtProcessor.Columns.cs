@@ -21,6 +21,9 @@ public sealed partial class BasicVtProcessor
             {
                 _cursorRow = y;
                 _cursorCol = column;
+                // Ghostty cursorAbsolute migrates page-local pen/link state
+                // before each row edit, even though the visible cursor stays.
+                RecordSnapshotCursorStyle();
                 if (insert) InsertCharacters(count);
                 else DeleteCharacters(count);
             }
@@ -29,6 +32,7 @@ public sealed partial class BasicVtProcessor
         {
             _cursorRow = row;
             _cursorCol = column;
+            RecordSnapshotCursorStyle();
         }
     }
 
