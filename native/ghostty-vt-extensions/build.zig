@@ -70,6 +70,13 @@ pub fn build(b: *std.Build) !void {
     });
     try addOverlay(b, sources, ghostty, "terminal/Terminal.zig", "03ef3a999a2b195746195933ce3cd945b4a9f188e53198b073a4de581d6096ef", &.{
         .{
+            // Wide overwrites cannot enter the simple-cell fill. Reject them
+            // before scanning the remaining codepoints on every scalar retry.
+            // Pending wrap and linked text retain upstream's full path.
+            .before = "    const SimpleMask = PrintSliceSimpleMask;\n\n    // The bit offset",
+            .after = "    if (comptime width == .wide and !linked) {\n        if (!screen.cursor.pending_wrap and screen.cursor.page_cell.wide != .narrow) return 0;\n    }\n\n    const SimpleMask = PrintSliceSimpleMask;\n\n    // The bit offset",
+        },
+        .{
             .before = "            assert(self.screens.active_key == .alternate);\n            self.eraseDisplay(.complete, false);",
             .after = "            assert(self.screens.active_key == .alternate);\n            self.screens.active.pages.royalHistoryInvalidate();\n            self.eraseDisplay(.complete, false);",
         },
