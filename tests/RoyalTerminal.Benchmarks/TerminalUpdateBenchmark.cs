@@ -10,7 +10,17 @@ using RoyalTerminal.Terminal;
 // compiled against both pins. Direct native and adapter costs are kept separate.
 internal static class TerminalUpdateBenchmark
 {
-    internal static void Run()
+    internal static void RunWideOverwrite()
+    {
+        byte[] input = Encoding.UTF8.GetBytes(new string('界', 39) + "\r");
+        using GhosttyTerminal terminal = new(80, 24, 0);
+        terminal.SetContinuationMaxBytes(0);
+        PerformanceMeasurement.Header();
+        PerformanceMeasurement.Run("wide", "native-core", 1_000_000,
+            () => terminal.Write(input), () => (long)terminal.GetTotalRows());
+    }
+
+    internal static void Run(int iterations = 25_000)
     {
         if (!GhosttyVtProcessor.IsAvailable()) throw new InvalidOperationException("Native comparison requires libghostty-vt.");
         PerformanceMeasurement.Header();
@@ -31,12 +41,12 @@ internal static class TerminalUpdateBenchmark
                 TerminalScreen screen = new(80, 24, 0);
                 using IVtProcessor processor = native ? new GhosttyVtProcessor(screen)
                     : new BasicVtProcessor(screen, new() { ContinuationMaxBytes = 0 });
-                PerformanceMeasurement.Run(name, native ? "native-adapter" : "managed", 25_000,
+                PerformanceMeasurement.Run(name, native ? "native-adapter" : "managed", iterations,
                     () => processor.Process(input), () => processor.CursorCol + processor.CursorRow * 80L);
             }
             using GhosttyTerminal terminal = new(80, 24, 0);
             terminal.SetContinuationMaxBytes(0);
-            PerformanceMeasurement.Run(name, "native-core", 25_000,
+            PerformanceMeasurement.Run(name, "native-core", iterations,
                 () => terminal.Write(input), () => (long)terminal.GetTotalRows());
         }
     }

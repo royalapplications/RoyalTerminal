@@ -82,6 +82,7 @@ No PowerShell startup, invocation, environment or ConPTY behavior is changed.
 | Placeholders target virtual placements only (`c412a3199`) | Included. | Shared projection checks explicit targets as well as fallback targets; ordinary placements remain independently visible. Both-engine renderer tests updated. |
 | Triple-click drag through blank rows (`53e55147b`) | Included in gesture API. | Shared line selection has an untrimmed fallback; headless tests drag from text onto a full blank row in both engines. |
 | Clear cursor-pin garbage after resize (`76329e5ad`) | Included. | Managed row/cursor remapping does not use native pin garbage; repeated-resize, saved-cursor and continuation comparisons exercise the equivalent state. |
+| Wide-cell overwrite scan (RoyalTerminal overlay) | Reject a doomed unlinked wide-cell fill before repeatedly scanning the remaining codepoints; pending wrap and linked text keep upstream behavior. Submodule remains unchanged. | Paired profiling found a ~4% upstream microbenchmark regression. The narrow overlay improves this case ~55% versus baseline; complete native snapshots match byte-fed scalar writes in `GhosttyWideOverwriteTests`. |
 | Mixed-width/ASCII/hyperlink printing and right-margin fast paths (`e2a3ba004`, `77f85cd67`, `e0acea275`, `91973f2b2`, `091beb992`) | Adopt upstream optimizations directly. | Preserve managed parser and metadata ownership algorithms; Unicode/wide/margin/hyperlink differential tests check behavior. Measure native core, adapter and managed paths independently. |
 | Blank-row erase/scroll and style-run scans (`59093e3aa`, `a0c092868`, `18e645ea2`, `7ea52a29c`, `6fba0873e`, `171a4e044`) | Adopt upstream optimizations directly. | Shared output/metadata/erase/scroll tests enforce semantic equivalence. Native SIMD/layout algorithms are not transplanted into CLR storage without a measured benefit. |
 | tmux `%output` parser and window events (`ae0dc1b71`, `eec45a52d`) | Present in upstream application sources. | Not exposed through libghostty-vt; RoyalTerminal does not host Ghostty's separate tmux control-mode frontend. Normal tmux VT output remains handled by both engines. |
@@ -110,16 +111,16 @@ control-mode orchestration are not libghostty-vt features to port into Avalonia.
 | Check | Result |
 | --- | --- |
 | Release solution | Pass, zero warnings/errors. |
-| Native integration | 304 passed, zero skips, fresh macOS ARM64 library. |
+| Native integration | 305 passed, zero skips, fresh macOS ARM64 library; wide-overwrite bulk/scalar snapshots compared at 360 checkpoints. |
 | Bounded history project | 45 passed, zero skips. |
-| Focused storage/selection | 258 passed before final pressure refinements; subsequent targeted pressure/quota and formatter cases rerun. |
+| Focused parity reruns | 249 printing, character/column edits, scroll, hyperlink lifecycle, reflow-refusal and formatter cases pass on the final optimized library. |
 | Native history/metadata/target tests | Pass with Zig 0.17.0. |
 | Native local builds | macOS ARM64 VT + renderer; Linux x64 VT cross-build. |
 | Linux consumer packaging | Shared and static C consumers link; ELF exports use `GHOSTTY_VT_1.0`, including RoyalTerminal extensions. |
 | ABI | 216 types, 31 callbacks, 209 exports/signatures checked; audit mutation checks pass. |
-| Complete local unit/headless suite | Final repository-local run pending. An earlier outside-repository output run was discarded because repository-discovery and canonical-directory tests require their normal location. |
-| Performance | Baseline binaries preserved before migration; final paired measurements pending. |
-| CI | Earlier native build matrix passed all six OS/architecture targets. Final PR revision still running. |
+| Complete local unit/headless suite | 8,354 passed, 23 existing platform/harness skips, zero remaining failures across 8,377 unique discovered cases. Includes the complete 113-batch repository-local run plus focused reruns of 59 corrected legacy-fixture failures. No skips were added. |
+| Performance | No material regression in measured CPU workloads. Identical-harness measurements, the resolved upstream wide-overwrite regression, bounded metadata allocation costs and raw data are in the [performance report](ghostty-performance-2026-11-07.md). |
+| CI | All six native OS/architecture builds passed. Windows audit encoding failure fixed with explicit UTF-8 and non-ASCII mutation fixtures. Final PR revision must pass before review. |
 
 Reproduction uses `scripts/build-native.sh`, `scripts/audit-ghostty-abi.py`,
 `scripts/test-audit-ghostty-abi.py`, `dotnet build -c Release`,
