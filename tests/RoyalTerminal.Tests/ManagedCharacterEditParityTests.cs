@@ -16,7 +16,7 @@ namespace RoyalTerminal.Tests;
 // uses a bounded rectangle; xterm.js BufferLine also clears split wide cells,
 // but repairs some edges after copying and has no Ghostty PAGE allocator.
 // Follow Ghostty's order, margins and wrapped-history boundary semantics.
-public sealed class ManagedCharacterEditParityTests
+public sealed partial class ManagedCharacterEditParityTests
 {
     private const string Close = "\u001b]8;;\u001b\\";
     private const string Seed = "\u001b[1;41m\u001b]8;id=a;https://a\u001b\\中\u0301" + Close +

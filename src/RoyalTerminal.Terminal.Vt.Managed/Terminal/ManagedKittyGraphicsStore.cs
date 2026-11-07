@@ -62,7 +62,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
     {
         Image? newest = null;
         foreach (Image image in _images.Values)
-            if (image.Number == number && (newest is null || image.Generation > newest.Generation)) newest = image;
+            if (image.Number == number && (newest is null || image.Transmission > newest.Transmission)) newest = image;
         return newest;
     }
 
@@ -366,7 +366,7 @@ internal sealed partial class ManagedKittyGraphicsStore(int byteLimit)
                 if (image.Id == exceptId) continue;
                 if (victim is null || image.EvictionPriority < victim.EvictionPriority ||
                     (image.EvictionPriority == victim.EvictionPriority &&
-                     (image.Generation < victim.Generation || image.Generation == victim.Generation && image.Id < victim.Id))) victim = image;
+                     (image.Transmission < victim.Transmission || image.Transmission == victim.Transmission && image.Id < victim.Id))) victim = image;
             }
             if (victim is null) return false;
             RemoveImage(screen, victim.Id);

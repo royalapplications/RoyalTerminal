@@ -19,7 +19,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     private readonly bool _ownsHandle;
 
     /// <summary>
-    /// Creates a new Ghostty VT terminal.
+    /// Creates a new Ghostty VT terminal with RoyalTerminal's glyph rendering enabled.
     /// </summary>
     /// <param name="columns">Initial terminal grid width in cells.</param>
     /// <param name="rows">Initial terminal grid height in cells.</param>
@@ -41,6 +41,9 @@ public sealed partial class GhosttyTerminal : IDisposable
         try
         {
             SetScrollbackMaxBytes(maxScrollback);
+            // libghostty 1.0 requires embedders to opt in. RoyalTerminal has a
+            // glyph renderer and historically enables this in both engines.
+            SetGlyphProtocol(true);
         }
         catch
         {
