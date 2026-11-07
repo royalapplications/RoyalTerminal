@@ -120,8 +120,8 @@ internal sealed class GhosttySnapshotAllocation
     }
 
     // PageList.increaseCapacity: zero resumes at the Capacity default, otherwise
-    // double, saturating once at the field maximum. Style/grapheme growth can
-    // project the current density over all reserved rows with 25% headroom,
+    // double, saturating once at the field maximum. Every metadata dimension
+    // projects the current density over all reserved rows with 25% headroom,
     // bounded to 32 times the old request and the native four-GiB page ceiling.
     internal bool TryIncreaseCapacity(GhosttySnapshotPageCapacity original, GhosttySnapshotCapacityDimension dimension,
         ulong used, int liveRows, out GhosttySnapshotPageCapacity increased)
