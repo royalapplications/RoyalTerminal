@@ -261,7 +261,7 @@ public sealed class GhosttySnapshotHyperlinkStorageTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ReflowSetFailureFreesScratchBeforeGrowthOrRehash(bool rehash)
+    public void ReflowReclaimsDeadIdsOrFreesScratchBeforeGrowth(bool rehash)
     {
         ushort capacity = rehash ? (ushort)384 : (ushort)192;
         GhosttySnapshotHyperlinkStorage source = new(192, 2048), destination = new(capacity, 2048);
@@ -276,10 +276,11 @@ public sealed class GhosttySnapshotHyperlinkStorageTests
         Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.StartCursor(Link(64, 1)));
         Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, source.WriteCursorToCell(0));
         GhosttySnapshotHyperlinkStorage retained = destination.Copy();
-        Assert.Equal(rehash ? GhosttySnapshotHyperlinkAddResult.SetNeedsRehash : GhosttySnapshotHyperlinkAddResult.SetFull,
+        Assert.Equal(rehash ? GhosttySnapshotHyperlinkAddResult.Success : GhosttySnapshotHyperlinkAddResult.SetFull,
             destination.CopyReflowCellFrom(9, source, 0));
-        Assert.Equal((ulong)count * 32, destination.StringBytes);
-        Assert.Equal(0, destination.CellId(9));
+        Assert.Equal((ulong)count * 32 + (rehash ? 64UL : 0UL), destination.StringBytes);
+        Assert.Equal(rehash, destination.CellId(9) != 0);
+        if (rehash) destination.Clear(9);
         Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, destination.Rebuild(384, 2048, out GhosttySnapshotHyperlinkStorage? rebuilt));
         Assert.Equal(GhosttySnapshotHyperlinkAddResult.Success, rebuilt!.CopyReflowCellFrom(9, source, 0));
         Assert.Equal((ulong)(rehash ? count - 1 : count) * 32 + 96, rebuilt.StringBytes);

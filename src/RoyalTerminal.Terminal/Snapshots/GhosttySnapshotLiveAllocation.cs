@@ -20,7 +20,7 @@ internal sealed class GhosttySnapshotPageAllocation(GhosttySnapshotPageCapacity 
     internal bool HasGraphemeSeed => restoredGraphemes is not null;
     internal GhosttySnapshotGraphemeStorage CopyRestoredGraphemes() => restoredGraphemes?.Copy() ?? new(Capacity.GraphemeBytes);
     internal bool HasHyperlinkSeed => restoredHyperlinks is not null;
-    internal GhosttySnapshotHyperlinkStorage CopyRestoredHyperlinks() => restoredHyperlinks?.Copy() ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes);
+    internal GhosttySnapshotHyperlinkStorage CopyRestoredHyperlinks() => restoredHyperlinks?.Copy() ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes, Capacity.HyperlinkCells);
 }
 
 /// <summary>Measures only currently retained storage, including the unpublished COW screen.</summary>

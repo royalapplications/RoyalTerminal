@@ -10,8 +10,8 @@ using Xunit;
 
 namespace RoyalTerminal.Tests;
 
-// Ghostty Screen.setAttribute/manualStyleUpdate allocates each intermediate pen,
-// not just the final SGR state or the style of the next printed cell. WT ROW and
+// Ghostty applies the final SGR pen once per sequence, with in-place reuse of
+// dead style IDs. Separate SGR sequences remain separate mutations. WT ROW and
 // xterm.js BufferLine don't define this PAGE-capacity/history-admission contract.
 public sealed class ManagedSnapshotStyleMutationTests
 {
@@ -22,14 +22,14 @@ public sealed class ManagedSnapshotStyleMutationTests
     [InlineData("\u001b[1;0m\u001b[2K")]
     [InlineData("\u001b[38:2::12:34:56;0m")]
     [InlineData("\u001b[4:3;0m")]
-    public void IntermediatePenGrowthSurvivesResetAndEraseWithoutAnAdmissionCheckpoint(string input)
+    public void IntermediateSgrPensDoNotAllocateWhenTheFinalPenIsUnchanged(string input)
     {
         using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot());
         Assert.Equal(0, Capacity(terminal.Screen).Styles);
         terminal.Processor.Process(Encoding.UTF8.GetBytes(input));
-        Assert.Equal(16, Capacity(terminal.Screen).Styles);
+        Assert.Equal(0, Capacity(terminal.Screen).Styles);
         _ = GhosttySnapshotLiveAllocation.Measure(terminal.Screen, terminal.Screen.GetSnapshotRows(0)!, new(4096));
-        Assert.Equal(16, Capacity(terminal.Screen).Styles);
+        Assert.Equal(0, Capacity(terminal.Screen).Styles);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class ManagedSnapshotStyleMutationTests
         terminal.Processor.Process("\u001b[1;"u8);
         Assert.Same(original, Page(terminal.Screen));
         terminal.Processor.Process("0m"u8);
-        Assert.Equal(16, Capacity(terminal.Screen).Styles);
+        Assert.Equal(0, Capacity(terminal.Screen).Styles);
         GhosttySnapshotPageAllocation grown = Page(terminal.Screen);
         terminal.Processor.Process("\u001b[0;39;49;999m"u8);
         Assert.Same(grown, Page(terminal.Screen));
@@ -50,7 +50,7 @@ public sealed class ManagedSnapshotStyleMutationTests
     public void FullCellStyleSetGrowsAtSgrBeforePrintingAndKeepsItsCapacityAfterErase()
     {
         using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot(4, [1, 2, 0, 0]));
-        terminal.Processor.Process("\u001b[2;0m\u001b[2K"u8);
+        terminal.Processor.Process("\u001b[2m\u001b[0m\u001b[2K"u8);
         Assert.Equal(8, Capacity(terminal.Screen).Styles);
         foreach (ref readonly TerminalCell cell in terminal.Screen.GetViewportRow(0).ReadOnlyCells)
             Assert.Equal(CellAttributes.None, cell.Attributes);
@@ -59,13 +59,13 @@ public sealed class ManagedSnapshotStyleMutationTests
     }
 
     [Fact]
-    public void DeadInteriorEntryRehashesWithoutGrowingAndLiveWritesOwnTheirReferences()
+    public void DeadInteriorEntryIsReusedWithoutReplacingThePage()
     {
         using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot(4, [2, 0, 0, 0]));
         GhosttySnapshotPageAllocation initial = Page(terminal.Screen);
         terminal.Processor.Process("\u001b[2m"u8);
         Assert.Equal(4, Capacity(terminal.Screen).Styles);
-        Assert.NotSame(initial, Page(terminal.Screen));
+        Assert.Same(initial, Page(terminal.Screen));
         terminal.Processor.Process("\u001b[1;2HX\u001b[0;1m"u8);
         Assert.Equal(8, Capacity(terminal.Screen).Styles);
     }
@@ -76,12 +76,12 @@ public sealed class ManagedSnapshotStyleMutationTests
         using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot());
         TerminalScreen retained = terminal.Screen.CreateStateCopy();
         object cells = retained.GetViewportRow(0).SearchStorageIdentity;
-        terminal.Processor.Process("\u001b[1;0m"u8);
+        terminal.Processor.Process("\u001b[1m\u001b[0m"u8);
         Assert.Equal(0, Capacity(retained).Styles);
         Assert.Equal(16, Capacity(terminal.Screen).Styles);
         Assert.Same(cells, terminal.Screen.GetViewportRow(0).SearchStorageIdentity);
         using BasicVtProcessor sibling = new(retained);
-        sibling.Process("\u001b[3;0m"u8);
+        sibling.Process("\u001b[3m\u001b[0m"u8);
         Assert.Equal(16, Capacity(retained).Styles);
         Assert.NotSame(Page(retained), Page(terminal.Screen));
     }
@@ -91,7 +91,7 @@ public sealed class ManagedSnapshotStyleMutationTests
     {
         using ManagedTerminalSnapshot terminal = ManagedTerminalSnapshot.Restore(Snapshot());
         TerminalScreen retained = terminal.Screen.CreateStateCopy();
-        terminal.Processor.Process("\u001b[?2026h\u001b[1;0m"u8);
+        terminal.Processor.Process("\u001b[?2026h\u001b[1m\u001b[0m"u8);
         Assert.Equal(0, Capacity(terminal.Screen).Styles);
         terminal.Processor.Process("\u001b[?2026l"u8);
         Assert.Equal(16, Capacity(terminal.Screen).Styles);

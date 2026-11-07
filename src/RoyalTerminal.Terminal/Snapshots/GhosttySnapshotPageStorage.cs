@@ -9,7 +9,7 @@ internal sealed class GhosttySnapshotPageStorage(GhosttySnapshotStyleStorage sty
     GhosttySnapshotHyperlinkStorage hyperlinks, object? allocationIdentity = null)
 {
     internal GhosttySnapshotPageStorage(GhosttySnapshotPageCapacity capacity)
-        : this(new(capacity.Styles), new(capacity.GraphemeBytes), new(capacity.HyperlinkBytes, capacity.StringBytes)) { }
+        : this(new(capacity.Styles), new(capacity.GraphemeBytes), new(capacity.HyperlinkBytes, capacity.StringBytes, capacity.HyperlinkCells)) { }
     internal GhosttySnapshotStyleStorage Styles { get; } = styles;
     internal GhosttySnapshotGraphemeStorage Graphemes { get; } = graphemes;
     internal GhosttySnapshotHyperlinkStorage Hyperlinks { get; } = hyperlinks;
@@ -22,7 +22,8 @@ internal sealed class GhosttySnapshotPageStorage(GhosttySnapshotStyleStorage sty
     internal ulong Usage(GhosttySnapshotCapacityDimension? dimension) => dimension switch
     {
         GhosttySnapshotCapacityDimension.GraphemeBytes => Graphemes.AllocatedBytes,
-        GhosttySnapshotCapacityDimension.HyperlinkBytes => (ulong)Hyperlinks.Count,
+        GhosttySnapshotCapacityDimension.HyperlinkBytes => Hyperlinks.Count == 0 ? 0 : ((ulong)(Hyperlinks.Count + 1) * 16 + 12) / 13 * 48,
+        GhosttySnapshotCapacityDimension.HyperlinkCells => (ulong)Hyperlinks.CellCount,
         GhosttySnapshotCapacityDimension.StringBytes => Hyperlinks.StringBytes,
         _ => (ulong)Styles.Count,
     };
@@ -32,7 +33,7 @@ internal sealed class GhosttySnapshotPageStorage(GhosttySnapshotStyleStorage sty
     {
         result = null;
         if (Graphemes.Rebuild(capacity.GraphemeBytes, out GhosttySnapshotGraphemeStorage? graphemes, remap) != GhosttySnapshotGraphemeAddResult.Success ||
-            Hyperlinks.Rebuild(capacity.HyperlinkBytes, capacity.StringBytes, out GhosttySnapshotHyperlinkStorage? hyperlinks, remap) != GhosttySnapshotHyperlinkAddResult.Success ||
+            Hyperlinks.Rebuild(capacity.HyperlinkBytes, capacity.StringBytes, out GhosttySnapshotHyperlinkStorage? hyperlinks, remap, capacity.HyperlinkCells) != GhosttySnapshotHyperlinkAddResult.Success ||
             Styles.Rebuild(capacity.Styles, out GhosttySnapshotStyleStorage? styles, remap) != GhosttySnapshotSetAddResult.Success) return false;
         // Screen.increaseCapacity commits the cell clone, then tries each
         // cursor reference once. Failure drops only that cursor detail; it

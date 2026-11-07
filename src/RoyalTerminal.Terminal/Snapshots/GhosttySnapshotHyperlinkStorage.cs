@@ -18,12 +18,12 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     private readonly ulong _mapCapacity;
     private int _cursorId;
 
-    internal GhosttySnapshotHyperlinkStorage(ushort hyperlinkBytes, uint stringBytes)
+    internal GhosttySnapshotHyperlinkStorage(ushort hyperlinkBytes, uint stringBytes, ushort? hyperlinkCells = null)
     {
         _strings = new(new(stringBytes, 32));
         _links = new((ushort)(hyperlinkBytes / 48), _strings);
         _cells = [];
-        _mapCapacity = GhosttySnapshotAllocation.MapItemCapacity(hyperlinkBytes / 48UL * 16, 80);
+        _mapCapacity = GhosttySnapshotAllocation.MapItemCapacity(hyperlinkCells ?? hyperlinkBytes / 48UL * 16, 80);
     }
 
     private GhosttySnapshotHyperlinkStorage(GhosttySnapshotHyperlinkStorage source)
@@ -70,7 +70,8 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     internal static GhosttySnapshotCapacityDimension? GrowthDimension(GhosttySnapshotHyperlinkAddResult reason) => reason switch
     {
         GhosttySnapshotHyperlinkAddResult.StringsFull => GhosttySnapshotCapacityDimension.StringBytes,
-        GhosttySnapshotHyperlinkAddResult.SetFull or GhosttySnapshotHyperlinkAddResult.MapFull => GhosttySnapshotCapacityDimension.HyperlinkBytes,
+        GhosttySnapshotHyperlinkAddResult.SetFull => GhosttySnapshotCapacityDimension.HyperlinkBytes,
+        GhosttySnapshotHyperlinkAddResult.MapFull => GhosttySnapshotCapacityDimension.HyperlinkCells,
         GhosttySnapshotHyperlinkAddResult.SetNeedsRehash => null,
         _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
@@ -282,9 +283,9 @@ internal sealed class GhosttySnapshotHyperlinkStorage
     // separately restores style then hyperlink cursor state, which can itself
     // fail because cursor insertion allocates temporary duplicate strings.
     internal GhosttySnapshotHyperlinkAddResult Rebuild(ushort hyperlinkBytes, uint stringBytes, out GhosttySnapshotHyperlinkStorage? rebuilt,
-        GhosttySnapshotPageRemap? remap = null)
+        GhosttySnapshotPageRemap? remap = null, ushort? hyperlinkCells = null)
     {
-        GhosttySnapshotHyperlinkStorage candidate = new(hyperlinkBytes, stringBytes);
+        GhosttySnapshotHyperlinkStorage candidate = new(hyperlinkBytes, stringBytes, hyperlinkCells);
         foreach (GhosttySnapshotPageRemap.Cell cell in GhosttySnapshotPageRemap.OrderCells(_cells.Keys, remap))
         {
             GhosttySnapshotHyperlinkAddResult result = candidate.CopyCellFrom(cell.Destination, this, cell.Source);

@@ -18,7 +18,7 @@ internal sealed class GhosttySnapshotMetadataRestore
     internal GhosttySnapshotMetadataRestore(GhosttySnapshotPageCapacity capacity)
     {
         _styleStorage = new(capacity.Styles);
-        _linkStorage = new(capacity.HyperlinkBytes, capacity.StringBytes);
+        _linkStorage = new(capacity.HyperlinkBytes, capacity.StringBytes, capacity.HyperlinkCells);
     }
 
     internal IReadOnlySet<ushort> Styles => _styles;

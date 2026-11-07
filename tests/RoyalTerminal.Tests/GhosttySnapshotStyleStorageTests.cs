@@ -61,7 +61,7 @@ public sealed class GhosttySnapshotStyleStorageTests
         Assert.Equal(Italic, storage.CellStyle(1));
         Assert.Equal(2, storage.Count);
         storage.ClearCell(0);
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, storage.ChangeCursor(Faint));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.ChangeCursor(Faint));
         Assert.Equal(GhosttySnapshotSetAddResult.Success, storage.Rebuild(4, out GhosttySnapshotStyleStorage? rebuilt));
         Assert.Equal(GhosttySnapshotSetAddResult.Success, rebuilt!.ChangeCursor(Faint));
         Assert.Equal(Italic, rebuilt.CellStyle(1));
@@ -92,12 +92,12 @@ public sealed class GhosttySnapshotStyleStorageTests
         source.ChangeCursor(Italic); source.WriteCursorToCell(1);
         GhosttySnapshotStyleStorage copy = source.Copy();
         copy.ClearCell(0);
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, copy.ChangeCursor(Faint));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, copy.ChangeCursor(Faint));
         Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, source.ChangeCursor(Faint));
         Assert.Equal(Bold, source.CellStyle(0));
         Assert.Equal(default, copy.CellStyle(0));
         Assert.Equal(2, source.Count);
-        Assert.Equal(1, copy.Count);
+        Assert.Equal(2, copy.Count);
     }
 
     [Fact]

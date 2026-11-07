@@ -95,14 +95,15 @@ internal sealed partial class GhosttySnapshotPageTracker
                     strings += Align((ulong)value.Uri.Length, 32) + Align((ulong)value.ExplicitId.Length, 32);
             }
         }
-        ulong linkCapacity = Math.Max(SetCapacity(hyperlinks.Count), (linkCells + 15) / 16) * 48;
+        ulong linkCapacity = SetCapacity(hyperlinks.Count) * 48;
         // capacityForCount can round 65535 up to 65536 at the u16 limit.
         // Saturating there preserves the source's identical table layout rather
         // than wrapping its charge to zero (the pinned Zig cast can overflow).
         GhosttySnapshotPageCapacity exact = new((ushort)width, (ushort)(end - first),
             (ushort)Math.Min(ushort.MaxValue, SetCapacity(styles.Count)),
             (ushort)Math.Min(ushort.MaxValue, linkCapacity),
-            (uint)Math.Min(uint.MaxValue, graphemes), (uint)Math.Min(uint.MaxValue, strings));
+            (uint)Math.Min(uint.MaxValue, graphemes), (uint)Math.Min(uint.MaxValue, strings))
+        { HyperlinkCells = (ushort)Math.Min(ushort.MaxValue, linkCells) };
         return layout.LayoutBytes(exact);
 
         static ulong SetCapacity(int count) => count == 0 ? 0 : ((ulong)(count + 1) * 16 + 12) / 13;

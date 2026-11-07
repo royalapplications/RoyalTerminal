@@ -110,7 +110,7 @@ internal sealed partial class GhosttySnapshotPageTracker
                 while (!state.Storage.Hyperlinks.TryReserveCursorUri())
                     if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.StringBytes,
                         layout, preserveOnFailure: true)) return 0;
-                if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.HyperlinkBytes,
+                if (!owner.GrowMetadata(ref page, state, group, GhosttySnapshotCapacityDimension.HyperlinkCells,
                     layout, preserveOnFailure: true)) return 0;
             }
             return state.Storage.Hyperlinks.CursorId == 0 ? 0 : token;
