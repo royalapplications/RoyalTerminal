@@ -42,35 +42,35 @@ public sealed class GhosttyKeyEvent : IDisposable
     public void SetAction(GhosttyVtNative.GhosttyVtKeyAction action)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetAction(_handle, action);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetAction(_handle, action), "KeyEventSetAction");
     }
 
     /// <summary>Sets the logical key identity.</summary>
     public void SetKey(GhosttyVtNative.GhosttyVtKey key)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetKey(_handle, key);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetKey(_handle, key), "KeyEventSetKey");
     }
 
     /// <summary>Sets held modifier flags.</summary>
     public void SetModifiers(GhosttyVtNative.GhosttyVtMods modifiers)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetMods(_handle, modifiers);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetMods(_handle, modifiers), "KeyEventSetMods");
     }
 
     /// <summary>Sets consumed modifier flags.</summary>
     public void SetConsumedModifiers(GhosttyVtNative.GhosttyVtMods modifiers)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetConsumedMods(_handle, modifiers);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetConsumedMods(_handle, modifiers), "KeyEventSetConsumedMods");
     }
 
     /// <summary>Sets whether the event is part of active composition.</summary>
     public void SetComposing(bool composing)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetComposing(_handle, composing);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetComposing(_handle, composing), "KeyEventSetComposing");
     }
 
     /// <summary>Copies text into event-owned pinned UTF-8 storage, retained until replacement or disposal.</summary>
@@ -80,7 +80,7 @@ public sealed class GhosttyKeyEvent : IDisposable
 
         if (string.IsNullOrEmpty(text))
         {
-            GhosttyVtNative.KeyEventSetUtf8(_handle, null, 0);
+            ThrowIfFailed(GhosttyVtNative.KeyEventSetUtf8(_handle, default), "KeyEventSetUtf8");
             return;
         }
 
@@ -90,7 +90,7 @@ public sealed class GhosttyKeyEvent : IDisposable
         Encoding.UTF8.GetBytes(text, _utf8Buffer);
         fixed (byte* utf8Ptr = _utf8Buffer)
         {
-            GhosttyVtNative.KeyEventSetUtf8(_handle, utf8Ptr, (nuint)length);
+            ThrowIfFailed(GhosttyVtNative.KeyEventSetUtf8(_handle, new GhosttyVtNative.GhosttyString((nint)utf8Ptr, (nuint)length)), "KeyEventSetUtf8");
         }
     }
 
@@ -98,7 +98,7 @@ public sealed class GhosttyKeyEvent : IDisposable
     public void SetUnshiftedCodepoint(uint codepoint)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.KeyEventSetUnshiftedCodepoint(_handle, codepoint);
+        ThrowIfFailed(GhosttyVtNative.KeyEventSetUnshiftedCodepoint(_handle, codepoint), "KeyEventSetUnshiftedCodepoint");
     }
 
     /// <inheritdoc />

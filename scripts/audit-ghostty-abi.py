@@ -25,8 +25,8 @@ TYPE_NAMES = {
     "GhosttyPaste": "GhosttyPasteRequest",
     "GhosttySelection": "GhosttySelectionRange",
 }
-FIELD_NAMES = {("GhosttyTerminalSelectionFormatOptions", "emit"): "Format"}
-ALIASES = {"GhosttyColorPaletteIndex": "byte", "GhosttyKittyKeyFlags": "GhosttyVtNative.GhosttyKittyKeyFlags", "GhosttyMode": "GhosttyVtNative.GhosttyMode", "GhosttyMods": "GhosttyVtNative.GhosttyVtMods", "GhosttyRow": "ulong", "GhosttyStyleId": "ushort", "GhosttyCell": "ulong"}
+FIELD_NAMES = {("GhosttyStyleColor", "tag"): "TagValue", ("GhosttyTerminalSelectionFormatOptions", "emit"): "Format"}
+ALIASES = {"GhosttyStyleFlags": "ushort", "GhosttyFormatterExtras": "uint", "GhosttyColorPaletteIndex": "byte", "GhosttyKittyKeyFlags": "GhosttyVtNative.GhosttyKittyKeyFlags", "GhosttyMode": "GhosttyVtNative.GhosttyMode", "GhosttyMods": "GhosttyVtNative.GhosttyVtMods", "GhosttyRow": "ulong", "GhosttyStyleId": "ushort", "GhosttyCell": "ulong"}
 WORDS = {"ctx": "context", "ptr": "pointer", "cap": "capacity", "len": "length", "buf": "buffer", "fg": "foreground", "bg": "background", "cols": "columns", "col": "column", "ref": "reference", "ns": "nanoseconds", "prev": "previous", "esc": "escape", "mem": "memory", "dnd": "draganddrop"}
 
 
@@ -146,6 +146,8 @@ def callback_inventory(abi):
         native_name = match[2]
         managed_name = native_name[:-2] + "Callback"
         expected = [canonical(match[1])] + parameters(match[3])
+        if native_name.startswith("GhosttyAllocator"):
+            continue
         callback = callbacks.get(managed_name)
         if callback is None:
             findings.append(f"missing callback {native_name}")
@@ -157,7 +159,7 @@ def callback_inventory(abi):
         rows.append((native_name, managed_name, expected))
 
     for field in ("alloc", "resize", "remap", "free"):
-        native = re.search(r"(void\*?|bool)\s*\(\*" + field + r"\)\((.*?)\);", headers)
+        native = re.search(r"typedef\s+(void\*?|bool)\s*\(\*GhosttyAllocator" + field.title() + r"Fn\)\((.*?)\);", headers)
         managed = re.search(r"delegate\* unmanaged\[Cdecl\]<([^>]+)> " + field.title() + ";", source)
         if native is None or managed is None:
             findings.append(f"missing allocator callback {field}")
@@ -194,7 +196,7 @@ def mode_checks():
     header = (ROOT / "external/ghostty/include/ghostty/vt/modes.h").read_text()
     source = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Core.cs").read_text()
     members = {normalized(name[4:]): name for name in re.findall(r"public static GhosttyMode (Mode\w+) =>", source)}
-    renamed = {"KAM": "KeyboardAction", "SRM": "SendReceive", "REVERSE_WRAP_EXT": "ReverseWrapExtended", "SYNC_OUTPUT": "SynchronizedOutput"}
+    renamed = {"DISABLE_KEYBOARD": "KeyboardAction", "SEND_RECEIVE_MODE": "SendReceive", "CURSOR_KEYS": "Decckm", "MOUSE_EVENT_X10": "X10Mouse", "ENABLE_LEFT_AND_RIGHT_MARGIN": "LeftRightMargin", "MOUSE_EVENT_NORMAL": "NormalMouse", "MOUSE_EVENT_BUTTON": "ButtonMouse", "MOUSE_EVENT_ANY": "AnyMouse", "MOUSE_FORMAT_UTF8": "Utf8Mouse", "MOUSE_FORMAT_SGR": "SgrMouse", "MOUSE_ALTERNATE_SCROLL": "AltScroll", "MOUSE_FORMAT_URXVT": "UrxvtMouse", "MOUSE_FORMAT_SGR_PIXELS": "SgrPixelsMouse", "IGNORE_KEYPAD_WITH_NUMLOCK": "NumlockKeypad", "ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER": "AltScreenSave", "REPORT_COLOR_SCHEME": "ColorSchemeReport", "REPORT_VISIBILITY": "VisibilityReport", "IN_BAND_SIZE_REPORTS": "InBandResize", "KITTY_PASTE_EVENTS": "PasteEvents", "KAM": "KeyboardAction", "SRM": "SendReceive", "REVERSE_WRAP_EXT": "ReverseWrapExtended", "SYNC_OUTPUT": "SynchronizedOutput"}
     checks, findings = [], []
     for name, number, ansi in re.findall(r"^#define GHOSTTY_MODE_(\w+)\s+\(ghostty_mode_new\((\d+), (true|false)\)\)", header, re.M):
         member = lookup(members, renamed.get(name, name))
@@ -223,7 +225,7 @@ def main():
         kind = descriptor["kind"]
         counts[kind] = counts.get(kind, 0) + 1
         managed = TYPE_NAMES.get(name, name)
-        type_rows.append((name, kind, managed if kind in ("struct", "union", "enum") else ("nint" if kind == "opaque" else ALIASES.get(name, "MISSING"))))
+        type_rows.append((name, kind, managed if kind in ("struct", "union", "enum") else ("callback signature" if kind == "callback" else "nint" if kind == "opaque" else ALIASES.get(name, "MISSING"))))
         if kind == "enum":
             members = enums.get(managed)
             if members is None:
@@ -251,6 +253,12 @@ def main():
             initialize = "new((nint)0x1234, (nint)0x5678)" if auto else "default"
             checks = [f'        JsonElement type = Type("{name}", "{kind}");', f'        CheckSizeAndAlignment<{qualified}>(type);', f'        {qualified} value = {initialize};', '        JsonElement fields = type.GetProperty("fields");', f'        Assert.Equal({len(descriptor["fields"])}, fields.EnumerateObject().Count());']
             for key, native_field in descriptor["fields"].items():
+                if name == "GhosttyAllocatorVtable" and key == "reserved":
+                    checks.append('        Assert.Equal(4, fields.GetProperty("reserved").GetProperty("count").GetInt32());')
+                    checks.append('        CheckField(fields, "reserved", (byte*)&value.Reserved0 - (byte*)&value, sizeof(nint) * 4);')
+                    for index in range(1, 4):
+                        checks.append(f'        Assert.Equal(sizeof(nint) * {index}, (byte*)&value.Reserved{index} - (byte*)&value.Reserved0);')
+                    continue
                 member = fields.get(normalized(FIELD_NAMES.get((name, key), ""))) or lookup(fields, key)
                 if key == "_padding" and member is None:
                     checks.append(f'        Assert.Equal(0, fields.GetProperty("{key}").GetProperty("offset").GetInt32());')

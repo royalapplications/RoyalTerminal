@@ -36,6 +36,8 @@ public static partial class GhosttyVtNative
         LimitExceeded = -6,
         /// <summary>The operation was valid but rejected by terminal policy.</summary>
         Rejected = -7,
+        /// <summary>Upstream UNSUPPORTED value.</summary>
+        Unsupported = -8,
     }
 
     // ──────────────────────────── Key Action ────────────────────────
@@ -62,355 +64,355 @@ public static partial class GhosttyVtNative
         /// <summary><c>Unidentified</c> enum value.</summary>
         Unidentified = 0,
         /// <summary><c>Backquote</c> enum value.</summary>
-        Backquote,
+        Backquote = 1,
         /// <summary><c>Backslash</c> enum value.</summary>
-        Backslash,
+        Backslash = 2,
         /// <summary><c>BracketLeft</c> enum value.</summary>
-        BracketLeft,
+        BracketLeft = 3,
         /// <summary><c>BracketRight</c> enum value.</summary>
-        BracketRight,
+        BracketRight = 4,
         /// <summary><c>Comma</c> enum value.</summary>
-        Comma,
+        Comma = 5,
         /// <summary><c>Digit0</c> enum value.</summary>
-        Digit0,
+        Digit0 = 6,
         /// <summary><c>Digit1</c> enum value.</summary>
-        Digit1,
+        Digit1 = 7,
         /// <summary><c>Digit2</c> enum value.</summary>
-        Digit2,
+        Digit2 = 8,
         /// <summary><c>Digit3</c> enum value.</summary>
-        Digit3,
+        Digit3 = 9,
         /// <summary><c>Digit4</c> enum value.</summary>
-        Digit4,
+        Digit4 = 10,
         /// <summary><c>Digit5</c> enum value.</summary>
-        Digit5,
+        Digit5 = 11,
         /// <summary><c>Digit6</c> enum value.</summary>
-        Digit6,
+        Digit6 = 12,
         /// <summary><c>Digit7</c> enum value.</summary>
-        Digit7,
+        Digit7 = 13,
         /// <summary><c>Digit8</c> enum value.</summary>
-        Digit8,
+        Digit8 = 14,
         /// <summary><c>Digit9</c> enum value.</summary>
-        Digit9,
+        Digit9 = 15,
         /// <summary><c>Equal</c> enum value.</summary>
-        Equal,
+        Equal = 16,
         /// <summary><c>IntlBackslash</c> enum value.</summary>
-        IntlBackslash,
+        IntlBackslash = 17,
         /// <summary><c>IntlRo</c> enum value.</summary>
-        IntlRo,
+        IntlRo = 18,
         /// <summary><c>IntlYen</c> enum value.</summary>
-        IntlYen,
+        IntlYen = 19,
         /// <summary><c>A</c> enum value.</summary>
-        A,
+        A = 20,
         /// <summary><c>B</c> enum value.</summary>
-        B,
+        B = 21,
         /// <summary><c>C</c> enum value.</summary>
-        C,
+        C = 22,
         /// <summary><c>D</c> enum value.</summary>
-        D,
+        D = 23,
         /// <summary><c>E</c> enum value.</summary>
-        E,
+        E = 24,
         /// <summary><c>F</c> enum value.</summary>
-        F,
+        F = 25,
         /// <summary><c>G</c> enum value.</summary>
-        G,
+        G = 26,
         /// <summary><c>H</c> enum value.</summary>
-        H,
+        H = 27,
         /// <summary><c>I</c> enum value.</summary>
-        I,
+        I = 28,
         /// <summary><c>J</c> enum value.</summary>
-        J,
+        J = 29,
         /// <summary><c>K</c> enum value.</summary>
-        K,
+        K = 30,
         /// <summary><c>L</c> enum value.</summary>
-        L,
+        L = 31,
         /// <summary><c>M</c> enum value.</summary>
-        M,
+        M = 32,
         /// <summary><c>N</c> enum value.</summary>
-        N,
+        N = 33,
         /// <summary><c>O</c> enum value.</summary>
-        O,
+        O = 34,
         /// <summary><c>P</c> enum value.</summary>
-        P,
+        P = 35,
         /// <summary><c>Q</c> enum value.</summary>
-        Q,
+        Q = 36,
         /// <summary><c>R</c> enum value.</summary>
-        R,
+        R = 37,
         /// <summary><c>S</c> enum value.</summary>
-        S,
+        S = 38,
         /// <summary><c>T</c> enum value.</summary>
-        T,
+        T = 39,
         /// <summary><c>U</c> enum value.</summary>
-        U,
+        U = 40,
         /// <summary><c>V</c> enum value.</summary>
-        V,
+        V = 41,
         /// <summary><c>W</c> enum value.</summary>
-        W,
+        W = 42,
         /// <summary><c>X</c> enum value.</summary>
-        X,
+        X = 43,
         /// <summary><c>Y</c> enum value.</summary>
-        Y,
+        Y = 44,
         /// <summary><c>Z</c> enum value.</summary>
-        Z,
+        Z = 45,
         /// <summary><c>Minus</c> enum value.</summary>
-        Minus,
+        Minus = 46,
         /// <summary><c>Period</c> enum value.</summary>
-        Period,
+        Period = 47,
         /// <summary><c>Quote</c> enum value.</summary>
-        Quote,
+        Quote = 48,
         /// <summary><c>Semicolon</c> enum value.</summary>
-        Semicolon,
+        Semicolon = 49,
         /// <summary><c>Slash</c> enum value.</summary>
-        Slash,
+        Slash = 50,
         /// <summary><c>AltLeft</c> enum value.</summary>
-        AltLeft,
+        AltLeft = 51,
         /// <summary><c>AltRight</c> enum value.</summary>
-        AltRight,
+        AltRight = 52,
         /// <summary><c>Backspace</c> enum value.</summary>
-        Backspace,
+        Backspace = 53,
         /// <summary><c>CapsLock</c> enum value.</summary>
-        CapsLock,
+        CapsLock = 54,
         /// <summary><c>ContextMenu</c> enum value.</summary>
-        ContextMenu,
+        ContextMenu = 55,
         /// <summary><c>ControlLeft</c> enum value.</summary>
-        ControlLeft,
+        ControlLeft = 56,
         /// <summary><c>ControlRight</c> enum value.</summary>
-        ControlRight,
+        ControlRight = 57,
         /// <summary><c>Enter</c> enum value.</summary>
-        Enter,
+        Enter = 58,
         /// <summary><c>MetaLeft</c> enum value.</summary>
-        MetaLeft,
+        MetaLeft = 59,
         /// <summary><c>MetaRight</c> enum value.</summary>
-        MetaRight,
+        MetaRight = 60,
         /// <summary><c>ShiftLeft</c> enum value.</summary>
-        ShiftLeft,
+        ShiftLeft = 61,
         /// <summary><c>ShiftRight</c> enum value.</summary>
-        ShiftRight,
+        ShiftRight = 62,
         /// <summary><c>Space</c> enum value.</summary>
-        Space,
+        Space = 63,
         /// <summary><c>Tab</c> enum value.</summary>
-        Tab,
+        Tab = 64,
         /// <summary><c>Convert</c> enum value.</summary>
-        Convert,
+        Convert = 65,
         /// <summary><c>KanaMode</c> enum value.</summary>
-        KanaMode,
+        KanaMode = 66,
         /// <summary><c>NonConvert</c> enum value.</summary>
-        NonConvert,
+        NonConvert = 67,
         /// <summary><c>Delete</c> enum value.</summary>
-        Delete,
+        Delete = 68,
         /// <summary><c>End</c> enum value.</summary>
-        End,
+        End = 69,
         /// <summary><c>Help</c> enum value.</summary>
-        Help,
+        Help = 70,
         /// <summary><c>Home</c> enum value.</summary>
-        Home,
+        Home = 71,
         /// <summary><c>Insert</c> enum value.</summary>
-        Insert,
+        Insert = 72,
         /// <summary><c>PageDown</c> enum value.</summary>
-        PageDown,
+        PageDown = 73,
         /// <summary><c>PageUp</c> enum value.</summary>
-        PageUp,
+        PageUp = 74,
         /// <summary><c>ArrowDown</c> enum value.</summary>
-        ArrowDown,
+        ArrowDown = 75,
         /// <summary><c>ArrowLeft</c> enum value.</summary>
-        ArrowLeft,
+        ArrowLeft = 76,
         /// <summary><c>ArrowRight</c> enum value.</summary>
-        ArrowRight,
+        ArrowRight = 77,
         /// <summary><c>ArrowUp</c> enum value.</summary>
-        ArrowUp,
+        ArrowUp = 78,
         /// <summary><c>NumLock</c> enum value.</summary>
-        NumLock,
+        NumLock = 79,
         /// <summary><c>Numpad0</c> enum value.</summary>
-        Numpad0,
+        Numpad0 = 80,
         /// <summary><c>Numpad1</c> enum value.</summary>
-        Numpad1,
+        Numpad1 = 81,
         /// <summary><c>Numpad2</c> enum value.</summary>
-        Numpad2,
+        Numpad2 = 82,
         /// <summary><c>Numpad3</c> enum value.</summary>
-        Numpad3,
+        Numpad3 = 83,
         /// <summary><c>Numpad4</c> enum value.</summary>
-        Numpad4,
+        Numpad4 = 84,
         /// <summary><c>Numpad5</c> enum value.</summary>
-        Numpad5,
+        Numpad5 = 85,
         /// <summary><c>Numpad6</c> enum value.</summary>
-        Numpad6,
+        Numpad6 = 86,
         /// <summary><c>Numpad7</c> enum value.</summary>
-        Numpad7,
+        Numpad7 = 87,
         /// <summary><c>Numpad8</c> enum value.</summary>
-        Numpad8,
+        Numpad8 = 88,
         /// <summary><c>Numpad9</c> enum value.</summary>
-        Numpad9,
+        Numpad9 = 89,
         /// <summary><c>NumpadAdd</c> enum value.</summary>
-        NumpadAdd,
+        NumpadAdd = 90,
         /// <summary><c>NumpadBackspace</c> enum value.</summary>
-        NumpadBackspace,
+        NumpadBackspace = 91,
         /// <summary><c>NumpadClear</c> enum value.</summary>
-        NumpadClear,
+        NumpadClear = 92,
         /// <summary><c>NumpadClearEntry</c> enum value.</summary>
-        NumpadClearEntry,
+        NumpadClearEntry = 93,
         /// <summary><c>NumpadComma</c> enum value.</summary>
-        NumpadComma,
+        NumpadComma = 94,
         /// <summary><c>NumpadDecimal</c> enum value.</summary>
-        NumpadDecimal,
+        NumpadDecimal = 95,
         /// <summary><c>NumpadDivide</c> enum value.</summary>
-        NumpadDivide,
+        NumpadDivide = 96,
         /// <summary><c>NumpadEnter</c> enum value.</summary>
-        NumpadEnter,
+        NumpadEnter = 97,
         /// <summary><c>NumpadEqual</c> enum value.</summary>
-        NumpadEqual,
+        NumpadEqual = 98,
         /// <summary><c>NumpadMemoryAdd</c> enum value.</summary>
-        NumpadMemoryAdd,
+        NumpadMemoryAdd = 99,
         /// <summary><c>NumpadMemoryClear</c> enum value.</summary>
-        NumpadMemoryClear,
+        NumpadMemoryClear = 100,
         /// <summary><c>NumpadMemoryRecall</c> enum value.</summary>
-        NumpadMemoryRecall,
+        NumpadMemoryRecall = 101,
         /// <summary><c>NumpadMemoryStore</c> enum value.</summary>
-        NumpadMemoryStore,
+        NumpadMemoryStore = 102,
         /// <summary><c>NumpadMemorySubtract</c> enum value.</summary>
-        NumpadMemorySubtract,
+        NumpadMemorySubtract = 103,
         /// <summary><c>NumpadMultiply</c> enum value.</summary>
-        NumpadMultiply,
+        NumpadMultiply = 104,
         /// <summary><c>NumpadParenLeft</c> enum value.</summary>
-        NumpadParenLeft,
+        NumpadParenLeft = 105,
         /// <summary><c>NumpadParenRight</c> enum value.</summary>
-        NumpadParenRight,
+        NumpadParenRight = 106,
         /// <summary><c>NumpadSubtract</c> enum value.</summary>
-        NumpadSubtract,
+        NumpadSubtract = 107,
         /// <summary><c>NumpadSeparator</c> enum value.</summary>
-        NumpadSeparator,
+        NumpadSeparator = 108,
         /// <summary><c>NumpadUp</c> enum value.</summary>
-        NumpadUp,
+        NumpadUp = 109,
         /// <summary><c>NumpadDown</c> enum value.</summary>
-        NumpadDown,
+        NumpadDown = 110,
         /// <summary><c>NumpadRight</c> enum value.</summary>
-        NumpadRight,
+        NumpadRight = 111,
         /// <summary><c>NumpadLeft</c> enum value.</summary>
-        NumpadLeft,
+        NumpadLeft = 112,
         /// <summary><c>NumpadBegin</c> enum value.</summary>
-        NumpadBegin,
+        NumpadBegin = 113,
         /// <summary><c>NumpadHome</c> enum value.</summary>
-        NumpadHome,
+        NumpadHome = 114,
         /// <summary><c>NumpadEnd</c> enum value.</summary>
-        NumpadEnd,
+        NumpadEnd = 115,
         /// <summary><c>NumpadInsert</c> enum value.</summary>
-        NumpadInsert,
+        NumpadInsert = 116,
         /// <summary><c>NumpadDelete</c> enum value.</summary>
-        NumpadDelete,
+        NumpadDelete = 117,
         /// <summary><c>NumpadPageUp</c> enum value.</summary>
-        NumpadPageUp,
+        NumpadPageUp = 118,
         /// <summary><c>NumpadPageDown</c> enum value.</summary>
-        NumpadPageDown,
+        NumpadPageDown = 119,
         /// <summary><c>Escape</c> enum value.</summary>
-        Escape,
+        Escape = 120,
         /// <summary><c>F1</c> enum value.</summary>
-        F1,
+        F1 = 121,
         /// <summary><c>F2</c> enum value.</summary>
-        F2,
+        F2 = 122,
         /// <summary><c>F3</c> enum value.</summary>
-        F3,
+        F3 = 123,
         /// <summary><c>F4</c> enum value.</summary>
-        F4,
+        F4 = 124,
         /// <summary><c>F5</c> enum value.</summary>
-        F5,
+        F5 = 125,
         /// <summary><c>F6</c> enum value.</summary>
-        F6,
+        F6 = 126,
         /// <summary><c>F7</c> enum value.</summary>
-        F7,
+        F7 = 127,
         /// <summary><c>F8</c> enum value.</summary>
-        F8,
+        F8 = 128,
         /// <summary><c>F9</c> enum value.</summary>
-        F9,
+        F9 = 129,
         /// <summary><c>F10</c> enum value.</summary>
-        F10,
+        F10 = 130,
         /// <summary><c>F11</c> enum value.</summary>
-        F11,
+        F11 = 131,
         /// <summary><c>F12</c> enum value.</summary>
-        F12,
+        F12 = 132,
         /// <summary><c>F13</c> enum value.</summary>
-        F13,
+        F13 = 133,
         /// <summary><c>F14</c> enum value.</summary>
-        F14,
+        F14 = 134,
         /// <summary><c>F15</c> enum value.</summary>
-        F15,
+        F15 = 135,
         /// <summary><c>F16</c> enum value.</summary>
-        F16,
+        F16 = 136,
         /// <summary><c>F17</c> enum value.</summary>
-        F17,
+        F17 = 137,
         /// <summary><c>F18</c> enum value.</summary>
-        F18,
+        F18 = 138,
         /// <summary><c>F19</c> enum value.</summary>
-        F19,
+        F19 = 139,
         /// <summary><c>F20</c> enum value.</summary>
-        F20,
+        F20 = 140,
         /// <summary><c>F21</c> enum value.</summary>
-        F21,
+        F21 = 141,
         /// <summary><c>F22</c> enum value.</summary>
-        F22,
+        F22 = 142,
         /// <summary><c>F23</c> enum value.</summary>
-        F23,
+        F23 = 143,
         /// <summary><c>F24</c> enum value.</summary>
-        F24,
+        F24 = 144,
         /// <summary><c>F25</c> enum value.</summary>
-        F25,
+        F25 = 145,
         /// <summary>Function modifier key.</summary>
-        Fn,
+        Fn = 146,
         /// <summary>Function modifier lock key.</summary>
-        FnLock,
+        FnLock = 147,
         /// <summary>Print screen key.</summary>
-        PrintScreen,
+        PrintScreen = 148,
         /// <summary>Scroll lock key.</summary>
-        ScrollLock,
+        ScrollLock = 149,
         /// <summary>Pause key.</summary>
-        Pause,
+        Pause = 150,
         /// <summary>Browser back key.</summary>
-        BrowserBack,
+        BrowserBack = 151,
         /// <summary>Browser favorites key.</summary>
-        BrowserFavorites,
+        BrowserFavorites = 152,
         /// <summary>Browser forward key.</summary>
-        BrowserForward,
+        BrowserForward = 153,
         /// <summary>Browser home key.</summary>
-        BrowserHome,
+        BrowserHome = 154,
         /// <summary>Browser refresh key.</summary>
-        BrowserRefresh,
+        BrowserRefresh = 155,
         /// <summary>Browser search key.</summary>
-        BrowserSearch,
+        BrowserSearch = 156,
         /// <summary>Browser stop key.</summary>
-        BrowserStop,
+        BrowserStop = 157,
         /// <summary>Media eject key.</summary>
-        Eject,
+        Eject = 158,
         /// <summary>Application launcher key 1.</summary>
-        LaunchApp1,
+        LaunchApp1 = 159,
         /// <summary>Application launcher key 2.</summary>
-        LaunchApp2,
+        LaunchApp2 = 160,
         /// <summary>Mail launcher key.</summary>
-        LaunchMail,
+        LaunchMail = 161,
         /// <summary>Media play/pause key.</summary>
-        MediaPlayPause,
+        MediaPlayPause = 162,
         /// <summary>Media selector key.</summary>
-        MediaSelect,
+        MediaSelect = 163,
         /// <summary>Media stop key.</summary>
-        MediaStop,
+        MediaStop = 164,
         /// <summary>Next media track key.</summary>
-        MediaTrackNext,
+        MediaTrackNext = 165,
         /// <summary>Previous media track key.</summary>
-        MediaTrackPrevious,
+        MediaTrackPrevious = 166,
         /// <summary>Power key.</summary>
-        Power,
+        Power = 167,
         /// <summary>Sleep key.</summary>
-        Sleep,
+        Sleep = 168,
         /// <summary>Volume down key.</summary>
-        AudioVolumeDown,
+        AudioVolumeDown = 169,
         /// <summary>Mute key.</summary>
-        AudioVolumeMute,
+        AudioVolumeMute = 170,
         /// <summary>Volume up key.</summary>
-        AudioVolumeUp,
+        AudioVolumeUp = 171,
         /// <summary>Wake key.</summary>
-        WakeUp,
+        WakeUp = 172,
         /// <summary>Copy key.</summary>
-        Copy,
+        Copy = 173,
         /// <summary>Cut key.</summary>
-        Cut,
+        Cut = 174,
         /// <summary>Paste key.</summary>
-        Paste,
+        Paste = 175,
     }
 
     // ──────────────────────────── Mods ───────────────────────────────
@@ -686,44 +688,44 @@ public static partial class GhosttyVtNative
     public static partial void KeyEventFree(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_action")]
-    public static partial void KeyEventSetAction(nint keyEvent, GhosttyVtKeyAction action);
+    public static partial GhosttyResult KeyEventSetAction(nint keyEvent, GhosttyVtKeyAction action);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_action")]
     public static partial GhosttyVtKeyAction KeyEventGetAction(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_key")]
-    public static partial void KeyEventSetKey(nint keyEvent, GhosttyVtKey key);
+    public static partial GhosttyResult KeyEventSetKey(nint keyEvent, GhosttyVtKey key);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_key")]
     public static partial GhosttyVtKey KeyEventGetKey(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_mods")]
-    public static partial void KeyEventSetMods(nint keyEvent, GhosttyVtMods mods);
+    public static partial GhosttyResult KeyEventSetMods(nint keyEvent, GhosttyVtMods mods);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_mods")]
     public static partial GhosttyVtMods KeyEventGetMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_consumed_mods")]
-    public static partial void KeyEventSetConsumedMods(nint keyEvent, GhosttyVtMods consumedMods);
+    public static partial GhosttyResult KeyEventSetConsumedMods(nint keyEvent, GhosttyVtMods consumedMods);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_consumed_mods")]
     public static partial GhosttyVtMods KeyEventGetConsumedMods(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_composing")]
-    public static partial void KeyEventSetComposing(nint keyEvent, [MarshalAs(UnmanagedType.U1)] bool composing);
+    public static partial GhosttyResult KeyEventSetComposing(nint keyEvent, [MarshalAs(UnmanagedType.U1)] bool composing);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_composing")]
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool KeyEventGetComposing(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_utf8")]
-    public static unsafe partial void KeyEventSetUtf8(nint keyEvent, byte* utf8, nuint len);
+    public static unsafe partial GhosttyResult KeyEventSetUtf8(nint keyEvent, GhosttyString utf8);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_utf8")]
-    public static unsafe partial byte* KeyEventGetUtf8(nint keyEvent, out nuint len);
+    public static unsafe partial GhosttyString KeyEventGetUtf8(nint keyEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_set_unshifted_codepoint")]
-    public static partial void KeyEventSetUnshiftedCodepoint(nint keyEvent, uint codepoint);
+    public static partial GhosttyResult KeyEventSetUnshiftedCodepoint(nint keyEvent, uint codepoint);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_event_get_unshifted_codepoint")]
     public static partial uint KeyEventGetUnshiftedCodepoint(nint keyEvent);
@@ -736,11 +738,11 @@ public static partial class GhosttyVtNative
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_free")]
     public static partial void KeyEncoderFree(nint encoder);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt")]
-    public static unsafe partial void KeyEncoderSetopt(nint encoder, int option, void* value);
+    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_set")]
+    public static unsafe partial GhosttyResult KeyEncoderSetopt(nint encoder, int option, void* value);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_setopt_from_terminal")]
-    public static partial void KeyEncoderSetoptFromTerminal(nint encoder, nint terminal);
+    [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_set_from_terminal")]
+    public static partial GhosttyResult KeyEncoderSetoptFromTerminal(nint encoder, nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_key_encoder_encode")]
     public static unsafe partial GhosttyResult KeyEncoderEncode(
@@ -773,8 +775,7 @@ public static partial class GhosttyVtNative
     public static partial GhosttyOscCommandType OscCommandType(nint command);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_osc_command_data")]
-    [return: MarshalAs(UnmanagedType.U1)]
-    public static unsafe partial bool OscCommandData(nint command, GhosttyOscCommandData dataType, void* outPtr);
+    public static unsafe partial GhosttyResult OscCommandData(nint command, GhosttyOscCommandData dataType, void* outPtr);
 
     // ────────────────────── SGR Parser Functions ────────────────────
 
@@ -801,7 +802,7 @@ public static partial class GhosttyVtNative
     public static unsafe partial nuint SgrUnknownPartial(GhosttySgrUnknown unknown, ushort** ptr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_tag")]
-    public static partial GhosttySgrAttributeTag SgrAttributeTag(GhosttySgrAttribute attr);
+    public static partial GhosttySgrAttributeTag SgrAttributeTag(in GhosttySgrAttribute attr);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sgr_attribute_value")]
     public static unsafe partial GhosttySgrAttributeValue* SgrAttributeValue(GhosttySgrAttribute* attr);

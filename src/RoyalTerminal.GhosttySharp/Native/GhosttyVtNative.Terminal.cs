@@ -105,13 +105,6 @@ public static partial class GhosttyVtNative
         Alternate = 1,
     }
 
-    public enum GhosttyTerminalCursorStyle : int
-    {
-        Bar = 0,
-        Block = 1,
-        Underline = 2,
-        BlockHollow = 3,
-    }
 
     public enum GhosttyClipboardLocation : int
     {
@@ -130,7 +123,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct GhosttyClipboardWrite
     {
-        public nuint Size;
         public GhosttyClipboardLocation Location;
         public GhosttyClipboardContent* Contents;
         public nuint ContentsLength;
@@ -210,7 +202,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct GhosttyClipboardRead
     {
-        public nuint Size;
         public GhosttyClipboardLocation Location;
         public GhosttyString* Mimes;
         public nuint MimesLength;
@@ -276,7 +267,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttyTerminalDesktopNotification
     {
-        public nuint Size;
         public GhosttyString Title;
         public GhosttyString Body;
     }
@@ -293,7 +283,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttyTerminalProgressReport
     {
-        public nuint Size;
         public GhosttyTerminalProgressState State;
         public sbyte Progress;
     }
@@ -381,60 +370,62 @@ public static partial class GhosttyVtNative
 
     public enum GhosttyTerminalOption : int
     {
-        Userdata = 0,
-        WritePty = 1,
-        Bell = 2,
-        Enquiry = 3,
-        Xtversion = 4,
-        TitleChanged = 5,
-        Size = 6,
-        ColorScheme = 7,
-        DeviceAttributes = 8,
-        Title = 9,
-        Pwd = 10,
-        ColorForeground = 11,
-        ColorBackground = 12,
-        ColorCursor = 13,
-        ColorPalette = 14,
-        KittyImageStorageLimit = 15,
-        KittyImageMediumFile = 16,
-        KittyImageMediumTempFile = 17,
-        KittyImageMediumSharedMemory = 18,
-        ApcMaxBytes = 19,
-        ApcMaxBytesKitty = 20,
-        Selection = 21,
-        DefaultCursorStyle = 22,
-        DefaultCursorBlink = 23,
-        GlyphProtocol = 24,
-        PwdChanged = 25,
-        ClipboardWrite = 26,
-        ScrollbackMaxBytes = 27,
-        ScrollbackMaxLines = 28,
-        DesktopNotification = 29,
-        ProgressReport = 30,
-        ContinuationMaxBytes = 31,
-        TitleReport = 32,
-        ModeDefault = 33,
-        Mode = 34,
-        UnknownSequence = 35,
-        UnknownMaxBytes = 36,
-        TerminfoName = 37,
-        ClipboardRead = 38,
-        ClipboardWriteMaxBytes = 39,
-        ResizePullScrollback = 40,
-        RenderHold = 41,
+        Userdata = 1,
+        WritePty = 2,
+        Bell = 3,
+        Enquiry = 4,
+        Xtversion = 5,
+        TitleChanged = 6,
+        Size = 7,
+        ColorScheme = 8,
+        DeviceAttributes = 9,
+        Title = 10,
+        Pwd = 11,
+        ColorForeground = 12,
+        ColorBackground = 13,
+        ColorCursor = 14,
+        ColorPalette = 15,
+        KittyImageStorageLimit = 16,
+        KittyImageMediumFile = 17,
+        KittyImageMediumTempFile = 18,
+        KittyImageMediumSharedMemory = 19,
+        ApcMaxBytes = 20,
+        ApcMaxBytesKitty = 21,
+        Selection = 22,
+        DefaultCursorStyle = 23,
+        DefaultCursorBlink = 24,
+        GlyphProtocol = 25,
+        PwdChanged = 26,
+        ClipboardWrite = 27,
+        ScrollbackMaxBytes = 28,
+        ScrollbackMaxLines = 29,
+        DesktopNotification = 30,
+        ProgressReport = 31,
+        ContinuationMaxBytes = 32,
+        TitleReport = 33,
+        ModeDefault = 34,
+        Mode = 35,
+        UnknownSequence = 36,
+        UnknownMaxBytes = 37,
+        TerminfoName = 38,
+        ClipboardRead = 39,
+        ClipboardWriteMaxBytes = 40,
+        ResizePullScrollback = 41,
+        RenderHold = 42,
         /// <summary>OSC 133 lifecycle callback.</summary>
-        SemanticPrompt = 42,
+        SemanticPrompt = 43,
         /// <summary>RIS callback.</summary>
-        Reset = 43,
+        Reset = 44,
         /// <summary>Enable DECRQCRA replies.</summary>
-        XtChecksumReport = 44,
+        XtChecksumReport = 45,
         /// <summary>Default XTCHECKSUM flags (0–31).</summary>
-        XtChecksumExtension = 45,
+        XtChecksumExtension = 46,
         /// <summary>OSC 7501 report callback; enables feature detection.</summary>
-        ProgramStatus = 46,
+        ProgramStatus = 47,
         /// <summary>Host callback for terminal-requested window resizing.</summary>
-        ResizeWindow = 47,
+        ResizeWindow = 48,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttyTerminalData : int
@@ -449,7 +440,7 @@ public static partial class GhosttyVtNative
         CursorVisible = 7,
         KittyKeyboardFlags = 8,
         Scrollbar = 9,
-        CursorStyle = 10,
+
         MouseTracking = 11,
         Title = 12,
         Pwd = 13,
@@ -484,6 +475,8 @@ public static partial class GhosttyVtNative
         MouseShape = 41,
         /// <summary>Native page and image memory usage.</summary>
         MemoryUsage = 42,
+        /// <summary>Upstream CURSOR_SGR_STYLE value.</summary>
+        CursorSgrStyle = 10,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_new")]
@@ -544,7 +537,7 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_scroll_viewport")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void TerminalScrollViewport(nint terminal, GhosttyTerminalScrollViewport behavior);
+    public static partial GhosttyResult TerminalScrollViewport(nint terminal, GhosttyTerminalScrollViewport behavior);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_terminal_compression_activity")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

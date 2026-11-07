@@ -16,7 +16,7 @@ public class GhosttyTerminalExtendedTests
     {
         using GhosttyTerminal terminal = new(10, 3, maxScrollback: 4096);
         terminal.SetScrollbackMaxLines(20);
-        terminal.SetDefaultCursorStyle(GhosttyVtNative.GhosttyTerminalCursorStyle.Underline);
+        terminal.SetDefaultCursorStyle(GhosttyVtNative.GhosttyCursorStyle.Underline);
         terminal.SetDefaultCursorBlink(blink: true);
         terminal.SetGlyphProtocol(enabled: true);
 

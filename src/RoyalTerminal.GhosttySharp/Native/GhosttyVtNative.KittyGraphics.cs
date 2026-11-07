@@ -32,17 +32,19 @@ public static partial class GhosttyVtNative
         Z = 12,
     }
 
-    public enum GhosttyKittyPlacementLayer : int
+    public enum GhosttyImageLayer : int
     {
         All = 0,
-        BelowBackground = 1,
-        BelowText = 2,
-        AboveText = 3,
+        BelowBackground = 0,
+        BelowText = 1,
+        AboveText = 2,
     }
 
     public enum GhosttyKittyGraphicsPlacementIteratorOption : int
     {
-        Layer = 0,
+        Layer = 1,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttyKittyImageFormat : int
@@ -69,9 +71,13 @@ public static partial class GhosttyVtNative
         Height = 4,
         Format = 5,
         Compression = 6,
-        DataPtr = 7,
-        DataLength = 8,
+
+
         Generation = 9,
+        /// <summary>Upstream PIXELS value.</summary>
+        Pixels = 7,
+        /// <summary>Upstream EXPECTED_LEN value.</summary>
+        ExpectedLen = 8,
     }
 
     [StructLayout(LayoutKind.Sequential)]

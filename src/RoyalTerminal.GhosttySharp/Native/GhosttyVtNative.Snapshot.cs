@@ -10,12 +10,14 @@ public static partial class GhosttyVtNative
 {
     public enum GhosttySnapshotDecoderOption : int
     {
-        MaxContinuationBytes = 0,
-        RetainContinuation = 1,
+        MaxContinuationBytes = 1,
+        RetainContinuation = 2,
         /// <summary>Compress each restored history page when supported.</summary>
-        CompressHistory = 2,
+        CompressHistory = 3,
         /// <summary>Per-screen restored Kitty image budget in bytes (uint64).</summary>
-        KittyImageStorageLimit = 3,
+        KittyImageStorageLimit = 4,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     /// <summary>Record restored by the most recent successful decoder step.</summary>

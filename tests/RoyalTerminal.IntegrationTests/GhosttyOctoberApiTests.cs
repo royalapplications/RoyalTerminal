@@ -61,7 +61,7 @@ public class GhosttyOctoberApiTests
         terminal.Write("\u001b]133;A\a\u001b[!p\u001bc"u8);
         Assert.Equal(["Apply?", "prompt", "clear", "reset"], events);
         Assert.Equal(2, reports.Count);
-        Assert.Equal((nuint)sizeof(GhosttyVtNative.GhosttyTerminalProgramStatus), reports[0].Report.Size);
+        Assert.Equal(80, sizeof(GhosttyVtNative.GhosttyTerminalProgramStatus));
         Assert.Equal(GhosttyVtNative.GhosttyProgramStatusState.Blocked, reports[0].Report.State);
         Assert.Equal(GhosttyVtNative.GhosttyProgramStatusKind.Permission, reports[0].Report.Kind);
         Assert.Equal(-1, reports[0].Report.Progress);
@@ -93,9 +93,9 @@ public class GhosttyOctoberApiTests
             GhosttyVtNative.GhosttyString content = default;
             bool truncated = false;
             GhosttyVtNative.GhosttyOscTerminator terminator = default;
-            Assert.True(GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownContent, &content));
-            Assert.True(GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownTruncated, &truncated));
-            Assert.True(GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownTerminator, &terminator));
+            Assert.Equal(GhosttyVtNative.GhosttyResult.Success, GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownContent, &content));
+            Assert.Equal(GhosttyVtNative.GhosttyResult.Success, GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownTruncated, &truncated));
+            Assert.Equal(GhosttyVtNative.GhosttyResult.Success, GhosttyVtNative.OscCommandData(command, GhosttyVtNative.GhosttyOscCommandData.UnknownTerminator, &terminator));
             Assert.Equal("7400;abc", content.ToUtf8String());
             Assert.True(truncated);
             Assert.Equal(GhosttyVtNative.GhosttyOscTerminator.Bel, terminator);
@@ -105,7 +105,7 @@ public class GhosttyOctoberApiTests
                 foreach (byte value in "7400;ok"u8) GhosttyVtNative.OscNext(parser, value);
                 Assert.Equal(0, GhosttyVtNative.OscEnd(parser, cancel));
             }
-            Assert.False(GhosttyVtNative.OscCommandData(0, GhosttyVtNative.GhosttyOscCommandData.UnknownContent, &content));
+            Assert.Equal(GhosttyVtNative.GhosttyResult.InvalidValue, GhosttyVtNative.OscCommandData(0, GhosttyVtNative.GhosttyOscCommandData.UnknownContent, &content));
         }
         finally { GhosttyVtNative.OscFree(parser); }
     }

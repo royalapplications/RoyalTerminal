@@ -93,7 +93,9 @@ public static partial class GhosttyVtNative
     public enum GhosttyOscOption : int
     {
         /// <summary>unknown max bytes.</summary>
-        UnknownMaxBytes = 0,
+        UnknownMaxBytes = 1,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     /// <summary>Native page and image memory usage; excludes host allocations.</summary>
@@ -179,7 +181,7 @@ public static partial class GhosttyVtNative
     public struct GhosttyTerminalProgramStatus
     {
         /// <summary>Size.</summary>
-        public nuint Size;
+
         /// <summary>State.</summary>
         public GhosttyProgramStatusState State;
         /// <summary>Kind.</summary>
@@ -229,7 +231,7 @@ public static partial class GhosttyVtNative
     public struct GhosttyTerminalSemanticPrompt
     {
         /// <summary>Size.</summary>
-        public nuint Size;
+
         /// <summary>Kind.</summary>
         public GhosttySemanticPromptKind Kind;
         /// <summary>Prompt kind.</summary>

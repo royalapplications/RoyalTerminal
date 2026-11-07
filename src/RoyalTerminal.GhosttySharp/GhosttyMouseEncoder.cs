@@ -31,7 +31,7 @@ public sealed class GhosttyMouseEncoder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        GhosttyVtNative.MouseEncoderSetoptFromTerminal(_handle, terminal.Handle);
+        ThrowIfFailed(GhosttyVtNative.MouseEncoderSetoptFromTerminal(_handle, terminal.Handle), "MouseEncoderSetoptFromTerminal");
     }
 
     /// <summary>Sets the mouse tracking mode.</summary>
@@ -73,7 +73,7 @@ public sealed class GhosttyMouseEncoder : IDisposable
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEncoderReset(_handle);
+        ThrowIfFailed(GhosttyVtNative.MouseEncoderReset(_handle), "MouseEncoderReset");
     }
 
     /// <summary>Encodes the given mouse event as UTF-8 bytes.</summary>
@@ -145,7 +145,7 @@ public sealed class GhosttyMouseEncoder : IDisposable
         where T : unmanaged
     {
         T copy = value;
-        GhosttyVtNative.MouseEncoderSetopt(_handle, option, &copy);
+        ThrowIfFailed(GhosttyVtNative.MouseEncoderSetopt(_handle, option, &copy), "MouseEncoderSetopt");
     }
 
     private static void ThrowIfFailed(GhosttyVtNative.GhosttyResult result, string operation)

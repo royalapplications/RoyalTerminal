@@ -211,7 +211,7 @@ public class GhosttyLatestApiTests
         Assert.Equal(foreground.R, actual.R);
         Assert.Equal(foreground.G, actual.G);
         Assert.Equal(foreground.B, actual.B);
-        Assert.True(terminal.GetCursorStyle().Size > 0);
+        Assert.Equal((ushort)0, terminal.GetCursorStyle().Flags);
 
         GhosttyVtNative.GhosttyColorRgb[] palette = new GhosttyVtNative.GhosttyColorRgb[256];
         terminal.GetDefaultPalette(palette);
