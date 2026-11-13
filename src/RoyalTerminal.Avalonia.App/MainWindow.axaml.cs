@@ -3,7 +3,6 @@
 // RoyalTerminal.Avalonia.App - Reusable terminal shell window activation.
 
 using System;
-using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using RoyalTerminal.Avalonia.App.Services;
 using RoyalTerminal.Avalonia.App.ViewModels;
@@ -46,7 +45,6 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
         ArgumentNullException.ThrowIfNull(shellOptions);
 
         InitializeComponent();
-        ConfigurePlatformWindowDecorations();
 
         MainWindowBackdropCoordinator.ConfigureTransparencyHint(this);
         Icon = RoyalTerminalWindowIconHelper.CreateWindowIcon();
@@ -79,22 +77,6 @@ public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
     private void InitializeComponent()
     {
         AvaloniaXamlLoader.Load(this);
-    }
-
-    private void ConfigurePlatformWindowDecorations()
-    {
-        if (OperatingSystem.IsLinux())
-        {
-            ExtendClientAreaToDecorationsHint = false;
-            WindowDecorations = WindowDecorations.Full;
-        }
-        else
-        {
-            ExtendClientAreaToDecorationsHint = true;
-            WindowDecorations = OperatingSystem.IsMacOS()
-                ? WindowDecorations.Full
-                : WindowDecorations.BorderOnly;
-        }
     }
 
 }

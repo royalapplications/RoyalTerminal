@@ -12,8 +12,8 @@
         MinWidth="720"
         MinHeight="460"
         WindowStartupLocation="CenterScreen"
-        ExtendClientAreaToDecorationsHint="True"
-        WindowDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="{OnPlatform Default=True, Linux=False}"
+        WindowDecorations="{OnPlatform Default=BorderOnly, Linux=Full, macOS=Full}"
         ExtendClientAreaTitleBarHeightHint="-1"
         TransparencyBackgroundFallback="{DynamicResource WindowBackgroundBrush}">
 
