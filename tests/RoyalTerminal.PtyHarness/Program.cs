@@ -19,11 +19,8 @@ internal static partial class Program
     private const uint EnableMouseInput = 0x0010;
     private const uint EnableVirtualTerminalInput = 0x0200;
 
-    private static int Main(string[] args)
+    private static int Main()
     {
-        if (args.Length > 0 && args[0] == "unix-spawn-probe")
-            return UnixSpawnProbe.Run(args);
-
         string? logPath = Environment.GetEnvironmentVariable("RT_HARNESS_LOG");
         if (string.IsNullOrWhiteSpace(logPath))
         {
