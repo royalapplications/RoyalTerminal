@@ -82,7 +82,7 @@ internal static partial class UnixSpawnProbe
     private static void CheckClosedDescriptors(int mask)
     {
         using UnixPty pty = new();
-        using ManualResetEventSlim ready = new(false), exited = new(false);
+        using ManualResetEventSlim ready = new(false), complete = new(false), exited = new(false);
         StringBuilder output = new();
         pty.DataReceived += (bytes, count) =>
         {
@@ -90,6 +90,7 @@ internal static partial class UnixSpawnProbe
             {
                 output.Append(Encoding.UTF8.GetString(bytes, 0, count));
                 if (output.ToString().Contains("READY\r\n", StringComparison.Ordinal)) ready.Set();
+                if (output.ToString().Contains("ERR:roundtrip\r\n", StringComparison.Ordinal)) complete.Set();
             }
         };
         pty.ProcessExited += _ => exited.Set();
@@ -100,14 +101,17 @@ internal static partial class UnixSpawnProbe
                 Require(Close(descriptor) == 0, $"Unable to close descriptor {descriptor}.");
         pty.Start("/bin/sh", arguments: ["-c",
             "stty -echo || exit 11; printf 'READY\\n'; IFS= read -r reply || exit 12; " +
-            "printf 'OUT:%s\\n' \"$reply\"; printf 'ERR:%s\\n' \"$reply\" >&2"]);
+            "printf 'OUT:%s\\n' \"$reply\"; printf 'ERR:%s\\n' \"$reply\" >&2; IFS= read -r finish"]);
         Require(ready.Wait(TimeSpan.FromSeconds(8)), "Child stdout/controlling terminal is unavailable.");
         pty.Write("roundtrip\n");
-        Require(exited.Wait(TimeSpan.FromSeconds(8)), "Child stdin is unavailable or child failed to exit.");
+        bool received = complete.Wait(TimeSpan.FromSeconds(8));
         string transcript;
         lock (output) transcript = output.ToString();
+        Require(received, $"Child standard-stream roundtrip did not complete: {transcript}");
         Require(transcript.Replace("\r\n", "\n", StringComparison.Ordinal) == "READY\nOUT:roundtrip\nERR:roundtrip\n",
             $"Child standard streams failed with closed-descriptor mask {mask}: {transcript}");
+        pty.Write("finish\n");
+        Require(exited.Wait(TimeSpan.FromSeconds(8)), "Child failed to exit after completing its roundtrip.");
     }
 
     private static void Require(bool condition, string message)
