@@ -189,7 +189,7 @@ while IFS=$'\t' read -r batch estimated_count filter; do
     --no-build
     --filter "${filter}"
     --diag "${results_dir}/${name}.diag.log"
-    --logger "trx;LogFileName=${name}.trx"
+    --logger "trx;LogFilePrefix=${name}"
     --results-directory "${results_dir}"
   )
 

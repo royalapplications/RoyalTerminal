@@ -15,7 +15,7 @@
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="royalterminal-pty-spawn"
           Condition="$([MSBuild]::IsOSPlatform('OSX')) Or Exists('runtimes/osx/native/royalterminal-pty-spawn')" />
   </ItemGroup>
-  <Target Name="BuildUnixPtyLauncher" BeforeTargets="PrepareForBuild"
+  <Target Name="BuildUnixPtyLauncher" BeforeTargets="DispatchToInnerBuilds;PrepareForBuild"
           Inputs="$(MSBuildProjectDirectory)/../../native/unix-pty/spawn-helper.c;$(MSBuildProjectDirectory)/../../scripts/build-unix-pty.sh"
           Outputs="$(MSBuildProjectDirectory)/runtimes/osx/native/royalterminal-pty-spawn"
           Condition="$([MSBuild]::IsOSPlatform('OSX'))">

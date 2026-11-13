@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 ARG TARGETARCH
-ARG DOTNET_CHANNEL=10.0
+ARG DOTNET_CHANNEL=11.0
 ARG ZIG_VERSION=0.17.0
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet \
     && bash /tmp/dotnet-install.sh --channel "${DOTNET_CHANNEL}" --install-dir /usr/share/dotnet \
     && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
     && rm -f /tmp/dotnet-install.sh

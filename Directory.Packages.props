@@ -34,8 +34,10 @@
     <PackageVersion Include="SkiaSharp.NativeAssets.macOS" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.WebAssembly" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
-    <PackageVersion Include="System.IO.Ports" Version="10.0.14" />
-    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
+    <PackageVersion Include="System.IO.Ports" Version="10.0.14" Condition="'$(TargetFramework)' != 'net11.0' and '$(TargetFramework)' != 'net11.0-windows7.0'" />
+    <PackageVersion Include="System.IO.Ports" Version="11.0.0" Condition="'$(TargetFramework)' == 'net11.0' or '$(TargetFramework)' == 'net11.0-windows7.0'" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" Condition="'$(TargetFramework)' != 'net11.0' and '$(TargetFramework)' != 'net11.0-windows7.0'" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="11.0.0" Condition="'$(TargetFramework)' == 'net11.0' or '$(TargetFramework)' == 'net11.0-windows7.0'" />
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
     <PackageVersion Include="SshNet.Agent" Version="2026.0.0" />
     <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.1" />

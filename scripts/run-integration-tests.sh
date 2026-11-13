@@ -58,8 +58,10 @@ done
 
 project=tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj
 dotnet build "$project" -c "$CONFIGURATION"
-# Do not reuse a stale output library merely because it exists.
-output="tests/RoyalTerminal.IntegrationTests/bin/$CONFIGURATION/net10.0"
-cp "$NATIVE_LIB" "$output/$LIB_NAME"
-ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1 dotnet test "$project" \
-    -c "$CONFIGURATION" --no-build --verbosity "$VERBOSITY"
+# Do not reuse stale output libraries for either target framework.
+for framework in net10.0 net11.0; do
+    output="tests/RoyalTerminal.IntegrationTests/bin/$CONFIGURATION/$framework"
+    cp "$NATIVE_LIB" "$output/$LIB_NAME"
+    ROYALTERMINAL_REQUIRE_NATIVE_TESTS=1 dotnet test "$project" \
+        -c "$CONFIGURATION" -f "$framework" --no-build --verbosity "$VERBOSITY"
+done

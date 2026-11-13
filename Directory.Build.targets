@@ -1,6 +1,8 @@
 <Project>
   <PropertyGroup Condition="'$(RoyalTerminalGenerateGhosttyNativeRuntimeJson)' == 'true'">
-    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);GenerateRoyalTerminalGhosttyNativeRuntimeJson</TargetsForTfmSpecificContentInPackage>
+    <!-- runtime.json is shared by all frameworks and must appear only once in the package. -->
+    <_RoyalTerminalGhosttyMetadataTargetFramework>$(TargetFrameworks.Split(';')[0])</_RoyalTerminalGhosttyMetadataTargetFramework>
+    <TargetsForTfmSpecificContentInPackage Condition="'$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_RoyalTerminalGhosttyMetadataTargetFramework)'">$(TargetsForTfmSpecificContentInPackage);GenerateRoyalTerminalGhosttyNativeRuntimeJson</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <Target Name="GenerateRoyalTerminalGhosttyNativeRuntimeJson"

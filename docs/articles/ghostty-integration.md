@@ -2028,7 +2028,7 @@ can trade reduced allocation for higher CPU time; those results are retained.
 | Snapshot palette / 1,000 installs, no overrides | Shared canonical/host palette: 72,000 bytes; owned palette: 1,432,000 bytes. These are different ownership workloads, not proof that all restores save the same amount. |
 
 Reproduce using `dotnet build RoyalTerminal.slnx -c Release`, then
-`dotnet run --project tests/RoyalTerminal.Benchmarks -c Release --no-build -- <mode>`.
+`dotnet run -f net11.0 --project tests/RoyalTerminal.Benchmarks -c Release --no-build -- <mode>`.
 The named modes and their fixture sizes live in the benchmark program; use identical
 harness inputs when comparing revisions. `scripts/validate-macos.sh` builds the
 shipping native integration and runs isolated Release batches, startup and required-native

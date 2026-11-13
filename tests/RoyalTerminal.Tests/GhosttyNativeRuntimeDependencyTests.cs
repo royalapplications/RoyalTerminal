@@ -11,7 +11,11 @@ namespace RoyalTerminal.Tests;
 
 public sealed partial class GhosttyNativeRuntimeDependencyTests
 {
+#if NET11_0_OR_GREATER
+    private const string ConsumerTargetFramework = "net11.0";
+#else
     private const string ConsumerTargetFramework = "net10.0";
+#endif
 
     private static readonly (string Rid, string ExpectedNativePackage)[] RuntimePackageSelections =
     [
@@ -250,11 +254,15 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
 
             foreach (string packageId in ExternalPackageStubs)
             {
-                PackStubPackage(
-                    testRoot,
-                    feedDirectory,
-                    packageId,
-                    ReadCentralPackageVersion(repoRoot, packageId));
+                HashSet<string> versions = new(StringComparer.Ordinal);
+                foreach (string framework in new[] { "net10.0", "net11.0" })
+                {
+                    string dependencyVersion = ReadCentralPackageVersion(repoRoot, packageId, framework);
+                    if (versions.Add(dependencyVersion))
+                    {
+                        PackStubPackage(testRoot, feedDirectory, packageId, dependencyVersion);
+                    }
+                }
             }
 
             string appHostPackageVersion = ReadAppHostPackageVersion(repoRoot);
@@ -517,17 +525,22 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             : versionPrefix + "-" + versionSuffix;
     }
 
-    private static string ReadCentralPackageVersion(string repoRoot, string packageId)
+    private static string ReadCentralPackageVersion(string repoRoot, string packageId, string targetFramework)
     {
-        string propsPath = Path.Combine(repoRoot, "Directory.Packages.props");
-        XDocument props = XDocument.Load(propsPath);
-        XElement packageVersion = Assert.Single(
-            props.Descendants(),
-            element => element.Name.LocalName == "PackageVersion"
-                    && string.Equals(element.Attribute("Include")?.Value, packageId, StringComparison.Ordinal));
+        string output = RunDotNet(
+            repoRoot,
+            "msbuild",
+            Path.Combine(repoRoot, "tests", "RoyalTerminal.Tests", "RoyalTerminal.Tests.csproj"),
+            "-p:TargetFramework=" + targetFramework,
+            "-getItem:PackageVersion");
 
-        return packageVersion.Attribute("Version")?.Value
-            ?? throw new InvalidOperationException("PackageVersion is missing a Version attribute for " + packageId + ".");
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement packageVersion = Assert.Single(
+            document.RootElement.GetProperty("Items").GetProperty("PackageVersion").EnumerateArray(),
+            item => string.Equals(item.GetProperty("Identity").GetString(), packageId, StringComparison.Ordinal));
+
+        return packageVersion.GetProperty("Version").GetString()
+            ?? throw new InvalidOperationException("PackageVersion is missing a Version for " + packageId + ".");
     }
 
     private static string ReadAppHostPackageVersion(string repoRoot)
@@ -536,6 +549,7 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             repoRoot,
             "msbuild",
             Path.Combine(repoRoot, "tests", "RoyalTerminal.Tests", "RoyalTerminal.Tests.csproj"),
+            "-p:TargetFramework=" + ConsumerTargetFramework,
             "-getItem:KnownAppHostPack");
 
         using JsonDocument document = JsonDocument.Parse(output);
