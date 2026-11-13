@@ -344,6 +344,40 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
         }
     }
 
+    [Fact]
+    public void DotNetProcess_CapturesOutputWhenStandardErrorExceedsPipeCapacity()
+    {
+        string testRoot = Path.Combine(Path.GetTempPath(), "RoyalTerminal.ProcessCapture." + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            string projectPath = Path.Combine(testRoot, "PipeWriter.csproj");
+            File.WriteAllText(projectPath, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>{{ConsumerTargetFramework}}</TargetFramework>
+                    <OutputType>Exe</OutputType>
+                    <UseAppHost>false</UseAppHost>
+                  </PropertyGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(testRoot, "Program.cs"), """
+                System.Console.Error.Write(new string('e', 256 * 1024));
+                System.Console.Out.Write(new string('o', 256 * 1024));
+                """);
+            string outputDirectory = Path.Combine(testRoot, "out");
+            RunDotNet(testRoot, "build", projectPath, "-o", outputDirectory);
+
+            string output = RunDotNet(testRoot, Path.Combine(outputDirectory, "PipeWriter.dll"));
+
+            Assert.Equal(new string('o', 256 * 1024), output);
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
     private static void AssertRuntimeDependency(
         JsonElement runtimes,
         string rid,
@@ -458,11 +492,27 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             startInfo.ArgumentList.Add(argument);
         }
 
+        // Build servers can outlive the command and retain its redirected pipe handles.
+        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        startInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+        startInfo.Environment["UseSharedCompilation"] = "false";
+
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start dotnet process.");
-        string output = process.StandardOutput.ReadToEnd();
-        string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        // Drain both pipes together: a full stderr pipe must not block stdout's EOF.
+        Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> errorTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(120_000))
+        {
+            process.Kill(entireProcessTree: true);
+            Assert.True(process.WaitForExit(10_000), "Timed out terminating dotnet process.");
+            Assert.Fail("Timed out running dotnet " + string.Join(" ", arguments));
+        }
+
+        string[] captured = Task.WhenAll(outputTask, errorTask)
+            .WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+        string output = captured[0];
+        string error = captured[1];
 
         Assert.True(
             process.ExitCode == 0,
