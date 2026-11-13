@@ -44,7 +44,7 @@
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="libroyalterminal-notifications.dylib"
           Condition="$([MSBuild]::IsOSPlatform('OSX')) Or Exists('runtimes/osx/native/libroyalterminal-notifications.dylib')" />
   </ItemGroup>
-  <Target Name="BuildMacOsNotificationBridge" BeforeTargets="PrepareForBuild"
+  <Target Name="BuildMacOsNotificationBridge" BeforeTargets="DispatchToInnerBuilds;PrepareForBuild"
           Inputs="$(MSBuildProjectDirectory)/../../native/macos-notifications/notifications.m;$(MSBuildProjectDirectory)/../../native/macos-notifications/notifications.h;$(MSBuildProjectDirectory)/../../scripts/build-macos-notifications.sh"
           Outputs="$(MSBuildProjectDirectory)/runtimes/osx/native/libroyalterminal-notifications.dylib"
           Condition="$([MSBuild]::IsOSPlatform('OSX'))">
@@ -73,7 +73,7 @@
       <CopyToPublishDirectory Condition="$([MSBuild]::IsOSPlatform('Windows')) And '$(NotificationBridgeArch)' == 'arm64'">PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
-  <Target Name="BuildWindowsNotificationBridge" BeforeTargets="PrepareForBuild"
+  <Target Name="BuildWindowsNotificationBridge" BeforeTargets="DispatchToInnerBuilds;PrepareForBuild"
           Inputs="$(MSBuildProjectDirectory)/../../native/windows-notifications/notifications.cpp;$(MSBuildProjectDirectory)/../../native/windows-notifications/notification-platform.h;$(MSBuildProjectDirectory)/../../scripts/build-windows-notifications.ps1"
           Outputs="$(MSBuildProjectDirectory)/runtimes/win-$(NotificationBridgeArch)/native/royalterminal-notifications.dll"
           Condition="$([MSBuild]::IsOSPlatform('Windows'))">

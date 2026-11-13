@@ -444,7 +444,7 @@ try {
     Write-Info ""
     Write-Info "Next steps:"
     Write-Info "  1. Build the .NET solution: dotnet build"
-    Write-Info "  2. Run the demo: dotnet run --project samples\RoyalTerminal.Demo"
+    Write-Info "  2. Run the demo: dotnet run -f net11.0 --project samples\RoyalTerminal.Demo"
     Write-Info "  3. Pack NuGet packages: dotnet pack -c Release"
 
 } finally {

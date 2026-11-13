@@ -7,9 +7,9 @@
 
 <img width="2690" height="1840" alt="image" src="https://github.com/user-attachments/assets/5ac2f18a-6461-495a-9344-382e25f82c2a" />
 
-High-performance .NET 10 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), framebuffer shader support, official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
+High-performance .NET 10 and .NET 11 terminal stack with a backend-neutral Avalonia core (`RoyalTerminal.Avalonia`), framebuffer shader support, official native Ghostty VT integration (`libghostty-vt`), and a separate fully managed VT implementation.
 
-[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com)
+[![.NET 10 / 11](https://img.shields.io/badge/.NET-10%20%2F%2011-512BD4)](https://dotnet.microsoft.com)
 [![Avalonia](https://img.shields.io/badge/Avalonia-12.x-8b44ac)](https://avaloniaui.net)
 [![Documentation](https://img.shields.io/badge/docs-online-0f766e.svg)](https://royalapplications.github.io/RoyalTerminal/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -706,7 +706,7 @@ protected override void OnDpiChangedAfterParent(EventArgs e)
 }
 ```
 
-See `samples/RoyalTerminal.WinFormsHost` for a complete Windows-only sample targeting `net10.0-windows7.0`.
+See `samples/RoyalTerminal.WinFormsHost` for a complete Windows-only sample targeting `net10.0-windows7.0` and `net11.0-windows7.0`.
 
 ### 2. Core Control with Native VT Provider (official `libghostty-vt`)
 
@@ -1284,7 +1284,7 @@ RoyalTerminal/
 
 ### Prerequisites
 
-- .NET 10 SDK
+- .NET 11 SDK and .NET 10 runtime (for testing both target frameworks)
 - Zig 0.17.0
 - Ghostty submodule:
 
@@ -1313,13 +1313,13 @@ dotnet build RoyalTerminal.slnx -c Release
 ### Run Demo
 
 ```bash
-dotnet run --project samples/RoyalTerminal.Demo
+dotnet run -f net11.0 --project samples/RoyalTerminal.Demo
 ```
 
 ### Run Control Catalog CLI
 
 ```bash
-dotnet run --project samples/RoyalTerminal.ControlCatalog
+dotnet run -f net11.0 --project samples/RoyalTerminal.ControlCatalog
 ```
 
 Optional demo toggles:
@@ -1327,7 +1327,7 @@ Optional demo toggles:
 ```bash
 ROYALTERMINAL_DISABLE_TEXT_SHAPING=1 \
 ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS=1 \
-dotnet run --project samples/RoyalTerminal.Demo
+dotnet run -f net11.0 --project samples/RoyalTerminal.Demo
 ```
 
 ### Run macOS Native SwiftUI Sample
@@ -1402,7 +1402,7 @@ Current baseline in this repository:
 Performance baseline harness:
 
 ```bash
-dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
+dotnet run -f net11.0 --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
 ```
 
 ## API Coverage

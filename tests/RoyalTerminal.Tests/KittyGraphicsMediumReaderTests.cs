@@ -36,6 +36,19 @@ public sealed partial class KittyGraphicsMediumReaderTests
         Assert.Equal(new byte[] { 3, 4, 5 }, data);
     }
 
+    [Fact]
+    public void OpenedRegularFileReadsOffsetsIndependentlyOfPreviousReads()
+    {
+        // Match Ghostty's graphics_image.zig: seek to Kitty's O before reading exactly S bytes.
+        using Files files = new();
+        string path = files.Create("offsets.data", [1, 2, 3, 4, 5]);
+        using KittyGraphicsFileAccess.OpenedFile opened = KittyGraphicsFileAccess.Open(path, temporary: false);
+
+        Assert.Equal(new byte[] { 4, 5 }, opened.Read(3, 2, null, 2));
+        Assert.Equal(new byte[] { 2, 3, 4 }, opened.Read(1, 3, null, 3));
+        Assert.Equal(new byte[] { 3, 4, 5 }, opened.Read(2, 0, null, 3));
+    }
+
     [Theory]
     [InlineData(0, 6, 64)]
     [InlineData(6, 0, 64)]

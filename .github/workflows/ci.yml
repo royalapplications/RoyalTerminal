@@ -11,7 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DOTNET_VERSION: '10.0.x'
+  DOTNET_VERSION: |
+    10.0.x
+    11.0.x
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_NUGET_SIGNATURE_VERIFICATION: false
@@ -141,15 +143,15 @@ jobs:
         run: bash scripts/run-unit-test-batches.sh
 
       - name: Test bounded history contracts
-        run: dotnet test tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj -c Release --no-build --logger "trx;LogFileName=history-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj -c Release --no-build --logger "trx;LogFilePrefix=history-results" --results-directory ./test-results
 
       - name: Test (Mode Startup Smoke)
-        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" --logger "trx;LogFileName=mode-startup-smoke-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj -c Release --no-build --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" --logger "trx;LogFilePrefix=mode-startup-smoke-results" --results-directory ./test-results
 
       - name: Test (Native Integration)
         env:
           ROYALTERMINAL_REQUIRE_NATIVE_TESTS: '1'
-        run: dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=native-integration-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFilePrefix=native-integration-results" --results-directory ./test-results
 
       - name: Upload test results
         uses: actions/upload-artifact@v7
@@ -529,7 +531,7 @@ jobs:
           ls -la "${dst_interop}"
 
       - name: Run integration tests
-        run: dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --logger "trx;LogFileName=integration-results.trx" --results-directory ./test-results
+        run: dotnet test tests/RoyalTerminal.IntegrationTests/RoyalTerminal.IntegrationTests.csproj -c Release --logger "trx;LogFilePrefix=integration-results" --results-directory ./test-results
 
       - name: Upload test results
         uses: actions/upload-artifact@v7

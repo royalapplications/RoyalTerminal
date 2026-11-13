@@ -11,7 +11,11 @@ namespace RoyalTerminal.Tests;
 
 public sealed partial class GhosttyNativeRuntimeDependencyTests
 {
+#if NET11_0_OR_GREATER
+    private const string ConsumerTargetFramework = "net11.0";
+#else
     private const string ConsumerTargetFramework = "net10.0";
+#endif
 
     private static readonly (string Rid, string ExpectedNativePackage)[] RuntimePackageSelections =
     [
@@ -250,11 +254,15 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
 
             foreach (string packageId in ExternalPackageStubs)
             {
-                PackStubPackage(
-                    testRoot,
-                    feedDirectory,
-                    packageId,
-                    ReadCentralPackageVersion(repoRoot, packageId));
+                HashSet<string> versions = new(StringComparer.Ordinal);
+                foreach (string framework in new[] { "net10.0", "net11.0" })
+                {
+                    string dependencyVersion = ReadCentralPackageVersion(repoRoot, packageId, framework);
+                    if (versions.Add(dependencyVersion))
+                    {
+                        PackStubPackage(testRoot, feedDirectory, packageId, dependencyVersion);
+                    }
+                }
             }
 
             string appHostPackageVersion = ReadAppHostPackageVersion(repoRoot);
@@ -333,6 +341,40 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             {
                 Directory.Delete(testRoot, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public void DotNetProcess_CapturesOutputWhenStandardErrorExceedsPipeCapacity()
+    {
+        string testRoot = Path.Combine(Path.GetTempPath(), "RoyalTerminal.ProcessCapture." + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            string projectPath = Path.Combine(testRoot, "PipeWriter.csproj");
+            File.WriteAllText(projectPath, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>{{ConsumerTargetFramework}}</TargetFramework>
+                    <OutputType>Exe</OutputType>
+                    <UseAppHost>false</UseAppHost>
+                  </PropertyGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(testRoot, "Program.cs"), """
+                System.Console.Error.Write(new string('e', 256 * 1024));
+                System.Console.Out.Write(new string('o', 256 * 1024));
+                """);
+            string outputDirectory = Path.Combine(testRoot, "out");
+            RunDotNet(testRoot, "build", projectPath, "-o", outputDirectory);
+
+            string output = RunDotNet(testRoot, Path.Combine(outputDirectory, "PipeWriter.dll"));
+
+            Assert.Equal(new string('o', 256 * 1024), output);
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
         }
     }
 
@@ -450,11 +492,27 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             startInfo.ArgumentList.Add(argument);
         }
 
+        // Build servers can outlive the command and retain its redirected pipe handles.
+        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        startInfo.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
+        startInfo.Environment["UseSharedCompilation"] = "false";
+
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start dotnet process.");
-        string output = process.StandardOutput.ReadToEnd();
-        string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        // Drain both pipes together: a full stderr pipe must not block stdout's EOF.
+        Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> errorTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(120_000))
+        {
+            process.Kill(entireProcessTree: true);
+            Assert.True(process.WaitForExit(10_000), "Timed out terminating dotnet process.");
+            Assert.Fail("Timed out running dotnet " + string.Join(" ", arguments));
+        }
+
+        string[] captured = Task.WhenAll(outputTask, errorTask)
+            .WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+        string output = captured[0];
+        string error = captured[1];
 
         Assert.True(
             process.ExitCode == 0,
@@ -517,17 +575,22 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             : versionPrefix + "-" + versionSuffix;
     }
 
-    private static string ReadCentralPackageVersion(string repoRoot, string packageId)
+    private static string ReadCentralPackageVersion(string repoRoot, string packageId, string targetFramework)
     {
-        string propsPath = Path.Combine(repoRoot, "Directory.Packages.props");
-        XDocument props = XDocument.Load(propsPath);
-        XElement packageVersion = Assert.Single(
-            props.Descendants(),
-            element => element.Name.LocalName == "PackageVersion"
-                    && string.Equals(element.Attribute("Include")?.Value, packageId, StringComparison.Ordinal));
+        string output = RunDotNet(
+            repoRoot,
+            "msbuild",
+            Path.Combine(repoRoot, "tests", "RoyalTerminal.Tests", "RoyalTerminal.Tests.csproj"),
+            "-p:TargetFramework=" + targetFramework,
+            "-getItem:PackageVersion");
 
-        return packageVersion.Attribute("Version")?.Value
-            ?? throw new InvalidOperationException("PackageVersion is missing a Version attribute for " + packageId + ".");
+        using JsonDocument document = JsonDocument.Parse(output);
+        JsonElement packageVersion = Assert.Single(
+            document.RootElement.GetProperty("Items").GetProperty("PackageVersion").EnumerateArray(),
+            item => string.Equals(item.GetProperty("Identity").GetString(), packageId, StringComparison.Ordinal));
+
+        return packageVersion.GetProperty("Version").GetString()
+            ?? throw new InvalidOperationException("PackageVersion is missing a Version for " + packageId + ".");
     }
 
     private static string ReadAppHostPackageVersion(string repoRoot)
@@ -536,6 +599,7 @@ public sealed partial class GhosttyNativeRuntimeDependencyTests
             repoRoot,
             "msbuild",
             Path.Combine(repoRoot, "tests", "RoyalTerminal.Tests", "RoyalTerminal.Tests.csproj"),
+            "-p:TargetFramework=" + ConsumerTargetFramework,
             "-getItem:KnownAppHostPack");
 
         using JsonDocument document = JsonDocument.Parse(output);

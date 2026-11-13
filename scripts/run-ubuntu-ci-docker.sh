@@ -189,7 +189,7 @@ for i in "${!slice_names[@]}"; do
     -c Release \
     --no-build \
     --filter "$filter" \
-    --logger "trx;LogFileName=${name}.trx" \
+    --logger "trx;LogFilePrefix=${name}" \
     --results-directory ./test-results
 done
 
@@ -197,7 +197,7 @@ dotnet test tests/RoyalTerminal.Tests/RoyalTerminal.Tests.csproj \
   -c Release \
   --no-build \
   --filter "(FullyQualifiedName~TerminalModeResolverTests)|(FullyQualifiedName~MainWindowControllerModeStartupTests)|(FullyQualifiedName~Headless_FallbackParity_AutoAndManaged_PreserveKeyboardMousePasteAndResize_WhenHostedInScrollViewer)" \
-  --logger "trx;LogFileName=docker-mode-startup-smoke-results.trx" \
+  --logger "trx;LogFilePrefix=docker-mode-startup-smoke-results" \
   --results-directory ./test-results
 EOF
 

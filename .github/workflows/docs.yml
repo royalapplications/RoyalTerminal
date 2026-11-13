@@ -56,7 +56,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Setup Pages
         if: github.event_name != 'pull_request' && vars.DOCS_DEPLOY_ENABLED == 'true'

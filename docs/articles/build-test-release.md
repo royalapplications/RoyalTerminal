@@ -10,7 +10,7 @@ RoyalTerminal combines managed .NET packages with native artifacts. A successful
 
 Minimum toolchain:
 
-- .NET 10 SDK
+- .NET 11 SDK and .NET 10 runtime (for testing both target frameworks)
 - Zig 0.17.0
 - initialized git submodules for native builds
 
@@ -85,10 +85,34 @@ pwsh scripts/build-native.ps1 -Release
 dotnet build RoyalTerminal.slnx -c Release
 ```
 
+### Stale native libraries in history tests
+
+If native history tests fail at `ghostty_terminal_new` with `InvalidValue` on
+both .NET targets, check the native artifacts before changing the bindings.
+A loadable DLL can use an older C ABI and lack RoyalTerminal's history exports.
+The November 2026 investigation found June DLLs in both Windows runtime folders;
+the managed constructor already matched the pinned Ghostty source.
+
+Rebuild the extension library for the architecture of the .NET test process.
+The Windows build script defaults to x64; ARM64 hosts need `-Arch arm64`:
+
+```powershell
+pwsh -NoProfile -File scripts/build-native.ps1 -Arch arm64 -Release
+dotnet build RoyalTerminal.slnx -c Release
+dotnet test tests/RoyalTerminal.HistoryTests/RoyalTerminal.HistoryTests.csproj -c Release --no-build
+```
+
+Use `-Arch x64` for an x64 process. Rebuild the managed projects after staging
+native artifacts so both framework output directories receive the current DLL.
+With LLVM installed, `python scripts/verify-history-exports.py
+src/RoyalTerminal.GhosttySharp.Native.Win64/runtimes/win-arm64/native` verifies
+the required history exports. A plain upstream Ghostty build does not contain
+RoyalTerminal's extensions; retain the pinned ABI and use the extension build.
+
 Run the demo:
 
 ```bash
-dotnet run --project samples/RoyalTerminal.Demo
+dotnet run -f net11.0 --project samples/RoyalTerminal.Demo
 ```
 
 Run the demo with rendering diagnostics:
@@ -96,7 +120,7 @@ Run the demo with rendering diagnostics:
 ```bash
 ROYALTERMINAL_DISABLE_TEXT_SHAPING=1 \
 ROYALTERMINAL_ENABLE_RENDER_DIAGNOSTICS=1 \
-dotnet run --project samples/RoyalTerminal.Demo
+dotnet run -f net11.0 --project samples/RoyalTerminal.Demo
 ```
 
 ## Test commands
@@ -259,7 +283,7 @@ Pull request runs never deploy.
 You can capture benchmark baselines with:
 
 ```bash
-dotnet run --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
+dotnet run -f net11.0 --project tests/RoyalTerminal.Benchmarks/RoyalTerminal.Benchmarks.csproj -c Release -- --output /tmp/royalterminal-render-baseline.md
 ```
 
 Focused update benchmarks accept `--terminal-update` (managed parser, native

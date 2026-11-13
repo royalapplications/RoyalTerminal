@@ -91,6 +91,11 @@ internal static partial class KittyGraphicsFileAccess
             {
                 if (FStat(handle, out status) != 0) throw new IOException("Unable to stat Kitty image object.");
                 regular = (status.Mode & 0xf000) == 0x8000;
+                // Opening must not block on FIFOs, but .NET 11 treats O_NONBLOCK handles
+                // as asynchronous streams and ignores RandomAccess.Read's file offset.
+                // Restore blocking mode only after the opened object is known to be regular.
+                if (regular && SetIsNonBlocking(handle, 0) != 0)
+                    throw new IOException("Unable to configure Kitty image file for offset reads.");
             }
             return new OpenedFile(handle, GetOpenedPath(handle), regular, status);
         }
@@ -219,6 +224,8 @@ internal static partial class KittyGraphicsFileAccess
 
     [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8)]
     private static partial int OpenUnix(string path, int flags);
+    [LibraryImport("System.Native", EntryPoint = "SystemNative_FcntlSetIsNonBlocking", SetLastError = true)]
+    private static partial int SetIsNonBlocking(SafeFileHandle handle, int isNonBlocking);
     [LibraryImport("System.Native", EntryPoint = "SystemNative_FStat")]
     private static partial int FStat(SafeFileHandle handle, out FileStatus status);
     [LibraryImport("System.Native", EntryPoint = "SystemNative_LStat", StringMarshalling = StringMarshalling.Utf8)]

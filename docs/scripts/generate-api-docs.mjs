@@ -66,7 +66,7 @@ async function readProjectMetadata(pkg) {
 
 async function getTargetFramework() {
   const xml = await fs.readFile(directoryBuildPropsPath, "utf8");
-  return getTagValue(xml, "TargetFramework") ?? "net10.0";
+  return getTagValue(xml, "TargetFramework") ?? getTagValue(xml, "TargetFrameworks")?.split(";")[0] ?? "net10.0";
 }
 
 async function normalizeMarkdown(outputDirectory) {
