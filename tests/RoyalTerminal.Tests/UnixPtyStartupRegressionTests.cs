@@ -56,7 +56,7 @@ public sealed class UnixPtyStartupRegressionTests
     private static string RunConcurrentSession(Barrier start, string directory, string id, string parentDirectory)
     {
         using UnixPty pty = new();
-        using ManualResetEventSlim ready = new(false), exited = new(false);
+        using ManualResetEventSlim ready = new(false), complete = new(false), exited = new(false);
         StringBuilder output = new();
         pty.DataReceived += (bytes, count) =>
         {
@@ -64,6 +64,7 @@ public sealed class UnixPtyStartupRegressionTests
             {
                 output.Append(Encoding.UTF8.GetString(bytes, 0, count));
                 if (output.ToString().Contains($"READY:{id}\r\n", StringComparison.Ordinal)) ready.Set();
+                if (output.ToString().Contains($"ERR:{id}\r\n", StringComparison.Ordinal)) complete.Set();
             }
         };
         pty.ProcessExited += _ => exited.Set();
@@ -71,22 +72,27 @@ public sealed class UnixPtyStartupRegressionTests
         pty.Start("/bin/sh", workingDirectory: directory, arguments: ["-c",
             "stty -echo || exit 11; tty; printf 'READY:%s\\n' \"$(cat identity)\"; " +
             "IFS= read -r reply || exit 12; printf 'OUT:%s:%s\\n' \"$(cat identity)\" \"$reply\"; " +
-            "printf 'ERR:%s\\n' \"$(cat identity)\" >&2"]);
+            "printf 'ERR:%s\\n' \"$(cat identity)\" >&2; IFS= read -r finish"]);
         Assert.Equal(parentDirectory, Environment.CurrentDirectory);
         Assert.True(ready.Wait(TimeSpan.FromSeconds(8)), $"Session {id} did not start in its own directory.");
         // Keep every child alive until all slave terminals have been allocated,
         // otherwise the OS may legitimately recycle an earlier slave's name.
         Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(10)), "Concurrent readiness barrier timed out.");
         pty.Write($"input-{id}\n");
-        Assert.True(exited.Wait(TimeSpan.FromSeconds(8)), $"Session {id} did not exit.");
+        // Validate startup and IO while the slave is still open. Final-output
+        // draining during process exit is covered by the gather tests.
+        bool received = complete.Wait(TimeSpan.FromSeconds(8));
         string transcript;
         lock (output) transcript = output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.True(received, $"Session {id} did not complete its roundtrip: {transcript}");
         string[] lines = transcript.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(4, lines.Length);
+        Assert.True(lines.Length == 4, $"Session {id} expected four output lines, got {lines.Length}: {transcript}");
         Assert.StartsWith("/dev/", lines[0]);
         Assert.Equal($"READY:{id}", lines[1]);
         Assert.Equal($"OUT:{id}:input-{id}", lines[2]);
         Assert.Equal($"ERR:{id}", lines[3]);
+        pty.Write("finish\n");
+        Assert.True(exited.Wait(TimeSpan.FromSeconds(8)), $"Session {id} did not exit.");
         return lines[0];
     }
 
