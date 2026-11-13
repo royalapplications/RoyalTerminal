@@ -70,7 +70,7 @@ public sealed class UnixPtyStartupRegressionTests
         pty.ProcessExited += _ => exited.Set();
         Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(10)), "Concurrent startup barrier timed out.");
         pty.Start("/bin/sh", workingDirectory: directory, arguments: ["-c",
-            "stty -echo || exit 11; tty; printf 'READY:%s\\n' \"$(cat identity)\"; " +
+            "stty -echo || exit 11; printf '%s\\n' \"$(tty)\"; printf 'READY:%s\\n' \"$(cat identity)\"; " +
             "IFS= read -r reply || exit 12; printf 'OUT:%s:%s\\n' \"$(cat identity)\" \"$reply\"; " +
             "printf 'ERR:%s\\n' \"$(cat identity)\" >&2; IFS= read -r finish"]);
         Assert.Equal(parentDirectory, Environment.CurrentDirectory);
