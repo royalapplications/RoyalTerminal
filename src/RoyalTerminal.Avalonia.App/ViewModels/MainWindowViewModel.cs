@@ -580,7 +580,10 @@ public sealed class MainWindowViewModel : ReactiveObject
 
     public bool IsBodyTabStripVisible => !IsTabsInTitleBar;
 
-    public string ShellWindowTitle => OperatingSystem.IsMacOS() ? "RoyalTerminal" : string.Empty;
+    /// <summary>
+    /// Gets the title displayed by the native window decorations on Linux and macOS.
+    /// </summary>
+    public string ShellWindowTitle => OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() ? "RoyalTerminal" : string.Empty;
 
     public bool IsTitleBarLogoVisible => OperatingSystem.IsMacOS() && _showMacOsTitleBarLogos && !IsTabsInTitleBar;
 

@@ -931,7 +931,7 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void MainWindow_TitleCaptionAndTitleBarLogo_AreHiddenOutsideMacOS()
+    public void MainWindow_WindowTitleAndTitleBarLogo_RespectPlatformDecorations()
     {
         MainWindow window = new();
 
@@ -942,7 +942,7 @@ public class MainWindowViewModelFlowTests
             Border titleBarBrandIcon = FindShellControl<Border>(window, "TitleBarBrandIcon")
                 ?? throw new InvalidOperationException("TitleBarBrandIcon was not found.");
 
-            string expectedTitle = OperatingSystem.IsMacOS() ? "RoyalTerminal" : string.Empty;
+            string expectedTitle = OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() ? "RoyalTerminal" : string.Empty;
 
             Assert.Equal(expectedTitle, viewModel.ShellWindowTitle);
             Assert.Equal(expectedTitle, window.Title);
@@ -1673,7 +1673,7 @@ public class MainWindowViewModelFlowTests
     }
 
     [AvaloniaFact]
-    public void MainWindow_UsesExtendedClientTitleBarLayout()
+    public void MainWindow_UsesPlatformWindowDecorationsAndTitleBarLayout()
     {
         MainWindow window = new()
         {
@@ -1749,9 +1749,9 @@ public class MainWindowViewModelFlowTests
             Point rightDecorationReserveOrigin = titleBarRightDecorationReserve.TranslatePoint(new Point(0, 0), titleBarLayout)
                 ?? throw new InvalidOperationException("Title bar right decoration reserve is not attached to the title bar layout.");
 
-            Assert.True(window.ExtendClientAreaToDecorationsHint);
+            Assert.Equal(!OperatingSystem.IsLinux(), window.ExtendClientAreaToDecorationsHint);
             Assert.Equal(
-                OperatingSystem.IsMacOS() ? WindowDecorations.Full : WindowDecorations.BorderOnly,
+                OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() ? WindowDecorations.Full : WindowDecorations.BorderOnly,
                 window.WindowDecorations);
             Assert.Equal(-1d, window.ExtendClientAreaTitleBarHeightHint);
             Assert.Contains("titleBarArea", titleBar.Classes);
