@@ -69,10 +69,10 @@ public sealed class GhosttySearch : IDisposable
     }
 
     /// <summary>Selects the next, older match; returns false when there are no matches.</summary>
-    public bool SelectNext() => Select(GhosttyVtNative.GhosttySearchOption.SelectNext);
+    public bool SelectNext() => Select(next: true);
 
     /// <summary>Selects the previous, newer match; returns false when there are no matches.</summary>
-    public bool SelectPrevious() => Select(GhosttyVtNative.GhosttySearchOption.SelectPrevious);
+    public bool SelectPrevious() => Select(next: false);
 
     /// <summary>Sets whether selecting a match scrolls it into view.</summary>
     public unsafe void SetSelectionScroll(GhosttyVtNative.GhosttySearchScroll value)
@@ -145,16 +145,16 @@ public sealed class GhosttySearch : IDisposable
         }
     }
 
-    private unsafe bool Select(GhosttyVtNative.GhosttySearchOption option)
+    private bool Select(bool next)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.GhosttyResult result = GhosttyVtNative.SearchSet(_handle, option, null);
+        GhosttyVtNative.GhosttyResult result = next ? GhosttyVtNative.SearchSelectNext(_handle) : GhosttyVtNative.SearchSelectPrev(_handle);
         if (result == GhosttyVtNative.GhosttyResult.NoValue)
         {
             return false;
         }
 
-        ThrowIfFailed(result, $"ghostty_search_set({option})");
+        ThrowIfFailed(result, "ghostty_search_select");
         return true;
     }
 

@@ -13,19 +13,19 @@ public static partial class GhosttyVtNative
     public enum GhosttyTerminalBoundary : int
     {
         /// <summary>Parser ground state, including immediately before consuming input.</summary>
-        Ground = 1 << 0,
+        Ground = 1,
         /// <summary>APC introducer consumed.</summary>
-        ApcStart = 1 << 1,
+        ApcStart = 2,
         /// <summary>APC ending byte consumed.</summary>
-        ApcEnd = 1 << 2,
+        ApcEnd = 4,
         /// <summary>DCS introducer consumed, before its header.</summary>
-        DcsStart = 1 << 3,
+        DcsStart = 8,
         /// <summary>DCS ending byte consumed.</summary>
-        DcsEnd = 1 << 4,
+        DcsEnd = 16,
         /// <summary>OSC introducer consumed.</summary>
-        OscStart = 1 << 5,
+        OscStart = 32,
         /// <summary>OSC ending byte consumed.</summary>
-        OscEnd = 1 << 6,
+        OscEnd = 64,
     }
 
     /// <summary>Control string associated with a parser boundary.</summary>

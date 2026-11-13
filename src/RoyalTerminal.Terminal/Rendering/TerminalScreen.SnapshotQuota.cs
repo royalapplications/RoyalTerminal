@@ -44,7 +44,7 @@ public sealed partial class TerminalScreen
         if (!TracksSnapshotMetadata || _rows.Count < 2 || !HasNativeSnapshotGeometry) return 0;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         TerminalRow tail = _rows[_rows.Count - 1];
-        if (tail.SnapshotAllocation is null && !(_snapshotPageTracker ??= new()).AssignTailRow(_rows, _rows.Count - 1, layout))
+        if (tail.SnapshotAllocation is null && !(_snapshotPageTracker ??= new()).AssignTailRow(_rows, _rows.Count - 1, layout, _alternateBufferActive ? 1 : 0))
             _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
         bool newPage = !ReferenceEquals(tail.SnapshotAllocation, _rows[_rows.Count - 2].SnapshotAllocation);
         return RemoveSnapshotQuotaRows(newPage ? GhosttySnapshotQuotaCheckpoint.PageGrowth : GhosttySnapshotQuotaCheckpoint.RowGrowth, growthQuota);

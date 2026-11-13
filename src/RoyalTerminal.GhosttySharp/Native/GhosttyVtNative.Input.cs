@@ -30,14 +30,16 @@ public static partial class GhosttyVtNative
 
     public enum GhosttyKeyEncoderOption : int
     {
-        CursorKeyApplication = 0,
-        KeypadKeyApplication = 1,
-        IgnoreKeypadWithNumlock = 2,
-        AltEscapePrefix = 3,
-        ModifyOtherKeysState2 = 4,
-        KittyFlags = 5,
-        MacOsOptionAsAlt = 6,
-        BackarrowKeyMode = 7,
+        CursorKeyApplication = 1,
+        KeypadKeyApplication = 2,
+        IgnoreKeypadWithNumlock = 3,
+        AltEscapePrefix = 4,
+        ModifyOtherKeysState2 = 5,
+        KittyFlags = 6,
+        MacOsOptionAsAlt = 7,
+        BackarrowKeyMode = 8,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttyMouseAction : int
@@ -112,11 +114,13 @@ public static partial class GhosttyVtNative
 
     public enum GhosttyMouseEncoderOption : int
     {
-        Event = 0,
-        Format = 1,
-        Size = 2,
-        AnyButtonPressed = 3,
-        TrackLastCell = 4,
+        Event = 1,
+        Format = 2,
+        Size = 3,
+        AnyButtonPressed = 4,
+        TrackLastCell = 5,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_new")]
@@ -129,7 +133,7 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_set_action")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEventSetAction(nint mouseEvent, GhosttyMouseAction action);
+    public static partial GhosttyResult MouseEventSetAction(nint mouseEvent, GhosttyMouseAction action);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_get_action")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -137,20 +141,19 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_set_button")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEventSetButton(nint mouseEvent, GhosttyMouseButtonId button);
+    public static partial GhosttyResult MouseEventSetButton(nint mouseEvent, GhosttyMouseButtonId button);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_clear_button")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEventClearButton(nint mouseEvent);
+    public static partial GhosttyResult MouseEventClearButton(nint mouseEvent);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_get_button")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    [return: MarshalAs(UnmanagedType.U1)]
-    public static partial bool MouseEventGetButton(nint mouseEvent, out GhosttyMouseButtonId button);
+    public static partial GhosttyResult MouseEventGetButton(nint mouseEvent, out GhosttyMouseButtonId button);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_set_mods")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEventSetMods(nint mouseEvent, GhosttyVtMods mods);
+    public static partial GhosttyResult MouseEventSetMods(nint mouseEvent, GhosttyVtMods mods);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_get_mods")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -158,7 +161,7 @@ public static partial class GhosttyVtNative
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_set_position")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEventSetPosition(nint mouseEvent, GhosttyMousePosition position);
+    public static partial GhosttyResult MouseEventSetPosition(nint mouseEvent, GhosttyMousePosition position);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_event_get_position")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -172,17 +175,17 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static partial void MouseEncoderFree(nint encoder);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_setopt")]
+    [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_set")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe partial void MouseEncoderSetopt(nint encoder, GhosttyMouseEncoderOption option, void* value);
+    public static unsafe partial GhosttyResult MouseEncoderSetopt(nint encoder, GhosttyMouseEncoderOption option, void* value);
 
-    [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_setopt_from_terminal")]
+    [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_set_from_terminal")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEncoderSetoptFromTerminal(nint encoder, nint terminal);
+    public static partial GhosttyResult MouseEncoderSetoptFromTerminal(nint encoder, nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_reset")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
-    public static partial void MouseEncoderReset(nint encoder);
+    public static partial GhosttyResult MouseEncoderReset(nint encoder);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_mouse_encoder_encode")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

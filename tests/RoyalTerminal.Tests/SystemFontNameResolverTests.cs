@@ -328,10 +328,10 @@ public sealed class SystemFontNameResolverTests
     }
 
     [Theory]
-    [InlineData("Source Code Pro", "Light", 300)]
-    [InlineData("Cascadia Code", "Light", 300)]
-    [InlineData("Cascadia Mono", "SemiLight", 350)]
-    public void NativeMatcherAndPublicCacheResolveInstalledStyleAliases(string family, string style, int weight)
+    [InlineData("Source Code Pro", "Light")]
+    [InlineData("Cascadia Code", "Light")]
+    [InlineData("Cascadia Mono", "SemiLight")]
+    public void NativeMatcherAndPublicCacheResolveInstalledStyleAliases(string family, string style)
     {
         using SKFontManager manager = SKFontManager.CreateDefault();
         using SKFontStyleSet styles = manager.GetFontStyles(family);
@@ -341,10 +341,13 @@ public sealed class SystemFontNameResolverTests
         Assert.NotNull(expected);
         using GlyphCache cache = new(family + " " + style);
         Assert.Equal(expected.FamilyName, cache.RegularTypeface.FamilyName);
-        Assert.Equal(weight, cache.RegularTypeface.FontWeight);
+        // Installed font weights vary with the CoreText font/version. Compare
+        // against the face selected by the native matcher; deterministic fixtures
+        // above verify the nominal CSS weights independently of host fonts.
+        Assert.Equal(expected.FontWeight, cache.RegularTypeface.FontWeight);
         Assert.True(cache.RegularTypeface.IsFixedPitch);
         using GlyphCache configured = GlyphCache.CreateWithFontFamilies(new() { Regular = [family + " " + style] });
-        Assert.Equal(weight, configured.RegularTypeface.FontWeight);
+        Assert.Equal(expected.FontWeight, configured.RegularTypeface.FontWeight);
         Assert.Equal(cache.MeasureCellSize(16), configured.MeasureCellSize(16));
     }
 

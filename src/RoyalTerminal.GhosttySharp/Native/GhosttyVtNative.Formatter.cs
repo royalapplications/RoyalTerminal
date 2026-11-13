@@ -113,8 +113,7 @@ public static partial class GhosttyVtNative
     public static partial GhosttyResult FormatterTerminalNew(
         nint allocator,
         out nint formatter,
-        nint terminal,
-        GhosttyFormatterTerminalOptions options);
+        nint terminal);
 
     [LibraryImport(LibName, EntryPoint = "ghostty_formatter_format")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

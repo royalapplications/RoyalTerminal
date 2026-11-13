@@ -10,6 +10,17 @@ namespace RoyalTerminal.Terminal.Snapshots;
 internal readonly record struct GhosttySnapshotPageCapacity(
     ushort Columns, ushort Rows, ushort Styles, ushort HyperlinkBytes, uint GraphemeBytes, uint StringBytes)
 {
+    // PAGE v1 encodes both hyperlink dimensions in one conservative hint.
+    // Live pages retain the independent fields introduced after libghostty 1.0.
+    internal ushort HyperlinkCells { get; init; } = DecodeHyperlinkCells(HyperlinkBytes, Columns, Rows);
+    internal ushort HyperlinkWireBytes => (ushort)Math.Min(ushort.MaxValue,
+        Math.Max(HyperlinkBytes, ((uint)HyperlinkCells + 15) / 16 * 48));
+
+    private static ushort DecodeHyperlinkCells(ushort bytes, ushort columns, ushort rows)
+        => bytes / 48 >= ushort.MaxValue / 48
+            ? (ushort)Math.Min(ushort.MaxValue, (uint)columns * rows)
+            : (ushort)(bytes / 48 * 16);
+
     internal static GhosttySnapshotPageCapacity Read(ReadOnlySpan<byte> header)
     {
         if (header.Length < 20) throw new EndOfStreamException();
@@ -46,7 +57,7 @@ internal sealed class GhosttySnapshotAllocation
     {
         if (capacity.Columns == 0 || capacity.Rows == 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         ulong cellsStart = Align((ulong)capacity.Rows * 8, 128); // Zig atomic.cache_line: x64/arm64.
-        ulong metaStart = Align(cellsStart + (ulong)capacity.Rows * capacity.Columns * 8, 8);
+        ulong metaStart = Align(cellsStart + (ulong)capacity.Rows * capacity.Columns * 8, 16);
         return Align(metaStart + MetadataBytes(capacity), _pageAlignment);
     }
 
@@ -79,6 +90,20 @@ internal sealed class GhosttySnapshotAllocation
         return false;
     }
 
+    internal bool TryFitRows(GhosttySnapshotPageCapacity capacity, ulong bytes, out GhosttySnapshotPageCapacity fitted)
+    {
+        ulong metadata = MetadataBytes(capacity);
+        if (metadata >= bytes) { fitted = default; return false; }
+        int rows = (int)Math.Min(ushort.MaxValue, (bytes - metadata) / ((ulong)capacity.Columns * 8 + 8));
+        for (; rows > 0; rows--)
+        {
+            fitted = capacity with { Rows = (ushort)rows };
+            if (LayoutBytes(fitted) <= bytes) return true;
+        }
+        fitted = default;
+        return false;
+    }
+
     internal (ulong Bytes, ulong Rows) MinimumLimits(int columns, int rows)
     {
         if (rows is <= 0 or > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(rows));
@@ -95,15 +120,15 @@ internal sealed class GhosttySnapshotAllocation
     }
 
     // PageList.increaseCapacity: zero resumes at the Capacity default, otherwise
-    // double, saturating once at the field maximum. Style/grapheme growth can
-    // project the current density over all reserved rows with 25% headroom,
+    // double, saturating once at the field maximum. Every metadata dimension
+    // projects the current density over all reserved rows with 25% headroom,
     // bounded to 32 times the old request and the native four-GiB page ceiling.
     internal bool TryIncreaseCapacity(GhosttySnapshotPageCapacity original, GhosttySnapshotCapacityDimension dimension,
         ulong used, int liveRows, out GhosttySnapshotPageCapacity increased)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(liveRows);
         uint old = GetDimension(original, dimension);
-        uint maximum = dimension is GhosttySnapshotCapacityDimension.Styles or GhosttySnapshotCapacityDimension.HyperlinkBytes
+        uint maximum = dimension is GhosttySnapshotCapacityDimension.Styles or GhosttySnapshotCapacityDimension.HyperlinkBytes or GhosttySnapshotCapacityDimension.HyperlinkCells
             ? ushort.MaxValue : uint.MaxValue;
         increased = original;
         if (old == maximum) return false;
@@ -112,19 +137,28 @@ internal sealed class GhosttySnapshotAllocation
             GhosttySnapshotCapacityDimension.Styles => 16,
             GhosttySnapshotCapacityDimension.GraphemeBytes => 1024,
             GhosttySnapshotCapacityDimension.HyperlinkBytes => 192,
+            GhosttySnapshotCapacityDimension.HyperlinkCells => 64,
             GhosttySnapshotCapacityDimension.StringBytes => 2048,
             _ => throw new ArgumentOutOfRangeException(nameof(dimension)),
         } : (uint)Math.Min((ulong)maximum, (ulong)old * 2);
         GhosttySnapshotPageCapacity doubled = SetDimension(original, dimension, next);
         if (LayoutBytes(doubled) > uint.MaxValue) return false;
         increased = doubled;
-        if (used == 0 || liveRows == 0 || old == 0 ||
-            dimension is not (GhosttySnapshotCapacityDimension.Styles or GhosttySnapshotCapacityDimension.GraphemeBytes)) return true;
+        if (used == 0 || liveRows == 0) return true;
 
         ulong scaled = used > ulong.MaxValue / original.Rows ? ulong.MaxValue : used * original.Rows;
         ulong density = scaled / (ulong)liveRows;
         ulong projected = density > ulong.MaxValue - density / 4 ? ulong.MaxValue : density + density / 4;
-        projected = Math.Min(projected, Math.Min((ulong)old * 32, maximum));
+        ulong floor = dimension switch
+        {
+            GhosttySnapshotCapacityDimension.Styles => 128,
+            GhosttySnapshotCapacityDimension.GraphemeBytes => 8192,
+            GhosttySnapshotCapacityDimension.HyperlinkBytes => ((original.Rows + 1UL) * 16 + 12) / 13 * 48,
+            GhosttySnapshotCapacityDimension.HyperlinkCells => original.Rows,
+            GhosttySnapshotCapacityDimension.StringBytes => (ulong)original.Rows * 64,
+            _ => 0,
+        };
+        projected = Math.Min(projected, Math.Min(Math.Max(old, floor) * 32, maximum));
         if (projected > next)
         {
             GhosttySnapshotPageCapacity candidate = SetDimension(original, dimension, (uint)projected);
@@ -154,10 +188,14 @@ internal sealed class GhosttySnapshotAllocation
                 dimension = GhosttySnapshotCapacityDimension.GraphemeBytes;
                 used = Math.Min(usage.GraphemeBytes, BitmapDataBytes(capacity.GraphemeBytes, 16));
             }
-            else if (usage.Hyperlinks > SetItemCapacity(capacity.HyperlinkBytes / 48UL) ||
-                     usage.HyperlinkCells > MapItemCapacity(capacity.HyperlinkBytes / 48UL * 16, 80))
+            else if (usage.Hyperlinks > SetItemCapacity(capacity.HyperlinkBytes / 48UL))
             {
                 dimension = GhosttySnapshotCapacityDimension.HyperlinkBytes;
+                used = 0;
+            }
+            else if (usage.HyperlinkCells > MapItemCapacity(capacity.HyperlinkCells, 80))
+            {
+                dimension = GhosttySnapshotCapacityDimension.HyperlinkCells;
                 used = 0;
             }
             else if (usage.StringBytes > BitmapDataBytes(capacity.StringBytes, 32))
@@ -189,6 +227,7 @@ internal sealed class GhosttySnapshotAllocation
         GhosttySnapshotCapacityDimension.Styles => capacity.Styles,
         GhosttySnapshotCapacityDimension.GraphemeBytes => capacity.GraphemeBytes,
         GhosttySnapshotCapacityDimension.HyperlinkBytes => capacity.HyperlinkBytes,
+        GhosttySnapshotCapacityDimension.HyperlinkCells => capacity.HyperlinkCells,
         GhosttySnapshotCapacityDimension.StringBytes => capacity.StringBytes,
         _ => throw new ArgumentOutOfRangeException(nameof(dimension)),
     };
@@ -199,15 +238,16 @@ internal sealed class GhosttySnapshotAllocation
         GhosttySnapshotCapacityDimension.Styles => capacity with { Styles = (ushort)value },
         GhosttySnapshotCapacityDimension.GraphemeBytes => capacity with { GraphemeBytes = value },
         GhosttySnapshotCapacityDimension.HyperlinkBytes => capacity with { HyperlinkBytes = (ushort)value },
+        GhosttySnapshotCapacityDimension.HyperlinkCells => capacity with { HyperlinkCells = (ushort)value },
         GhosttySnapshotCapacityDimension.StringBytes => capacity with { StringBytes = value },
         _ => throw new ArgumentOutOfRangeException(nameof(dimension)),
     };
 
     private static ulong MetadataBytes(GhosttySnapshotPageCapacity capacity)
     {
-        // RGB is a packed u24 with four-byte ABI alignment. Each tagged color
-        // therefore occupies eight bytes; Style is 28 and Set.Item is 36.
-        ulong end = SetBytes(capacity.Styles, 36, 4);
+        // The native packed u128 Style is 16 bytes with 16-byte alignment.
+        // Its reference-counted item includes eight metadata bytes, padded to 32.
+        ulong end = SetBytes(capacity.Styles, 32, 16);
         end = Align(end, 8) + BitmapBytes(capacity.GraphemeBytes, 16);
         ulong graphemes = PowerOfTwo(((ulong)capacity.GraphemeBytes + 15) / 16);
         // Offset(Cell): u32; Offset(u21).Slice: 16 bytes, aligned to eight.
@@ -216,7 +256,7 @@ internal sealed class GhosttySnapshotAllocation
         ulong links = capacity.HyperlinkBytes / 48UL;
         end = Align(end, 8) + SetBytes(links, 48, 8);
         // Hyperlink cell map uses u16 IDs and 80% maximum load.
-        return Align(end, 4) + MapBytes(links * 16, 2, 2, 80);
+        return Align(end, 4) + MapBytes(capacity.HyperlinkCells, 2, 2, 80);
     }
 
     private static ulong SetBytes(ulong requested, ulong itemBytes, ulong alignment)

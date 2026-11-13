@@ -53,7 +53,7 @@ internal sealed class TerminalKittyPlaceholderScene
     internal bool TryGetTarget(in TerminalKittyPlaceholderRun run, out TerminalKittyPlaceholderTarget target)
         => run.PlacementId == 0
             ? _defaults.TryGetValue(run.ImageId, out target)
-            : _targets.TryGetValue(new(run.ImageId, run.PlacementId, false), out target);
+            : _targets.TryGetValue(new(run.ImageId, run.PlacementId, false), out target) && target.Virtual;
 
     internal bool Matches(IReadOnlyList<TerminalKittyPlaceholderTarget> targets,
         IReadOnlyList<TerminalKittyRelativePlacement> relatives, uint cellWidth, uint cellHeight)

@@ -38,7 +38,7 @@ public sealed class GhosttyMouseEvent : IDisposable
     public void SetAction(GhosttyVtNative.GhosttyMouseAction action)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEventSetAction(_handle, action);
+        ThrowIfFailed(GhosttyVtNative.MouseEventSetAction(_handle, action), "MouseEventSetAction");
     }
 
     /// <summary>Gets the mouse action.</summary>
@@ -52,28 +52,28 @@ public sealed class GhosttyMouseEvent : IDisposable
     public void SetButton(GhosttyVtNative.GhosttyMouseButtonId button)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEventSetButton(_handle, button);
+        ThrowIfFailed(GhosttyVtNative.MouseEventSetButton(_handle, button), "MouseEventSetButton");
     }
 
     /// <summary>Clears the mouse button.</summary>
     public void ClearButton()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEventClearButton(_handle);
+        ThrowIfFailed(GhosttyVtNative.MouseEventClearButton(_handle), "MouseEventClearButton");
     }
 
     /// <summary>Attempts to get the active mouse button.</summary>
     public bool TryGetButton(out GhosttyVtNative.GhosttyMouseButtonId button)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return GhosttyVtNative.MouseEventGetButton(_handle, out button);
+        return GhosttyVtNative.MouseEventGetButton(_handle, out button) == GhosttyVtNative.GhosttyResult.Success;
     }
 
     /// <summary>Sets the keyboard modifiers held during the mouse event.</summary>
     public void SetModifiers(GhosttyVtNative.GhosttyVtMods modifiers)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEventSetMods(_handle, modifiers);
+        ThrowIfFailed(GhosttyVtNative.MouseEventSetMods(_handle, modifiers), "MouseEventSetMods");
     }
 
     /// <summary>Gets the keyboard modifiers held during the mouse event.</summary>
@@ -87,11 +87,11 @@ public sealed class GhosttyMouseEvent : IDisposable
     public void SetPosition(float x, float y)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.MouseEventSetPosition(_handle, new GhosttyVtNative.GhosttyMousePosition
+        ThrowIfFailed(GhosttyVtNative.MouseEventSetPosition(_handle, new GhosttyVtNative.GhosttyMousePosition
         {
             X = x,
             Y = y,
-        });
+        }), "MouseEventSetPosition");
     }
 
     /// <summary>Gets the mouse position in surface-space pixels.</summary>

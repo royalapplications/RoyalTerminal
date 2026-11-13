@@ -1,0 +1,8 @@
+Runtime: .NET 10.0.5; Arm64
+Snapshot-tracked reflow: 512 source rows, 13 resizes; median of 7 samples; setup/restore excluded.
+| Workload | Median milliseconds | Allocated bytes | Final rows |
+|---|---:|---:|---:|
+| plain | 11.104 | 39409728 | 524 |
+| graphemes | 67.590 | 90295544 | 524 |
+| shared-links | 118.110 | 110367480 | 524 |
+| long-shared-links | 137.674 | 109901208 | 524 |

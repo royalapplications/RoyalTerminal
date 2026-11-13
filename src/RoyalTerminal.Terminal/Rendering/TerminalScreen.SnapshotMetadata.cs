@@ -51,7 +51,7 @@ public sealed partial class TerminalScreen
         if (_snapshotPageTracker?.IsCurrent(key, row, current) == true) return true;
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
-        if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout))
+        if (row.SnapshotAllocation is null && !tracker.AssignTailRow(rows, index, layout, key))
             _ = GhosttySnapshotLiveAllocation.Measure(this, rows, layout);
         return tracker.IsCurrent(key, row, current) || tracker.ChangeCursor(rows, key, row, previous, current, layout, this, ref hyperlinkCounter);
     }
@@ -69,7 +69,7 @@ public sealed partial class TerminalScreen
         GhosttySnapshotAllocation layout = SnapshotPageLayout();
         GhosttySnapshotPageTracker tracker = _snapshotPageTracker ??= new();
         if (row.SnapshotAllocation is null &&
-            !(_rows.Count > 0 && ReferenceEquals(_rows[_rows.Count - 1], row) && tracker.AssignTailRow(_rows, _rows.Count - 1, layout)))
+            !(_rows.Count > 0 && ReferenceEquals(_rows[_rows.Count - 1], row) && tracker.AssignTailRow(_rows, _rows.Count - 1, layout, _alternateBufferActive ? 1 : 0)))
             _ = GhosttySnapshotLiveAllocation.Measure(this, _rows, layout);
         return tracker.EditRow(_rows, row, layout, this);
     }
