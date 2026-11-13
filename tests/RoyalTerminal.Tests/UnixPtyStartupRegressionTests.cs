@@ -127,8 +127,7 @@ public sealed class UnixPtyStartupRegressionTests
         while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "RoyalTerminal.slnx")))
             repository = repository.Parent;
         Assert.NotNull(repository);
-        string executable = Path.Combine(repository.FullName, "tests", "RoyalTerminal.PtyHarness", "bin",
-            output.Parent!.Name, output.Name, "RoyalTerminal.PtyHarness");
+        string executable = PtyHarnessPath.Resolve(repository.FullName, output.FullName);
         Assert.True(File.Exists(executable), $"Missing harness for this configuration/framework: {executable}");
         string resultFile = Path.GetTempFileName();
         ProcessStartInfo info = new(executable)
