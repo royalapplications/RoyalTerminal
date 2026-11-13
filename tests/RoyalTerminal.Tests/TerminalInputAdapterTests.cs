@@ -296,7 +296,8 @@ public sealed partial class TerminalInputAdapterTests
     [Fact]
     public void ResetClearsWindowsAltGrSuppressionAndPendingRelease()
     {
-        WindowsTerminalKeyboardInputNormalizer normalizer = new();
+        // After reset, Ctrl+Alt+A is a shortcut only on a layout without AltGr text on A.
+        WindowsTerminalKeyboardInputNormalizer normalizer = new(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: false));
         DefaultTerminalInputAdapter adapter = new(normalizer);
         TerminalModeState modes = default;
         normalizer.HandleKeyDown(new() { Key = Key.RightAlt }, modes);
@@ -1226,7 +1227,10 @@ public sealed partial class TerminalInputAdapterTests
     [Fact]
     public async Task HandleKeyUp_WithWindowsAltGrPrintableKey_DoesNotSendRelease()
     {
-        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        // This tests printable AltGr input, not a host layout's AltGr+E dead key.
+        DefaultTerminalInputAdapter adapter = new(
+            new WindowsTerminalKeyboardInputNormalizer(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: true)),
+            new PlainKeyboardLayout());
         TerminalSessionService sessionService = new();
         FakeTransport transport = new();
         StaticTransportFactory factory = new(transport);
@@ -1283,7 +1287,9 @@ public sealed partial class TerminalInputAdapterTests
     [Fact]
     public async Task HandleKeyDown_WithWindowsNormalizer_RealControlAltChordStillEncodes()
     {
-        DefaultTerminalInputAdapter adapter = new(new WindowsTerminalKeyboardInputNormalizer());
+        DefaultTerminalInputAdapter adapter = new(
+            new WindowsTerminalKeyboardInputNormalizer(new FixedWindowsKeyboardLayoutTextInputProbe(mayProduceText: false)),
+            new PlainKeyboardLayout());
         TerminalSessionService sessionService = new();
         FakeTransport transport = new();
         StaticTransportFactory factory = new(transport);
@@ -1677,7 +1683,7 @@ public sealed partial class TerminalInputAdapterTests
     [Fact]
     public async Task HandleKeyDown_WithActiveTransport_EncodesAltControlChord()
     {
-        DefaultTerminalInputAdapter adapter = new();
+        DefaultTerminalInputAdapter adapter = new(new DefaultTerminalKeyboardInputNormalizer(), new PlainKeyboardLayout());
         TerminalSessionService sessionService = new();
         FakeTransport transport = new();
         StaticTransportFactory factory = new(transport);

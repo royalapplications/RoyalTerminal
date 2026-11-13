@@ -14,6 +14,13 @@ Minimum toolchain:
 - Zig 0.17.0
 - initialized git submodules for native builds
 
+The `net11.0` target opts into runtime async through the `runtime-async=on`
+compiler feature in `Directory.Build.targets`. The `net10.0` target keeps its
+existing compiler-generated async state machines. This setting applies when
+compiling each assembly; consuming applications choose separately whether to
+enable runtime async for their own code. See the
+[.NET runtime documentation](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#runtime-async).
+
 Common optional requirements:
 
 - SSH test endpoint credentials for integration tests
@@ -85,6 +92,13 @@ pwsh scripts/build-native.ps1 -Release
 dotnet build RoyalTerminal.slnx -c Release
 ```
 
+The Windows notification bridge compiler is serialized per checkout and
+architecture. Its build script rechecks source, header, and script timestamps
+after acquiring the lock, so parallel framework builds reuse the first completed
+DLL. Normal parallel MSBuild execution remains enabled. The
+`WindowsNotificationBridgeBuildTests` regression test checks competing processes,
+an unchanged rebuild, and header invalidation when Windows build tools are available.
+
 ### Stale native libraries in history tests
 
 If native history tests fail at `ghostty_terminal_new` with `InvalidValue` on
@@ -130,6 +144,26 @@ Full solution test pass:
 ```bash
 dotnet test RoyalTerminal.slnx -c Release
 ```
+
+### Keyboard layout isolation
+
+Keyboard unit tests must inject the layout and Windows text-input probe when
+their assertions depend on whether Ctrl+Alt produces text or a dead key. For
+example, Ctrl+Alt+C can produce `ç`, and Ctrl+Alt+E can be a dead accent key.
+Those tests must not infer shortcut behavior from the developer's active layout.
+
+RoyalTerminal continues to honor layout text and composition in production.
+[Windows Terminal](https://github.com/microsoft/terminal/blob/main/src/terminal/input/terminalInput.cpp)
+distinguishes AltGr using translated characters;
+[Ghostty](https://github.com/ghostty-org/ghostty/blob/main/src/input/key.zig)
+carries text, consumed modifiers, and composition state;
+[xterm.js](https://github.com/xtermjs/xterm.js/blob/master/src/browser/CoreBrowserTerminal.ts)
+defers third-level shift and dead keys to the text/composition path. RoyalTerminal
+keeps its layout-aware shortcut distinction rather than adopting xterm.js's
+broader Windows Ctrl+Alt heuristic. The shortcut, AltGr release, reset, and dead-key
+tests cover these separate contracts with explicit inputs.
+
+### Focused validation
 
 Focused transport/session validation:
 

@@ -1,4 +1,9 @@
 <Project>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0'">
+    <!-- Runtime async is a per-assembly compiler opt-in; leave .NET 10 unchanged. -->
+    <Features>$(Features);runtime-async=on</Features>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(RoyalTerminalGenerateGhosttyNativeRuntimeJson)' == 'true'">
     <!-- runtime.json is shared by all frameworks and must appear only once in the package. -->
     <_RoyalTerminalGhosttyMetadataTargetFramework>$(TargetFrameworks.Split(';')[0])</_RoyalTerminalGhosttyMetadataTargetFramework>

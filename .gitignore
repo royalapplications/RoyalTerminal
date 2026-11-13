@@ -431,3 +431,5 @@ FodyWeavers.xsd
 /src/RoyalTerminal.Rendering.Interop.Ghostty/runtimes/osx-arm64
 /test-results
 /src/RoyalTerminal.Terminal.Pty.Unix/runtimes/
+/src/RoyalTerminal.Avalonia.App/runtimes/win-x64/
+/src/RoyalTerminal.Avalonia.App/runtimes/win-arm64/
