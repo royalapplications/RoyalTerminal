@@ -1,0 +1,35 @@
+name: Workspace Lua and process smoke
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/lua/*']
+permissions: {contents: read}
+concurrency: {group: 'workspace-lua-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - run: sudo apt-get update -qq && sudo apt-get install -y lua5.1 lua-dkjson
+      - run: |
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+      - name: Real process, action, remote view, archive and configuration scenarios
+        working-directory: scripts/workspace
+        run: |
+          set -euo pipefail
+          bash smoke-action-contracts.sh
+          python3 smoke-remote-views.py
+          python3 smoke-server-exec.py
+          bash smoke-config-modules.sh
+          bash test-agent-skill.sh
+          bash test-script-processes.sh
+          bash smoke-lua.sh
+          bash smoke-server-lua.sh
+          bash smoke-layout-templates.sh
+          bash smoke-terminal-tools.sh
+          bash smoke-keymap.sh
+          bash smoke-archive.sh

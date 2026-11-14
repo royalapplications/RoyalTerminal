@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 
 import { apiPackageGroups } from "./api-packages.mjs";
+import { installRepositoryLinks } from "./repository-links.mjs";
 
 const guideSidebarItems = [
   {
@@ -60,8 +61,7 @@ const guideSidebarItems = [
       { text: "Rendering, Text, and Graphics", link: "/articles/rendering-native" },
       { text: "Shader Support", link: "/articles/shaders" },
       { text: "Applying Shaders", link: "/articles/shaders-applying" },
-      { text: "Skia Runtime Effect Shaders", link: "/articles/shaders-skia-runtime-effect" },
-      { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-ghostty-shadertoy" },
+      { text: "Ghostty/Shadertoy Shader Compatibility", link: "/articles/shaders-skia-runtime-effect" },
       { text: "Windows Terminal HLSL Shader Compatibility", link: "/articles/shaders-windows-terminal-hlsl" }
     ]
   },
@@ -74,41 +74,30 @@ const guideSidebarItems = [
       { text: "Build, Test, and Release", link: "/articles/build-test-release" },
       { text: "Troubleshooting", link: "/articles/troubleshooting" }
     ]
+  },
+  {
+    text: "Experimental workspaces",
+    collapsed: true,
+    items: [
+      { text: "Implementation contract", link: "/specs/rex-experimental-implementation" },
+      { text: "Parity increments", link: "/specs/rex-parity-continuation" }
+    ]
   }
 ];
 
-const apiSidebarItems = [
-  { text: "Overview", link: "/api/" }
-];
-
+const apiSidebarItems = [{ text: "Overview", link: "/api/" }];
 export default defineConfig({
   title: "RoyalTerminal",
-  description:
-    ".NET 10 terminal platform for Avalonia with multi-transport sessions, managed and native VT processors, and modular rendering/runtime packages.",
-  base: "/RoyalTerminal/",
-  cleanUrls: true,
-  lastUpdated: true,
+  description: ".NET 10 terminal platform for Avalonia with multi-transport sessions, managed and native VT processors, and modular rendering/runtime packages.",
+  base: "/RoyalTerminal/", cleanUrls: true, lastUpdated: true,
   head: [
     ["meta", { name: "theme-color", content: "#0f766e" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:title", content: "RoyalTerminal" }],
-    [
-      "meta",
-      {
-        property: "og:description",
-        content:
-          ".NET 10 terminal platform for Avalonia with multi-transport sessions, managed and native VT processors, and modular rendering/runtime packages."
-      }
-    ]
+    ["meta", { property: "og:description", content: ".NET 10 terminal platform for Avalonia with multi-transport sessions, managed and native VT processors, and modular rendering/runtime packages." }]
   ],
-  markdown: {
-    lineNumbers: true
-  },
-  vite: {
-    build: {
-      chunkSizeWarningLimit: 4096
-    }
-  },
+  markdown: { lineNumbers: true, config: installRepositoryLinks },
+  vite: { build: { chunkSizeWarningLimit: 4096 } },
   themeConfig: {
     logo: "/assets/royalterminal-mark.svg",
     nav: [
@@ -117,50 +106,12 @@ export default defineConfig({
       { text: "API", link: "/api/" },
       { text: "GitHub", link: "https://github.com/royalapplications/RoyalTerminal" }
     ],
-    sidebar: {
-      "/articles/": guideSidebarItems,
-      "/api/": [
-        {
-          text: "API Reference",
-          items: apiSidebarItems
-        },
-        ...apiPackageGroups.map((group) => ({
-          text: group.text,
-          items: group.packages.map((pkg) => ({
-            text: pkg.packageId,
-            link: `/api/${pkg.slug}/`
-          }))
-        }))
-      ],
-      "/": [
-        ...guideSidebarItems,
-        {
-          text: "API Reference",
-          items: apiSidebarItems
-        }
-      ]
-    },
-    outline: {
-      level: [2, 3],
-      label: "On this page"
-    },
-    editLink: {
-      pattern: "https://github.com/royalapplications/RoyalTerminal/edit/main/docs/:path",
-      text: "Edit this page on GitHub"
-    },
-    docFooter: {
-      prev: "Previous page",
-      next: "Next page"
-    },
-    search: {
-      provider: "local"
-    },
-    socialLinks: [
-      { icon: "github", link: "https://github.com/royalapplications/RoyalTerminal" }
-    ],
-    footer: {
-      message: "MIT Licensed",
-      copyright: "Copyright Royal Apps Contributors"
-    }
+    sidebar: { "/articles/": guideSidebarItems, "/api/": [{ text: "API Reference", items: apiSidebarItems }, ...apiPackageGroups.map((group) => ({ text: group.text, items: group.packages.map((pkg) => ({ text: pkg.packageId, link: `/api/${pkg.slug}/` })) }))], "/": [...guideSidebarItems, { text: "API Reference", items: apiSidebarItems }] },
+    outline: { level: [2, 3], label: "On this page" },
+    editLink: { pattern: "https://github.com/royalapplications/RoyalTerminal/edit/main/docs/:path", text: "Edit this page on GitHub" },
+    docFooter: { prev: "Previous page", next: "Next page" },
+    search: { provider: "local" },
+    socialLinks: [{ icon: "github", link: "https://github.com/royalapplications/RoyalTerminal" }],
+    footer: { message: "MIT Licensed", copyright: "Copyright Royal Apps Contributors" }
   }
 });

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>RoyalApps.RoyalTerminal.Multiplexing.Automation</PackageId>
+    <Description>Experimental declarative actions, target resolution, and key modes for terminal workspaces.</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+</Project>

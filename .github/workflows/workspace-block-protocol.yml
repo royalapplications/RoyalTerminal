@@ -1,0 +1,48 @@
+name: Typed workspace block protocol
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/protocol/*']
+permissions: {contents: read}
+concurrency: {group: 'workspace-protocol-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - run: sudo apt-get update -qq && sudo apt-get install -y lua5.1 lua-dkjson
+      - run: dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release && dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+      - name: Protocol, Lua, session tools, activity, shell and foreground job acceptance
+        run: |
+          for suite in block-protocol lua-json session-tools activity shell-workflows foreground; do python3 "scripts/workspace/smoke-$suite.py"; done
+      - run: mkdir -p "$RUNNER_TEMP/portable" && cp -L /usr/share/lua/5.1/dkjson.lua "$RUNNER_TEMP/portable/"
+      - uses: actions/upload-artifact@v7
+        with: {name: job-test-dkjson, path: '${{ runner.temp }}/portable/dkjson.lua', retention-days: 1}
+  darwin-job-control:
+    needs: protocol
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - uses: actions/download-artifact@v8
+        with: {name: job-test-dkjson, path: '${{ runner.temp }}/portable'}
+      - run: xcrun clang -std=c11 -Wall -Werror -fsyntax-only scripts/workspace/check-darwin-job-abi.c
+      - name: Build the checksummed Lua interpreter
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo lua.tgz https://www.lua.org/ftp/lua-5.1.5.tar.gz
+          echo '2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333  lua.tgz' | shasum -a 256 -c -
+          tar xzf lua.tgz && make -C lua-5.1.5/src generic CC=clang
+          mkdir -p lua-bin && cp lua-5.1.5/src/lua lua-bin/lua5.1
+          echo "$RUNNER_TEMP/lua-bin" >> "$GITHUB_PATH"
+          echo "LUA_PATH=$RUNNER_TEMP/portable/?.lua;;" >> "$GITHUB_ENV"
+      - run: |
+          bash scripts/build-unix-pty.sh
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+          dotnet build samples/RoyalTerminal.Multiplexing.Cli -c Release
+          python3 scripts/workspace/smoke-foreground.py

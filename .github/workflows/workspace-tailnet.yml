@@ -1,0 +1,27 @@
+name: Workspace tailnet ingress
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/tailnet/*']
+permissions: {contents: read}
+jobs:
+  ingress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with: {go-version: stable, cache: false}
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - name: Race tests and portable discovery builds
+        working-directory: tools/workspace-tailnet
+        run: |
+          go vet ./...
+          go test -race -v ./...
+          go build -trimpath -o "$RUNNER_TEMP/workspace-tailnet" .
+          GOOS=darwin GOARCH=arm64 go build -o "$RUNNER_TEMP/discover-darwin" .
+          GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/discover.exe" .
+      - run: |
+          dotnet build samples/RoyalTerminal.Multiplexing.Server -c Release
+          GATEWAY="$RUNNER_TEMP/workspace-tailnet" SERVER="$PWD/samples/RoyalTerminal.Multiplexing.Server/bin/Release/net10.0/RoyalTerminal.Multiplexing.Server.dll" tools/workspace-tailnet/smoke.sh

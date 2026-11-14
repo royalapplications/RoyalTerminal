@@ -1,0 +1,7 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {Keymap,keyStroke} from '../wwwroot/keymap.js';
+test('exclusive once modes keep unmatched keys consumed and leave after one action',()=>{const map=new Keymap({modes:[{name:'tools',exclusive:true}],bindings:[{sequence:'ctrl+g',enterMode:'tools',once:true},{mode:'tools',sequence:'b',actionId:'build'}]});assert.equal(map.process('ctrl+g').consumed,true);assert.equal(map.mode,'tools');assert.equal(map.process('x').consumed,true);assert.equal(map.mode,'tools');assert.equal(map.process('b').actionId,'build');assert.equal(map.mode,'default');});
+test('chord cancellation precedes mode popping; nonexclusive mismatch reconsiders only last key',()=>{const map=new Keymap({bindings:[{sequence:'ctrl+b>x',actionId:'split'},{sequence:'a',actionId:'another'}]});assert.equal(map.process('ctrl+b').pending,'ctrl+b');assert.equal(map.process('escape').consumed,true);assert.equal(map.process('x').consumed,false);map.process('ctrl+b');assert.equal(map.process('a').actionId,'another');});
+test('expired prefixes never dispatch a stale command',()=>{let now=0;const map=new Keymap({bindings:[{sequence:'ctrl+b>x',actionId:'split'}]},()=>now);map.process('ctrl+b');now=1600;assert.equal(map.process('x').consumed,false);});
+test('modifier normalization matches the C# contract and ignores IME composition',()=>{assert.equal(keyStroke({key:'K',ctrlKey:true,altKey:true,shiftKey:true,metaKey:true}),'ctrl+alt+shift+meta+k');assert.equal(keyStroke({key:'Process',isComposing:true}),null);});

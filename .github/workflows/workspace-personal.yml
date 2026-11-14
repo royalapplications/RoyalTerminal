@@ -1,0 +1,23 @@
+name: Personal workspace bundle
+on:
+  workflow_dispatch:
+  push:
+    tags: ['workspace-ci/personal/*']
+permissions: {contents: read}
+concurrency: {group: 'personal-workspace-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with: {dotnet-version: '10.0.x'}
+      - uses: actions/setup-node@v7
+        with: {node-version: '26'}
+      - run: |
+          bash scripts/workspace/publish-personal.sh "$RUNNER_TEMP/royalterminal-personal"
+          bash scripts/workspace/smoke-personal.sh "$RUNNER_TEMP/royalterminal-personal"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/royalterminal-personal.tar.gz" royalterminal-personal
+      - uses: actions/upload-artifact@v7
+        with: {name: experimental-personal-linux, path: '${{ runner.temp }}/royalterminal-personal.tar.gz', retention-days: 7}
