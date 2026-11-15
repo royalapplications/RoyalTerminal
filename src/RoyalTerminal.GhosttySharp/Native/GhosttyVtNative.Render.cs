@@ -15,7 +15,7 @@ public static partial class GhosttyVtNative
         Full = 2,
     }
 
-    public enum GhosttyRenderStateCursorVisualStyle : int
+    public enum GhosttyCursorStyle : int
     {
         Bar = 0,
         Block = 1,
@@ -57,9 +57,11 @@ public static partial class GhosttyVtNative
 
     public enum GhosttyRenderStateOption : int
     {
-        Dirty = 0,
+        Dirty = 1,
         /// <summary>Persistent overscan request (GhosttyRenderStateOverscan).</summary>
-        Overscan = 1,
+        Overscan = 2,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttyRenderStateRowData : int
@@ -126,7 +128,9 @@ public static partial class GhosttyVtNative
 
     public enum GhosttyRenderStateRowOption : int
     {
-        Dirty = 0,
+        Dirty = 1,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     public enum GhosttyRenderStateRowCellsData : int
@@ -197,7 +201,7 @@ public static partial class GhosttyVtNative
         [MarshalAs(UnmanagedType.U1)]
         public bool PasswordInput;
 
-        public GhosttyRenderStateCursorVisualStyle VisualStyle;
+        public GhosttyCursorStyle VisualStyle;
 
         public static GhosttyRenderStateCursor CreateSized()
         {

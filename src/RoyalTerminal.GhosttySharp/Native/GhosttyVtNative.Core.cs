@@ -187,6 +187,24 @@ public static partial class GhosttyVtNative
         VersionPatch = 8,
         VersionPre = 9,
         VersionBuild = 10,
+        /// <summary>Upstream FEATURE_SNAPSHOT value.</summary>
+        FeatureSnapshot = 11,
+        /// <summary>Upstream FEATURE_FORMATTER value.</summary>
+        FeatureFormatter = 12,
+        /// <summary>Upstream FEATURE_SELECTION value.</summary>
+        FeatureSelection = 13,
+        /// <summary>Upstream FEATURE_SEARCH value.</summary>
+        FeatureSearch = 14,
+        /// <summary>Upstream FEATURE_RENDER_STATE value.</summary>
+        FeatureRenderState = 15,
+        /// <summary>Upstream FEATURE_INPUT_ENCODE value.</summary>
+        FeatureInputEncode = 16,
+        /// <summary>Upstream FEATURE_COLOR value.</summary>
+        FeatureColor = 17,
+        /// <summary>Upstream FEATURE_GRID_INTROSPECTION value.</summary>
+        FeatureGridIntrospection = 18,
+        /// <summary>Upstream FEATURE_GLYPH_PROTOCOL value.</summary>
+        FeatureGlyphProtocol = 19,
     }
 
     public enum GhosttyFocusEvent : int
@@ -354,7 +372,7 @@ public static partial class GhosttyVtNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe partial GhosttyResult SizeReportEncode(
         GhosttySizeReportStyle style,
-        GhosttySizeReportSize size,
+        in GhosttySizeReportSize size,
         byte* buffer,
         nuint bufferLength,
         out nuint written);

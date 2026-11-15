@@ -158,7 +158,7 @@ public sealed class KittyVirtualPlacementParityTests(ITestOutputHelper output)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ExplicitPlaceholderIdCanTargetAnOrdinaryPlacement(bool native)
+    public void ExplicitPlaceholderIdDoesNotTargetAnOrdinaryPlacement(bool native)
     {
         if (!CanRun(native)) return;
         TerminalScreen screen = new(8, 4, 20);
@@ -167,9 +167,8 @@ public sealed class KittyVirtualPlacementParityTests(ITestOutputHelper output)
         processor.Process("\u001b_Ga=T,f=32,i=1,p=1,U=1,s=1,v=1,c=1,r=1;/wAA/w==\u001b\\"u8);
         processor.Process("\u001b_Ga=T,f=32,i=2,p=7,s=1,v=1,c=1,r=1,C=1,z=5;AAD//w==\u001b\\"u8);
         Write(processor, "\u001b[2;5H\u001b[38;5;2;58;5;7m" + P);
-        Assert.Equal(2, screen.GetKittyPlacements().Length);
-        TerminalKittyImagePlacement fragment = screen.GetKittyPlacements()[0];
-        Assert.Equal((2, 4, 1, -1), (fragment.ImageId, fragment.ViewportColumn, fragment.ViewportRow, fragment.ZIndex));
+        TerminalKittyImagePlacement ordinary = Assert.Single(screen.GetKittyPlacements().ToArray());
+        Assert.Equal((2, 0, 0, 5), (ordinary.ImageId, ordinary.ViewportColumn, ordinary.ViewportRow, ordinary.ZIndex));
         // Removing the last virtual placement disables the placeholder scan, not the ordinary image.
         processor.Process("\u001b_Ga=d,d=i,i=1\u001b\\"u8);
         TerminalKittyImagePlacement anchored = Assert.Single(screen.GetKittyPlacements().ToArray());

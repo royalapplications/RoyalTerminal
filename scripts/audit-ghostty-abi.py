@@ -25,8 +25,8 @@ TYPE_NAMES = {
     "GhosttyPaste": "GhosttyPasteRequest",
     "GhosttySelection": "GhosttySelectionRange",
 }
-FIELD_NAMES = {("GhosttyTerminalSelectionFormatOptions", "emit"): "Format"}
-ALIASES = {"GhosttyColorPaletteIndex": "byte", "GhosttyKittyKeyFlags": "GhosttyVtNative.GhosttyKittyKeyFlags", "GhosttyMode": "GhosttyVtNative.GhosttyMode", "GhosttyMods": "GhosttyVtNative.GhosttyVtMods", "GhosttyRow": "ulong", "GhosttyStyleId": "ushort", "GhosttyCell": "ulong"}
+FIELD_NAMES = {("GhosttyStyleColor", "tag"): "TagValue", ("GhosttyTerminalSelectionFormatOptions", "emit"): "Format"}
+ALIASES = {"GhosttyStyleFlags": "ushort", "GhosttyFormatterExtras": "uint", "GhosttyColorPaletteIndex": "byte", "GhosttyKittyKeyFlags": "GhosttyVtNative.GhosttyKittyKeyFlags", "GhosttyMode": "GhosttyVtNative.GhosttyMode", "GhosttyMods": "GhosttyVtNative.GhosttyVtMods", "GhosttyRow": "ulong", "GhosttyStyleId": "ushort", "GhosttyCell": "ulong"}
 WORDS = {"ctx": "context", "ptr": "pointer", "cap": "capacity", "len": "length", "buf": "buffer", "fg": "foreground", "bg": "background", "cols": "columns", "col": "column", "ref": "reference", "ns": "nanoseconds", "prev": "previous", "esc": "escape", "mem": "memory", "dnd": "draganddrop"}
 
 
@@ -55,7 +55,7 @@ def bodies(source: str, pattern: str):
 def declarations():
     enums, structs = {}, {}
     for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")):
-        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(), flags=re.S)
+        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)
         for match, body in bodies(source, r"public enum (\w+)(?:\s*:\s*(\w+))?\s*"):
             members = {}
             for item in body.split(","):
@@ -71,7 +71,7 @@ def declarations():
             ):
                 fields[normalized(field["name"])] = dict(field.groupdict())
             structs[match[1]] = fields
-    desktop = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/Enums.cs").read_text()
+    desktop = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/Enums.cs").read_text(encoding="utf-8")
     for match, body in bodies(desktop, r"public enum (GhosttyColorScheme)\s*"):
         body = re.sub(r"//[^\n]*", "", body)
         enums[match[1]] = {normalized(item.split("=")[0].strip()): item.split("=")[0].strip() for item in body.split(",") if item.strip()}
@@ -84,13 +84,13 @@ def manifest(library: str):
     return json.loads(lib.ghostty_type_json())
 
 
-def export_inventory(library: str):
+def export_inventory(library: str, abi):
     """Check every native VT entry point; wasm.h explicitly targets Wasm only."""
-    headers = "\n".join(path.read_text() for path in sorted(
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted(
         (ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")) if path.name != "wasm.h")
     headers = re.sub(r"/\*.*?\*/|//[^\n]*", "", headers, flags=re.S)
     exports = sorted(set(re.findall(r"GHOSTTY_API\s+[^;]*?\b(ghostty_\w+)\s*\(", headers, re.S)))
-    source = "\n".join(path.read_text() for path in sorted(
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted(
         (ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
     imports = set(re.findall(r'EntryPoint\s*=\s*"(ghostty_\w+)"', source))
     lib = ctypes.CDLL(str(Path(library).resolve()))
@@ -103,13 +103,65 @@ def export_inventory(library: str):
     stale = imports - set(exports)
     findings.extend(f"entry-point binding absent from public VT headers: {export}"
                     for export in sorted(stale) if not export.startswith("ghostty_royal_"))
+    # Audit call shapes as well as symbol names. Pointer ownership remains a
+    # separate wrapper contract, but by-value versus pointer, scalar widths,
+    # argument count, Cdecl, and one-byte bool marshalling are ABI requirements.
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
+    imports_by_name = {}
+    for match in re.finditer(r'\[LibraryImport\([^;]*?EntryPoint\s*=\s*"(ghostty_\w+)"([^;]*?)(?:public|internal) static (?:unsafe )?partial ([\w*]+) \w+\((.*?)\);', source, re.S):
+        imports_by_name[match[1]] = (match[3], match[4], match[2])
+    reverse_names = {value: key for key, value in TYPE_NAMES.items()}
+    scalars = {"size_t": "usize", "uintptr_t": "usize", "nuint": "usize", "uint8_t": "u8", "byte": "u8",
+               "uint16_t": "u16", "ushort": "u16", "uint32_t": "u32", "uint": "u32", "uint64_t": "u64", "ulong": "u64",
+               "int8_t": "i8", "sbyte": "i8", "int16_t": "i16", "short": "i16", "int32_t": "i32", "int": "i32",
+               "int64_t": "i64", "long": "i64", "char": "u8", "bool": "u8"}
+
+    def shape(value, managed=False, attrs=""):
+        value = re.sub(r"\[[^]]+\]", "", value).strip()
+        if re.search(r"\b(?:in|out|ref)\b", value):
+            return "pointer"
+        value = re.sub(r"\bconst\b|\s", "", value)
+        if "*" in value or value in ("nint", "IntPtr"):
+            return "pointer"
+        value = reverse_names.get(value, value)
+        native = abi["types"].get(value, {})
+        if native.get("kind") in ("opaque", "callback"):
+            return "pointer"
+        if native.get("kind") == "enum":
+            return native["underlying"]
+        if value in ALIASES:
+            return shape(ALIASES[value].removeprefix("GhosttyVtNative.")) if ALIASES[value].removeprefix("GhosttyVtNative.") != value else value
+        if managed and value == "bool" and "UnmanagedType.U1" not in attrs:
+            return "invalid-bool-marshalling"
+        return scalars.get(value, value)
+
+    def argument_shapes(value, managed=False):
+        result = []
+        for item in value.split(","):
+            if item.strip() in ("", "void"):
+                continue
+            cleaned = re.sub(r"\[[^]]+\]", "", item).strip()
+            result.append(shape(re.sub(r"@?\b\w+\s*$", "", cleaned), managed, item))
+        return result
+
+    for match in re.finditer(r"GHOSTTY_API\s+([^;]*?)\b(ghostty_\w+)\s*\((.*?)\);", headers, re.S):
+        name = match[2]
+        imported = imports_by_name.get(name)
+        if imported is None:
+            findings.append(f"unparsed import signature {name}")
+            continue
+        result, args, attrs = imported
+        expected = [shape(match[1])] + argument_shapes(match[3])
+        actual = [shape(result, True, attrs)] + argument_shapes(args, True)
+        if expected != actual or "CallConvCdecl" not in attrs:
+            findings.append(f"entry-point ABI mismatch {name}: expected {expected}, actual {actual}")
     return exports, findings
 
 
 def callback_inventory(abi):
-    headers = "\n".join(path.read_text() for path in sorted((ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")))
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "external/ghostty/include/ghostty/vt").rglob("*.h")))
     headers = re.sub(r"/\*.*?\*/|//[^\n]*", "", headers, flags=re.S)
-    source = "\n".join(path.read_text() for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
+    source = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "src/RoyalTerminal.GhosttySharp/Native").glob("GhosttyVtNative*.cs")))
     source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
     callbacks = {}
     for match in re.finditer(r"((?:\s*\[[^]]+\])*)\s*public\s+(?:unsafe\s+)?delegate\s+(\w+)\s+(Ghostty\w+)\s*\((.*?)\);", source, re.S):
@@ -146,6 +198,8 @@ def callback_inventory(abi):
         native_name = match[2]
         managed_name = native_name[:-2] + "Callback"
         expected = [canonical(match[1])] + parameters(match[3])
+        if native_name.startswith("GhosttyAllocator"):
+            continue
         callback = callbacks.get(managed_name)
         if callback is None:
             findings.append(f"missing callback {native_name}")
@@ -157,7 +211,7 @@ def callback_inventory(abi):
         rows.append((native_name, managed_name, expected))
 
     for field in ("alloc", "resize", "remap", "free"):
-        native = re.search(r"(void\*?|bool)\s*\(\*" + field + r"\)\((.*?)\);", headers)
+        native = re.search(r"typedef\s+(void\*?|bool)\s*\(\*GhosttyAllocator" + field.title() + r"Fn\)\((.*?)\);", headers)
         managed = re.search(r"delegate\* unmanaged\[Cdecl\]<([^>]+)> " + field.title() + ";", source)
         if native is None or managed is None:
             findings.append(f"missing allocator callback {field}")
@@ -172,7 +226,7 @@ def callback_inventory(abi):
 
 
 def flags_checks(enums):
-    headers = "\n".join(path.read_text() for path in sorted((ROOT / "external/ghostty/include/ghostty/vt/key").glob("*.h")))
+    headers = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "external/ghostty/include/ghostty/vt/key").glob("*.h")))
     macros = dict(re.findall(r"^#define (GHOSTTY_(?:MODS|KITTY_KEY)_\w+) (.+)$", headers, re.M))
     checks, findings = [], []
     for name, expression in macros.items():
@@ -187,14 +241,25 @@ def flags_checks(enums):
             findings.append(f"unsupported flag expression {name} = {expression}")
             continue
         checks.append(f'        Assert.Equal((long)({expression}), (long)GhosttyVtNative.{managed}.{member});')
+    # Image filters use bit masks, not the ordinal layer enum. Their macros
+    # live outside the key headers and are not part of the type manifest.
+    types_header = (ROOT / "external/ghostty/include/ghostty/vt/types.h").read_text(encoding="utf-8").replace("\\\n", "")
+    for name, expression in re.findall(r"^#define GHOSTTY_IMAGE_LAYER_MASK_(\w+)\s+([^\n]+)", types_header, re.M):
+        layer = re.fullmatch(r"\s*\(1u << GHOSTTY_IMAGE_LAYER_(\w+)\)\s*", expression)
+        member = lookup(enums.get("GhosttyImageLayerMask", {}), name)
+        ordinal = lookup(enums.get("GhosttyImageLayer", {}), layer[1]) if layer else None
+        if member is None or ordinal is None:
+            findings.append(f"missing or unsupported image-layer mask {name}")
+            continue
+        checks.append(f'        Assert.Equal(1L << (int)GhosttyVtNative.GhosttyImageLayer.{ordinal}, (long)GhosttyVtNative.GhosttyImageLayerMask.{member});')
     return checks, findings
 
 
 def mode_checks():
-    header = (ROOT / "external/ghostty/include/ghostty/vt/modes.h").read_text()
-    source = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Core.cs").read_text()
+    header = (ROOT / "external/ghostty/include/ghostty/vt/modes.h").read_text(encoding="utf-8")
+    source = (ROOT / "src/RoyalTerminal.GhosttySharp/Native/GhosttyVtNative.Core.cs").read_text(encoding="utf-8")
     members = {normalized(name[4:]): name for name in re.findall(r"public static GhosttyMode (Mode\w+) =>", source)}
-    renamed = {"KAM": "KeyboardAction", "SRM": "SendReceive", "REVERSE_WRAP_EXT": "ReverseWrapExtended", "SYNC_OUTPUT": "SynchronizedOutput"}
+    renamed = {"DISABLE_KEYBOARD": "KeyboardAction", "SEND_RECEIVE_MODE": "SendReceive", "CURSOR_KEYS": "Decckm", "MOUSE_EVENT_X10": "X10Mouse", "ENABLE_LEFT_AND_RIGHT_MARGIN": "LeftRightMargin", "MOUSE_EVENT_NORMAL": "NormalMouse", "MOUSE_EVENT_BUTTON": "ButtonMouse", "MOUSE_EVENT_ANY": "AnyMouse", "MOUSE_FORMAT_UTF8": "Utf8Mouse", "MOUSE_FORMAT_SGR": "SgrMouse", "MOUSE_ALTERNATE_SCROLL": "AltScroll", "MOUSE_FORMAT_URXVT": "UrxvtMouse", "MOUSE_FORMAT_SGR_PIXELS": "SgrPixelsMouse", "IGNORE_KEYPAD_WITH_NUMLOCK": "NumlockKeypad", "ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER": "AltScreenSave", "REPORT_COLOR_SCHEME": "ColorSchemeReport", "REPORT_VISIBILITY": "VisibilityReport", "IN_BAND_SIZE_REPORTS": "InBandResize", "KITTY_PASTE_EVENTS": "PasteEvents", "KAM": "KeyboardAction", "SRM": "SendReceive", "REVERSE_WRAP_EXT": "ReverseWrapExtended", "SYNC_OUTPUT": "SynchronizedOutput"}
     checks, findings = [], []
     for name, number, ansi in re.findall(r"^#define GHOSTTY_MODE_(\w+)\s+\(ghostty_mode_new\((\d+), (true|false)\)\)", header, re.M):
         member = lookup(members, renamed.get(name, name))
@@ -223,7 +288,7 @@ def main():
         kind = descriptor["kind"]
         counts[kind] = counts.get(kind, 0) + 1
         managed = TYPE_NAMES.get(name, name)
-        type_rows.append((name, kind, managed if kind in ("struct", "union", "enum") else ("nint" if kind == "opaque" else ALIASES.get(name, "MISSING"))))
+        type_rows.append((name, kind, managed if kind in ("struct", "union", "enum") else ("callback signature" if kind == "callback" else "nint" if kind == "opaque" else ALIASES.get(name, "MISSING"))))
         if kind == "enum":
             members = enums.get(managed)
             if members is None:
@@ -251,6 +316,12 @@ def main():
             initialize = "new((nint)0x1234, (nint)0x5678)" if auto else "default"
             checks = [f'        JsonElement type = Type("{name}", "{kind}");', f'        CheckSizeAndAlignment<{qualified}>(type);', f'        {qualified} value = {initialize};', '        JsonElement fields = type.GetProperty("fields");', f'        Assert.Equal({len(descriptor["fields"])}, fields.EnumerateObject().Count());']
             for key, native_field in descriptor["fields"].items():
+                if name == "GhosttyAllocatorVtable" and key == "reserved":
+                    checks.append('        Assert.Equal(4, fields.GetProperty("reserved").GetProperty("count").GetInt32());')
+                    checks.append('        CheckField(fields, "reserved", (byte*)&value.Reserved0 - (byte*)&value, sizeof(nint) * 4);')
+                    for index in range(1, 4):
+                        checks.append(f'        Assert.Equal(sizeof(nint) * {index}, (byte*)&value.Reserved{index} - (byte*)&value.Reserved0);')
+                    continue
                 member = fields.get(normalized(FIELD_NAMES.get((name, key), ""))) or lookup(fields, key)
                 if key == "_padding" and member is None:
                     checks.append(f'        Assert.Equal(0, fields.GetProperty("{key}").GetProperty("offset").GetInt32());')
@@ -282,7 +353,7 @@ def main():
     findings += flag_findings
     modes, mode_findings = mode_checks()
     findings += mode_findings
-    exports, export_findings = export_inventory(args.library)
+    exports, export_findings = export_inventory(args.library, abi)
     findings += export_findings
     if findings:
         print("\n".join(findings))
@@ -290,15 +361,15 @@ def main():
     output = ROOT / "tests/RoyalTerminal.IntegrationTests/GhosttyAbiManifestTests.Generated.cs"
     generated = HEADER + "\n".join(enum_checks + struct_checks) + method("HeaderModifierAndKittyFlagConstants", flags) + method("HeaderModeConstants", modes) + method("PrimitiveAliasesAndOpaqueHandles", primitive_checks) + FOOTER.replace("TYPE_COUNT", str(len(abi["types"])))
     if args.check:
-        if not output.exists() or output.read_text() != generated:
+        if not output.exists() or output.read_text(encoding="utf-8") != generated:
             print(f"Generated tests are stale: {output}")
             return 1
     else:
-        output.write_text(generated)
+        output.write_text(generated, encoding="utf-8")
     inventory = "# Ghostty ABI binding inventory\n\nGenerated by `scripts/audit-ghostty-abi.py` from the pinned native\n`ghostty_type_json` manifest and all public VT headers. No .NET reflection.\nRegenerate with a freshly built native package; `--check` rejects stale output.\n\n"
     inventory += f"Types: **{len(abi['types'])}** ({', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}).\nCallback signatures: **{len(callbacks)}** (including four allocator vtable entries).\n\n"
-    inventory += f"Header-only constants: **{len(flags)}** modifier/Kitty-key flags and **{len(modes) // 3}** terminal modes (packed value, mode number, ANSI flag).\n\n"
-    inventory += f"Public native VT entry points: **{len(exports)}**, each matched to a `LibraryImport` and verified in the built library. Wasm-only helpers are excluded because native libraries do not export them.\n\n"
+    inventory += f"Header-only constants: **{len(flags)}** modifier/Kitty-key/image-layer flags and **{len(modes) // 3}** terminal modes (packed value, mode number, ANSI flag).\n\n"
+    inventory += f"Public native VT entry points: **{len(exports)}**, each matched to a `LibraryImport`, signature-audited, and verified in the built library. Wasm-only helpers are excluded because native libraries do not export them.\n\n"
     inventory += "All enum members are named compile-time C# references compared with the runtime\nmanifest's numeric values; enum-width sentinels are checked as `int.MaxValue`.\nStruct/union size, alignment, field offsets and field sizes are checked. Reserved\nunion padding is represented by explicit struct size (and its native zero offset).\nRead/write callback auto-properties are checked using distinct constructor\nmarkers at their native offsets. Opaque handles are `nint`; aliases/packed cells\nare checked at their managed scalar width. The runtime type/member counts make\nupstream additions fail validation until reviewed. Callback parameters/returns,\nCdecl, one-byte bool marshalling and allocator function-pointer signatures are\nsource-audited; raw typed pointers represented by `nint` remain pointer-width\nABI equivalents, not claims about ownership. Runtime ownership tests are separate.\n\n"
     inventory += "## Public types\n\n| Native type | Kind | Managed type |\n|---|---|---|\n"
     inventory += "".join(f"| `{name}` | {kind} | `{managed}` |\n" for name, kind, managed in type_rows)
@@ -307,11 +378,11 @@ def main():
     inventory += "\n## Native VT entry points\n\n" + "\n".join(f"- `{export}`" for export in exports) + "\n"
     inventory_path = ROOT / "docs/specs/ghostty-abi-inventory-2026.md"
     if args.check:
-        if not inventory_path.exists() or inventory_path.read_text() != inventory:
+        if not inventory_path.exists() or inventory_path.read_text(encoding="utf-8") != inventory:
             print(f"Generated inventory is stale: {inventory_path}")
             return 1
     else:
-        inventory_path.write_text(inventory)
+        inventory_path.write_text(inventory, encoding="utf-8")
     print(f"Validated source coverage and {'checked' if args.check else 'generated'} all {len(abi['types'])} ABI type checks and {len(callbacks)} callback signatures.")
     return 0
 

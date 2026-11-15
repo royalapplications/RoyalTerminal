@@ -277,10 +277,12 @@ public class KeyEncoderTests
                 var text = "a"u8;
                 fixed (byte* textPtr = text)
                 {
-                    GhosttyVtNative.KeyEventSetUtf8(keyEvent, textPtr, (nuint)text.Length);
+                    GhosttyVtNative.KeyEventSetUtf8(keyEvent, new GhosttyVtNative.GhosttyString((nint)textPtr, (nuint)text.Length));
                 }
 
-                var resultPtr = GhosttyVtNative.KeyEventGetUtf8(keyEvent, out var len);
+                GhosttyVtNative.GhosttyString value = GhosttyVtNative.KeyEventGetUtf8(keyEvent);
+                byte* resultPtr = (byte*)value.Ptr;
+                nuint len = value.Len;
                 Assert.True(resultPtr != null);
                 Assert.Equal((nuint)1, len);
                 Assert.Equal((byte)'a', resultPtr[0]);

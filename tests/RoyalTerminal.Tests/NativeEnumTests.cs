@@ -104,30 +104,30 @@ public class NativeEnumTests
     [Fact]
     public void GhosttyLatestVtBindings_HaveExpectedValues()
     {
-        Assert.Equal(7, (int)GhosttyVtNative.GhosttyKeyEncoderOption.BackarrowKeyMode);
-        Assert.Equal(19, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytes);
-        Assert.Equal(20, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty);
-        Assert.Equal(21, (int)GhosttyVtNative.GhosttyTerminalOption.Selection);
-        Assert.Equal(22, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorStyle);
-        Assert.Equal(23, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorBlink);
-        Assert.Equal(24, (int)GhosttyVtNative.GhosttyTerminalOption.GlyphProtocol);
-        Assert.Equal(25, (int)GhosttyVtNative.GhosttyTerminalOption.PwdChanged);
-        Assert.Equal(26, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardWrite);
-        Assert.Equal(27, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
-        Assert.Equal(28, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
-        Assert.Equal(29, (int)GhosttyVtNative.GhosttyTerminalOption.DesktopNotification);
-        Assert.Equal(30, (int)GhosttyVtNative.GhosttyTerminalOption.ProgressReport);
-        Assert.Equal(31, (int)GhosttyVtNative.GhosttyTerminalOption.ContinuationMaxBytes);
-        Assert.Equal(32, (int)GhosttyVtNative.GhosttyTerminalOption.TitleReport);
-        Assert.Equal(33, (int)GhosttyVtNative.GhosttyTerminalOption.ModeDefault);
-        Assert.Equal(34, (int)GhosttyVtNative.GhosttyTerminalOption.Mode);
-        Assert.Equal(35, (int)GhosttyVtNative.GhosttyTerminalOption.UnknownSequence);
-        Assert.Equal(36, (int)GhosttyVtNative.GhosttyTerminalOption.UnknownMaxBytes);
-        Assert.Equal(37, (int)GhosttyVtNative.GhosttyTerminalOption.TerminfoName);
-        Assert.Equal(38, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardRead);
-        Assert.Equal(39, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardWriteMaxBytes);
-        Assert.Equal(40, (int)GhosttyVtNative.GhosttyTerminalOption.ResizePullScrollback);
-        Assert.Equal(41, (int)GhosttyVtNative.GhosttyTerminalOption.RenderHold);
+        Assert.Equal(8, (int)GhosttyVtNative.GhosttyKeyEncoderOption.BackarrowKeyMode);
+        Assert.Equal(20, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytes);
+        Assert.Equal(21, (int)GhosttyVtNative.GhosttyTerminalOption.ApcMaxBytesKitty);
+        Assert.Equal(22, (int)GhosttyVtNative.GhosttyTerminalOption.Selection);
+        Assert.Equal(23, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorStyle);
+        Assert.Equal(24, (int)GhosttyVtNative.GhosttyTerminalOption.DefaultCursorBlink);
+        Assert.Equal(25, (int)GhosttyVtNative.GhosttyTerminalOption.GlyphProtocol);
+        Assert.Equal(26, (int)GhosttyVtNative.GhosttyTerminalOption.PwdChanged);
+        Assert.Equal(27, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardWrite);
+        Assert.Equal(28, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
+        Assert.Equal(29, (int)GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
+        Assert.Equal(30, (int)GhosttyVtNative.GhosttyTerminalOption.DesktopNotification);
+        Assert.Equal(31, (int)GhosttyVtNative.GhosttyTerminalOption.ProgressReport);
+        Assert.Equal(32, (int)GhosttyVtNative.GhosttyTerminalOption.ContinuationMaxBytes);
+        Assert.Equal(33, (int)GhosttyVtNative.GhosttyTerminalOption.TitleReport);
+        Assert.Equal(34, (int)GhosttyVtNative.GhosttyTerminalOption.ModeDefault);
+        Assert.Equal(35, (int)GhosttyVtNative.GhosttyTerminalOption.Mode);
+        Assert.Equal(36, (int)GhosttyVtNative.GhosttyTerminalOption.UnknownSequence);
+        Assert.Equal(37, (int)GhosttyVtNative.GhosttyTerminalOption.UnknownMaxBytes);
+        Assert.Equal(38, (int)GhosttyVtNative.GhosttyTerminalOption.TerminfoName);
+        Assert.Equal(39, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardRead);
+        Assert.Equal(40, (int)GhosttyVtNative.GhosttyTerminalOption.ClipboardWriteMaxBytes);
+        Assert.Equal(41, (int)GhosttyVtNative.GhosttyTerminalOption.ResizePullScrollback);
+        Assert.Equal(42, (int)GhosttyVtNative.GhosttyTerminalOption.RenderHold);
         Assert.Equal(31, (int)GhosttyVtNative.GhosttyTerminalData.Selection);
         Assert.Equal(35, (int)GhosttyVtNative.GhosttyTerminalData.ScrollbackMaxLines);
         Assert.Equal(36, (int)GhosttyVtNative.GhosttyTerminalData.ContinuationMaxBytes);
@@ -138,7 +138,7 @@ public class NativeEnumTests
         Assert.Equal(-5, (int)GhosttyVtNative.GhosttyResult.IoError);
         Assert.Equal(-6, (int)GhosttyVtNative.GhosttyResult.LimitExceeded);
         Assert.Equal(-7, (int)GhosttyVtNative.GhosttyResult.Rejected);
-        Assert.Equal(2, (int)GhosttyVtNative.GhosttySysOption.Log);
+        Assert.Equal(3, (int)GhosttyVtNative.GhosttySysOption.Log);
         Assert.Equal(0, (int)GhosttyVtNative.GhosttySysLogLevel.Error);
         Assert.Equal(3, (int)GhosttyVtNative.GhosttySysLogLevel.Debug);
         Assert.Equal(4, (int)GhosttyVtNative.GhosttyMouseFormat.SgrPixels);
@@ -157,18 +157,18 @@ public class NativeEnumTests
         int pointerSize = IntPtr.Size;
 
         Assert.Equal(
-            pointerSize == 8 ? 72 : 36,
+            pointerSize == 8 ? 64 : 32,
             Marshal.SizeOf<GhosttyVtNative.GhosttyClipboardWrite>());
         Assert.Equal(
-            pointerSize == 8 ? 16 : 8,
+            pointerSize == 8 ? 8 : 4,
             Marshal.OffsetOf<GhosttyVtNative.GhosttyClipboardWrite>(
                 nameof(GhosttyVtNative.GhosttyClipboardWrite.Contents)).ToInt32());
         Assert.Equal(
-            pointerSize == 8 ? 24 : 12,
+            pointerSize == 8 ? 16 : 8,
             Marshal.OffsetOf<GhosttyVtNative.GhosttyClipboardWrite>(
                 nameof(GhosttyVtNative.GhosttyClipboardWrite.ContentsLength)).ToInt32());
         Assert.Equal(
-            pointerSize == 8 ? 80 : 44,
+            pointerSize == 8 ? 72 : 40,
             Marshal.SizeOf<GhosttyVtNative.GhosttyClipboardRead>());
         Assert.Equal(
             pointerSize == 8 ? 56 : 28,
@@ -187,22 +187,22 @@ public class NativeEnumTests
             Marshal.SizeOf<GhosttyVtNative.GhosttySelectionBuffer>());
 
         Assert.Equal(
-            pointerSize == 8 ? 40 : 20,
+            pointerSize == 8 ? 32 : 16,
             Marshal.SizeOf<GhosttyVtNative.GhosttyTerminalDesktopNotification>());
         Assert.Equal(
-            pointerSize,
+            0,
             Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalDesktopNotification>(
                 nameof(GhosttyVtNative.GhosttyTerminalDesktopNotification.Title)).ToInt32());
 
         Assert.Equal(
-            pointerSize == 8 ? 16 : 12,
+            8,
             Marshal.SizeOf<GhosttyVtNative.GhosttyTerminalProgressReport>());
         Assert.Equal(
-            pointerSize,
+            0,
             Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalProgressReport>(
                 nameof(GhosttyVtNative.GhosttyTerminalProgressReport.State)).ToInt32());
         Assert.Equal(
-            pointerSize + sizeof(int),
+            sizeof(int),
             Marshal.OffsetOf<GhosttyVtNative.GhosttyTerminalProgressReport>(
                 nameof(GhosttyVtNative.GhosttyTerminalProgressReport.Progress)).ToInt32());
     }

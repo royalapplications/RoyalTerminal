@@ -88,7 +88,7 @@ public sealed partial class BasicVtProcessor
         SemanticPen semantic = new() { Content = (TerminalSemanticContent)state.SemanticContent, ClearAtEndOfLine = state.SemanticContentClearEol };
         PromptPolicy prompt = new()
         {
-            Seen = semantic.Content == TerminalSemanticContent.Prompt || SnapshotRowsContainPrompt(rows),
+            Seen = semantic.Content != TerminalSemanticContent.Output || SnapshotRowsContainPrompt(rows),
             Click = state.SemanticClickKind switch
             {
                 1 => state.SemanticClickValue == 0 ? TerminalPromptClick.Absolute : TerminalPromptClick.Relative,

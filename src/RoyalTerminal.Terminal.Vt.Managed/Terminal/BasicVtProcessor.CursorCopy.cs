@@ -38,12 +38,14 @@ public sealed partial class BasicVtProcessor
         {
             _primaryCursorStyle = _alternateCursorStyle;
             _primarySemanticPen = _alternateSemanticPen;
+            if (_primarySemanticPen.Content != TerminalSemanticContent.Output) _primaryPromptPolicy.Seen = true;
             _primaryHyperlinkImplicitCounter = _alternateHyperlinkImplicitCounter;
         }
         else
         {
             _alternateCursorStyle = _primaryCursorStyle;
             _alternateSemanticPen = _primarySemanticPen;
+            if (_alternateSemanticPen.Content != TerminalSemanticContent.Output) _alternatePromptPolicy.Seen = true;
             _alternateHyperlinkImplicitCounter = _primaryHyperlinkImplicitCounter;
         }
     }

@@ -123,10 +123,10 @@ public sealed class GhosttySnapshotNativeStorageTests
         Assert.Equal(1, first); Assert.Equal(2, second);
         set.Release(first);
         Assert.Empty(context.DeletedValues);
-        Assert.Equal(0, set.Add(c)); // dead non-tail ID still requires native rehash
+        Assert.Equal(first, set.Add(c)); // Dead non-tail IDs are now reclaimed in place.
         set.Release(second);
         Assert.Equal(1, set.Add(c));
-        Assert.Equal(new[] { 2, 1 }, context.DeletedValues);
+        Assert.Equal(new[] { 1, 2, 3 }, context.DeletedValues);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class GhosttySnapshotNativeStorageTests
     }
 
     [Fact]
-    public void LiveReferencesDistinguishRehashFromCapacityExhaustion()
+    public void LiveReferencesDistinguishDeadIdReuseFromCapacityExhaustion()
     {
         GhosttySnapshotRefCountedSet<Value> set = new(4, new Context());
         int first = set.Add(new(1, 0)), last = set.Add(new(2, 1));
@@ -184,25 +184,26 @@ public sealed class GhosttySnapshotNativeStorageTests
         Assert.Equal(0, id);
         set.Release(first);
         Assert.Equal(1, set.Count);
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, set.TryAdd(new(3, 2), out id));
-        Assert.Equal(0, id);
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(3, 2), out id));
+        Assert.Equal(first, id);
         // Lookup still precedes pressure checks, and a released tail is trimmed.
         Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(2, 1), out id));
         Assert.Equal(last, id);
         set.Release(last); set.Release(last);
-        Assert.Equal(0, set.Count);
+        Assert.Equal(1, set.Count);
         Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(3, 2), out id));
         Assert.Equal(1, id);
     }
 
     [Fact]
-    public void RehashThresholdUsesNativeTruncationAndProbeFailureTakesPrecedence()
+    public void ReclamationThresholdUsesNativeTruncationAndProbeFailureTakesPrecedence()
     {
         GhosttySnapshotRefCountedSet<Value> set = new(8, new Context()); // cap=6, threshold=5
         for (int i = 1; i <= 5; i++) Assert.Equal(i, set.Add(new(i, (ulong)i)));
         Assert.Equal(GhosttySnapshotSetAddResult.OutOfMemory, set.TryAdd(new(6, 7), out _));
         set.Release(1);
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, set.TryAdd(new(6, 7), out _));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, set.TryAdd(new(6, 7), out int reused));
+        Assert.Equal(1, reused);
 
         GhosttySnapshotRefCountedSet<Value> probes = new(128, new Context());
         for (int i = 1; i <= 32; i++) probes.Add(new(i, 0));
@@ -218,14 +219,14 @@ public sealed class GhosttySnapshotNativeStorageTests
         int first = source.Add(new(1, 0)), last = source.Add(new(2, 1));
         source.Release(first);
         GhosttySnapshotRefCountedSet<Value> copy = source.Copy(copyContext);
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, copy.TryAdd(new(3, 2), out _));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, copy.TryAdd(new(3, 2), out _));
         copy.Release(last);
         Assert.Equal(1, copy.Add(new(3, 2)));
-        Assert.Equal(new[] { 2, 1 }, copyContext.DeletedValues);
+        Assert.Equal(new[] { 1, 2, 3 }, copyContext.DeletedValues);
         Assert.Empty(sourceContext.DeletedValues);
         Assert.Equal(1, source.Count);
         Assert.Equal(new Value(2, 1), source.Get(last));
-        Assert.Equal(GhosttySnapshotSetAddResult.NeedsRehash, source.TryAdd(new(3, 2), out _));
+        Assert.Equal(GhosttySnapshotSetAddResult.Success, source.TryAdd(new(3, 2), out _));
     }
 
     [Fact]

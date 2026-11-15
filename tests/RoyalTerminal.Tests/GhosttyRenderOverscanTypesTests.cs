@@ -21,7 +21,7 @@ public sealed class GhosttyRenderOverscanTypesTests
         Assert.Equal(0, (byte*)id.Bits - (byte*)&id);
         Assert.Equal(20, (int)GhosttyRenderStateData.Overscan);
         Assert.Equal(21, (int)GhosttyRenderStateData.OverscanRequest);
-        Assert.Equal(1, (int)GhosttyRenderStateOption.Overscan);
+        Assert.Equal(2, (int)GhosttyRenderStateOption.Overscan);
         Assert.Equal(6, (int)GhosttyRenderStateRowData.ViewportY);
         Assert.Equal(7, (int)GhosttyRenderStateRowData.Id);
     }

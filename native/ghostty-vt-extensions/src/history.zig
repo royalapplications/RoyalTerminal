@@ -39,7 +39,6 @@ export fn ghostty_royal_history_row_ref(
 ) callconv(.c) c_int {
     const result = output orelse return -2;
     const GridRef = @import("terminal/c/grid_ref.zig").CGridRef;
-    if (result.size < @sizeOf(GridRef)) return -2;
     const t = @import("terminal/c/terminal.zig").zigTerminal(handle) orelse return -2;
     const pages = &t.screens.active.pages;
     if (row >= pages.total_rows) return -2;
@@ -91,7 +90,7 @@ test "Royal history sized ABI and borrowed row access" {
     try testing.expectEqual(@as(c_int, 0), ghostty_royal_history_info(handle, &info));
     try testing.expectEqual(epoch, info.epoch);
     try testing.expectEqual(@as(u64, 3), info.total_rows);
-    var ref: @import("terminal/c/grid_ref.zig").CGridRef = .{ .size = @sizeOf(@import("terminal/c/grid_ref.zig").CGridRef) };
+    var ref: @import("terminal/c/grid_ref.zig").CGridRef = .{ .node = null, .x = 0, .y = 0 };
     try testing.expectEqual(@as(c_int, 0), ghostty_royal_history_row_ref(handle, 0, &ref));
     try testing.expectEqual(@as(c_int, 0), ghostty_royal_history_row_ref(handle, 2, &ref));
     try testing.expectEqual(@as(c_int, -2), ghostty_royal_history_row_ref(handle, 3, &ref));

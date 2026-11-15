@@ -91,4 +91,24 @@ public sealed partial class TerminalControlHeadlessInteractionTests
         }
         finally { await CleanupWindowAsync(window, control.StopPty); }
     }
+    [AvaloniaTheory]
+    [InlineData(VtProcessorPreference.Managed)]
+    [InlineData(VtProcessorPreference.Native)]
+    public async Task Headless_TripleClickDragExtendsThroughBlankLine(VtProcessorPreference preference)
+    {
+        if (preference == VtProcessorPreference.Native && !GhosttyVtProcessor.IsAvailable()) Assert.Skip("Native unavailable.");
+        TerminalControl control = await CreateTextSelectionControlAsync("alpha beta\r\n\r\nthree four", preference);
+        Window window = Assert.IsType<Window>(TopLevel.GetTopLevel(control));
+        try
+        {
+            Point press = await GetCellInteractionPointAsync(control, window, 1, 0);
+            Point drag = await GetCellInteractionPointAsync(control, window, 2, 1);
+            RaiseMouseDragReleaseSequence(control, window, press, drag, clickCount: 3);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal((0, 0), control.Renderer!.SelectionStart!.Value);
+            Assert.Equal((control.Columns, 1), control.Renderer.SelectionEnd!.Value);
+        }
+        finally { await CleanupWindowAsync(window, control.StopPty); }
+    }
+
 }

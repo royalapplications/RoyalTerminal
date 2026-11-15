@@ -181,8 +181,8 @@ public sealed partial class GhosttyRenderState : IDisposable
     }
 
     /// <summary>Gets the cursor visual style.</summary>
-    public GhosttyVtNative.GhosttyRenderStateCursorVisualStyle GetCursorVisualStyle()
-        => GetValue<GhosttyVtNative.GhosttyRenderStateCursorVisualStyle>(
+    public GhosttyVtNative.GhosttyCursorStyle GetCursorVisualStyle()
+        => GetValue<GhosttyVtNative.GhosttyCursorStyle>(
             GhosttyVtNative.GhosttyRenderStateData.CursorVisualStyle);
 
     /// <summary>Gets whether the cursor is visible.</summary>
@@ -410,11 +410,12 @@ public sealed partial class GhosttyRenderState : IDisposable
 
         fixed (uint* destinationPtr = destination)
         {
+            GhosttyVtNative.GhosttyCodepointBuffer buffer = new() { Ptr = destinationPtr, Cap = (nuint)destination.Length };
             ThrowIfFailed(
                 GhosttyVtNative.RenderStateRowCellsGet(
                     _rowCells,
                     GhosttyVtNative.GhosttyRenderStateRowCellsData.GraphemesBuffer,
-                    destinationPtr),
+                    &buffer),
                 "ghostty_render_state_row_cells_get(graphemes)");
         }
     }

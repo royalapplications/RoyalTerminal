@@ -34,7 +34,8 @@ public sealed class ManagedSnapshotReflowMetadataTests
         terminal.Processor.ResizeScreen(16, 2, 0, 0);
 
         TerminalRow row = terminal.Screen.GetSnapshotRows(0)![0];
-        Assert.Equal(4096U, row.SnapshotAllocation!.Capacity.StringBytes);
+        // Full-page density projection now applies to strings too.
+        Assert.Equal(alignment == 16384 ? 155648U : explicitId ? 40320U : 40960U, row.SnapshotAllocation!.Capacity.StringBytes);
         Assert.Equal((ushort)192, row.SnapshotAllocation.Capacity.HyperlinkBytes);
         Assert.False(row.SnapshotAllocation.MetadataOverflow);
         for (int column = 0; column < 8; column++)

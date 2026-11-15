@@ -16,15 +16,6 @@ public static partial class GhosttyVtNative
     }
 
     /// <summary>Drawing layer, ordered from lowest to highest.</summary>
-    public enum GhosttyRenderStateImageLayer : int
-    {
-        /// <summary>Behind cell backgrounds.</summary>
-        BelowBackground = 0,
-        /// <summary>Between backgrounds and text.</summary>
-        BelowText = 1,
-        /// <summary>In front of text.</summary>
-        AboveText = 2,
-    }
 
     /// <summary>Origin of a Kitty render placement.</summary>
     public enum GhosttyRenderStateKittyPlacementKind : int

@@ -15,7 +15,7 @@ public static partial class GhosttyVtNative
         Rgb = 2,
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 8)]
+    [StructLayout(LayoutKind.Explicit, Size = 3)]
     public struct GhosttyStyleColorValue
     {
         [FieldOffset(0)]
@@ -23,59 +23,96 @@ public static partial class GhosttyVtNative
 
         [FieldOffset(0)]
         public GhosttyColorRgb Rgb;
-
-        [FieldOffset(0)]
-        public ulong Padding;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttyStyleColor
     {
-        public GhosttyStyleColorTag Tag;
+        public byte TagValue;
+
+        /// <summary>Gets or sets the byte-sized color discriminator.</summary>
+        public GhosttyStyleColorTag Tag
+        {
+            readonly get => (GhosttyStyleColorTag)TagValue;
+            set => TagValue = (byte)value;
+        }
         public GhosttyStyleColorValue Value;
     }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttyStyle
     {
-        public nuint Size;
         public GhosttyStyleColor ForegroundColor;
         public GhosttyStyleColor BackgroundColor;
         public GhosttyStyleColor UnderlineColor;
+        public ushort Flags;
+        public ushort Reserved;
 
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Bold;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Italic;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Faint;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Blink;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Inverse;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Invisible;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Strikethrough;
-
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Overline;
-
-        public int Underline;
-
-        public static GhosttyStyle CreateSized()
+        /// <summary>Gets or sets the bold style flag.</summary>
+        public bool Bold
         {
-            return new GhosttyStyle
-            {
-                Size = (nuint)Marshal.SizeOf<GhosttyStyle>(),
-            };
+            readonly get => (Flags & 1) != 0;
+            set => Flags = (ushort)(value ? Flags | 1 : Flags & ~1);
         }
+
+        /// <summary>Gets or sets the italic style flag.</summary>
+        public bool Italic
+        {
+            readonly get => (Flags & 2) != 0;
+            set => Flags = (ushort)(value ? Flags | 2 : Flags & ~2);
+        }
+
+        /// <summary>Gets or sets the faint style flag.</summary>
+        public bool Faint
+        {
+            readonly get => (Flags & 4) != 0;
+            set => Flags = (ushort)(value ? Flags | 4 : Flags & ~4);
+        }
+
+        /// <summary>Gets or sets the blink style flag.</summary>
+        public bool Blink
+        {
+            readonly get => (Flags & 8) != 0;
+            set => Flags = (ushort)(value ? Flags | 8 : Flags & ~8);
+        }
+
+        /// <summary>Gets or sets the inverse style flag.</summary>
+        public bool Inverse
+        {
+            readonly get => (Flags & 16) != 0;
+            set => Flags = (ushort)(value ? Flags | 16 : Flags & ~16);
+        }
+
+        /// <summary>Gets or sets the invisible style flag.</summary>
+        public bool Invisible
+        {
+            readonly get => (Flags & 32) != 0;
+            set => Flags = (ushort)(value ? Flags | 32 : Flags & ~32);
+        }
+
+        /// <summary>Gets or sets the strikethrough style flag.</summary>
+        public bool Strikethrough
+        {
+            readonly get => (Flags & 64) != 0;
+            set => Flags = (ushort)(value ? Flags | 64 : Flags & ~64);
+        }
+
+        /// <summary>Gets or sets the overline style flag.</summary>
+        public bool Overline
+        {
+            readonly get => (Flags & 128) != 0;
+            set => Flags = (ushort)(value ? Flags | 128 : Flags & ~128);
+        }
+
+        /// <summary>Gets or sets the three-bit underline style.</summary>
+        public int Underline
+        {
+            readonly get => (Flags >> 8) & 7;
+            set => Flags = (ushort)((Flags & ~0x700) | ((value & 7) << 8));
+        }
+
+        /// <summary>Creates a zeroed, frozen libghostty 1.0 style value.</summary>
+        public static GhosttyStyle CreateSized() => default;
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_style_default")]
@@ -90,7 +127,6 @@ public static partial class GhosttyVtNative
     [StructLayout(LayoutKind.Sequential)]
     public struct GhosttyGridRef
     {
-        public nuint Size;
         public nint Node;
         public ushort X;
         public ushort Y;
@@ -99,7 +135,7 @@ public static partial class GhosttyVtNative
         {
             return new GhosttyGridRef
             {
-                Size = (nuint)Marshal.SizeOf<GhosttyGridRef>(),
+
             };
         }
     }

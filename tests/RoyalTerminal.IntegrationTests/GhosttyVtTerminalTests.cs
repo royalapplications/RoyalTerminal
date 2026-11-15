@@ -166,7 +166,7 @@ public class GhosttyVtTerminalTests
         Assert.Equal(6, image.CopyData().Length);
 
         using GhosttyKittyGraphicsPlacementIterator iterator = graphics.CreatePlacementIterator();
-        iterator.SetLayer(GhosttyVtNative.GhosttyKittyPlacementLayer.All);
+        iterator.SetLayers(GhosttyVtNative.GhosttyImageLayerMask.All);
         graphics.Populate(iterator);
 
         Assert.True(iterator.MoveNext());
@@ -274,7 +274,7 @@ public class GhosttyVtTerminalTests
     public void ProtocolHelpers_TypeMetadataAndModeHelpers_Work()
     {
         string typeJson = GhosttyVtHelpers.GetTypeMetadataJson();
-        Assert.Contains("GhosttyFormatterTerminalOptions", typeJson, StringComparison.Ordinal);
+        Assert.Contains("GhosttyFormatterOption", typeJson, StringComparison.Ordinal);
         Assert.Contains("GhosttyPoint", typeJson, StringComparison.Ordinal);
 
         GhosttyVtNative.GhosttyMode ansiMode = GhosttyVtNative.CreateMode(4, ansi: true);

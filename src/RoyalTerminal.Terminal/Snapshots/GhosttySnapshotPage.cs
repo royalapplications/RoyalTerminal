@@ -29,7 +29,7 @@ internal sealed class GhosttySnapshotPage
         _liveStyles = metadata?.Styles;
         _styleStorage = metadata?.FinishStyles(grid);
         _graphemeStorage = graphemeStorage;
-        _hyperlinkStorage = metadata?.FinishHyperlinks(grid) ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes);
+        _hyperlinkStorage = metadata?.FinishHyperlinks(grid) ?? new(Capacity.HyperlinkBytes, Capacity.StringBytes, Capacity.HyperlinkCells);
     }
 
     internal GhosttySnapshotGrid Grid { get; }

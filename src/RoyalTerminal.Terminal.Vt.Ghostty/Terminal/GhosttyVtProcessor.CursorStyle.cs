@@ -14,12 +14,12 @@ public sealed partial class GhosttyVtProcessor
     public void SetDefaultCursorStyle(TerminalCursorStyle style)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.GhosttyTerminalCursorStyle native = style switch
+        GhosttyVtNative.GhosttyCursorStyle native = style switch
         {
-            TerminalCursorStyle.Block => GhosttyVtNative.GhosttyTerminalCursorStyle.Block,
-            TerminalCursorStyle.Underline => GhosttyVtNative.GhosttyTerminalCursorStyle.Underline,
-            TerminalCursorStyle.Bar => GhosttyVtNative.GhosttyTerminalCursorStyle.Bar,
-            TerminalCursorStyle.BlockHollow => GhosttyVtNative.GhosttyTerminalCursorStyle.BlockHollow,
+            TerminalCursorStyle.Block => GhosttyVtNative.GhosttyCursorStyle.Block,
+            TerminalCursorStyle.Underline => GhosttyVtNative.GhosttyCursorStyle.Underline,
+            TerminalCursorStyle.Bar => GhosttyVtNative.GhosttyCursorStyle.Bar,
+            TerminalCursorStyle.BlockHollow => GhosttyVtNative.GhosttyCursorStyle.BlockHollow,
             _ => throw new ArgumentOutOfRangeException(nameof(style)),
         };
         _terminal.SetDefaultCursorStyle(native);

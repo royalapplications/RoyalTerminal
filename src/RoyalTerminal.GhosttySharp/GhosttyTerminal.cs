@@ -19,7 +19,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     private readonly bool _ownsHandle;
 
     /// <summary>
-    /// Creates a new Ghostty VT terminal.
+    /// Creates a new Ghostty VT terminal with RoyalTerminal's glyph rendering enabled.
     /// </summary>
     /// <param name="columns">Initial terminal grid width in cells.</param>
     /// <param name="rows">Initial terminal grid height in cells.</param>
@@ -41,6 +41,9 @@ public sealed partial class GhosttyTerminal : IDisposable
         try
         {
             SetScrollbackMaxBytes(maxScrollback);
+            // libghostty 1.0 requires embedders to opt in. RoyalTerminal has a
+            // glyph renderer and historically enables this in both engines.
+            SetGlyphProtocol(true);
         }
         catch
         {
@@ -211,7 +214,7 @@ public sealed partial class GhosttyTerminal : IDisposable
     public void ScrollViewport(GhosttyVtNative.GhosttyTerminalScrollViewport behavior)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.TerminalScrollViewport(_handle, behavior);
+        ThrowIfFailed(GhosttyVtNative.TerminalScrollViewport(_handle, behavior), "TerminalScrollViewport");
     }
 
     /// <summary>Gets the current value of a VT mode.</summary>
@@ -500,35 +503,23 @@ public sealed partial class GhosttyTerminal : IDisposable
     /// <summary>Sets or removes the native scrollback byte limit.</summary>
     public void SetScrollbackMaxBytes(nuint? bytes)
     {
-        if (bytes is null)
-        {
-            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes);
-            return;
-        }
-
         SetStructOption(
             GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxBytes,
-            bytes.Value,
+            bytes is null ? ulong.MaxValue : (ulong)bytes.Value,
             "ghostty_terminal_set(scrollback_max_bytes)");
     }
 
     /// <summary>Sets or removes the native scrollback physical-line limit.</summary>
     public void SetScrollbackMaxLines(nuint? lines)
     {
-        if (lines is null)
-        {
-            ClearOption(GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines);
-            return;
-        }
-
         SetStructOption(
             GhosttyVtNative.GhosttyTerminalOption.ScrollbackMaxLines,
-            lines.Value,
+            lines is null ? ulong.MaxValue : (ulong)lines.Value,
             "ghostty_terminal_set(scrollback_max_lines)");
     }
 
     /// <summary>Sets the default cursor style restored by DECSCUSR reset.</summary>
-    public void SetDefaultCursorStyle(GhosttyVtNative.GhosttyTerminalCursorStyle style)
+    public void SetDefaultCursorStyle(GhosttyVtNative.GhosttyCursorStyle style)
     {
         SetStructOption(
             GhosttyVtNative.GhosttyTerminalOption.DefaultCursorStyle,
@@ -784,53 +775,17 @@ public sealed partial class GhosttyTerminal : IDisposable
         out byte[] output)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        GhosttyVtNative.GhosttySelectionRange nativeSelection = default;
-        GhosttyVtNative.GhosttyTerminalSelectionFormatOptions options =
-            GhosttyVtNative.GhosttyTerminalSelectionFormatOptions.CreateSized();
-        options.Format = format;
-        options.Unwrap = unwrap;
-        options.Trim = trim;
-        if (selection is not null)
+        if (selection is null)
         {
-            nativeSelection = selection.Value.ToNative();
-            options.Selection = &nativeSelection;
-        }
-
-        GhosttyVtNative.GhosttyResult probe = GhosttyVtNative.TerminalSelectionFormatBuffer(
-            _handle,
-            options,
-            null,
-            0,
-            out nuint required);
-        if (probe == GhosttyVtNative.GhosttyResult.NoValue)
-        {
-            output = [];
-            return false;
-        }
-
-        if (probe != GhosttyVtNative.GhosttyResult.OutOfSpace)
-        {
-            ThrowIfFailed(probe, "ghostty_terminal_selection_format_buf(probe)");
-        }
-
-        byte[] result = new byte[checked((int)required)];
-        fixed (byte* resultPtr = result)
-        {
-            ThrowIfFailed(
-                GhosttyVtNative.TerminalSelectionFormatBuffer(
-                    _handle,
-                    options,
-                    resultPtr,
-                    (nuint)result.Length,
-                    out nuint written),
-                "ghostty_terminal_selection_format_buf");
-            if (written != (nuint)result.Length)
+            if (!TryGetSelection(out GhosttySelection active))
             {
-                Array.Resize(ref result, checked((int)written));
+                output = [];
+                return false;
             }
+            selection = active;
         }
-
-        output = result;
+        using GhosttyFormatter formatter = new(this, format, unwrap, trim, selection);
+        output = formatter.Format();
         return true;
     }
 
@@ -938,7 +893,7 @@ public sealed partial class GhosttyTerminal : IDisposable
             ThrowIfFailed(
                 GhosttyVtNative.TerminalGet(
                     _handle,
-                    GhosttyVtNative.GhosttyTerminalData.CursorStyle,
+                    GhosttyVtNative.GhosttyTerminalData.CursorSgrStyle,
                     &style),
                 "ghostty_terminal_get(cursor_style)");
         }

@@ -97,7 +97,7 @@ public sealed class ManagedSnapshotCursorResizeTests
         processor.ResizeScreen(8, 3, 0, 0);
         row = screen.GetViewportRow(0);
         Assert.NotSame(previous, row.SnapshotAllocation);
-        Assert.Equal(4096U, row.SnapshotAllocation!.Capacity.StringBytes);
+        Assert.Equal(6720U, row.SnapshotAllocation!.Capacity.StringBytes);
         Assert.Equal((1, 1UL, 0UL, 2016UL), Usage(screen, row));
         AssertCursor(processor, 0, Bold, uri, 0, 0);
         Process(processor, "A" + Close + "\u001b[0m");
@@ -262,6 +262,11 @@ public sealed class ManagedSnapshotCursorResizeTests
         using GhosttyTerminal native = GhosttySnapshot.Decode(snapshot);
         using ManagedTerminalSnapshot managed = ManagedTerminalSnapshot.Restore(snapshot);
         bool nativeRetainedOrphan = false;
+        // Density projection uses reserved rows, which depend on the native
+        // page alignment. The same orphan grows this fixture to 600 bytes on
+        // 4 KiB targets and 6000 bytes on macOS ARM64's 16 KiB target.
+        ushort grownHyperlinkBytes = new GhosttySnapshotScrollbackQuota().PageAlignment == 16384
+            ? (ushort)6000 : (ushort)600;
         foreach ((ushort columns, ushort rows) in new (ushort, ushort)[] { (8, 3), (16, 3), (8, 2), (8, 4), (4, 2) })
         {
             native.Resize(columns, rows);
@@ -298,7 +303,7 @@ public sealed class ManagedSnapshotCursorResizeTests
                 Assert.Equal(1UL, Usage(managed.Screen, cursor, state.Key).Links);
                 Assert.Equal((ushort)192, cursor.SnapshotAllocation.Capacity.HyperlinkBytes);
                 bool afterNativeGrowth = state.Key == 1 && nativeRetainedOrphan;
-                Assert.Equal((ushort)(afterNativeGrowth ? 384 : 192), expectedCapacity.HyperlinkBytes);
+                Assert.Equal(afterNativeGrowth ? grownHyperlinkBytes : (ushort)192, expectedCapacity.HyperlinkBytes);
                 Assert.Equal(expectedCapacity.StringBytes, cursor.SnapshotAllocation.Capacity.StringBytes);
                 nativeRetainedOrphan |= nativePage.HyperlinkCount == 2;
             }

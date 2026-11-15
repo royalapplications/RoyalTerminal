@@ -62,6 +62,7 @@ public sealed partial class BasicVtProcessor : ITerminalPromptStateSource
                 break;
             case 'B':
             case 'I':
+                CurrentPromptPolicy.Seen = true;
                 CurrentSemanticPen = new() { Content = TerminalSemanticContent.Input, ClearAtEndOfLine = action == 'I' };
                 break;
             case 'C':

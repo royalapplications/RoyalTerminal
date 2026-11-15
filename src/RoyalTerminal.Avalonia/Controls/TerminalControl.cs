@@ -3956,7 +3956,9 @@ public partial class TerminalControl : TemplatedControl, ILogicalScrollable
             // Ghostty line semantics: trim edge whitespace, stop at prompt/input/
             // output boundaries, and include the whole final wide glyph.
             if (source.TryGetLineExtent(new(Math.Clamp(column, 0, _screen.Columns - 1), absoluteRow),
-                ReadOnlySpan<uint>.Empty, semanticPromptBoundary: true, out TerminalLineExtent line))
+                ReadOnlySpan<uint>.Empty, semanticPromptBoundary: true, out TerminalLineExtent line) ||
+                TerminalLineSelection.TryResolve(_screen, new(Math.Clamp(column, 0, _screen.Columns - 1), absoluteRow),
+                    [], semanticPromptBoundary: true, out line, trimWhitespace: false))
                 return new SelectionExtent(line.Start.Column, line.Start.Row, line.End.Column, line.End.Row);
             return new SelectionExtent(0, absoluteRow, 1, absoluteRow);
         }

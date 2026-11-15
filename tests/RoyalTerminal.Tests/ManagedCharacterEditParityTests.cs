@@ -16,7 +16,7 @@ namespace RoyalTerminal.Tests;
 // uses a bounded rectangle; xterm.js BufferLine also clears split wide cells,
 // but repairs some edges after copying and has no Ghostty PAGE allocator.
 // Follow Ghostty's order, margins and wrapped-history boundary semantics.
-public sealed class ManagedCharacterEditParityTests
+public sealed partial class ManagedCharacterEditParityTests
 {
     private const string Close = "\u001b]8;;\u001b\\";
     private const string Seed = "\u001b[1;41m\u001b]8;id=a;https://a\u001b\\中\u0301" + Close +
@@ -163,8 +163,15 @@ public sealed class ManagedCharacterEditParityTests
         foreach (TerminalRow row in GhosttySnapshotLivePage.Decode(page, owner))
         {
             TerminalRow observed = managed.Screen.GetRow(rowIndex++);
-            Assert.Equal(page.Capacity, observed.SnapshotAllocation!.Capacity);
-            Assert.False(observed.SnapshotAllocation.MetadataOverflow);
+            // Compare the live allocation through PAGE v1's combined hint;
+            // independent map growth need not enlarge the unique-link set.
+            GhosttySnapshotPageCapacity capacity = observed.SnapshotAllocation!.Capacity;
+            Assert.Equal(page.Capacity, capacity with
+            {
+                HyperlinkBytes = capacity.HyperlinkWireBytes,
+                HyperlinkCells = page.Capacity.HyperlinkCells,
+            });
+            Assert.False(observed.SnapshotAllocation!.MetadataOverflow);
             Assert.Equal((row.WrapsToNext, row.IsWrapContinuation), (observed.WrapsToNext, observed.IsWrapContinuation));
             for (int column = 0; column < row.Columns; column++)
             {

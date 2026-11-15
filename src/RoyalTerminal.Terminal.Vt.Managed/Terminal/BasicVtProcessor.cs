@@ -1939,6 +1939,16 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                 _state = ParserState.Ground;
                 break;
 
+            case (byte)'6': // DECBI — Back index
+                HorizontalIndex(forward: false);
+                _state = ParserState.Ground;
+                break;
+
+            case (byte)'9': // DECFI — Forward index
+                HorizontalIndex(forward: true);
+                _state = ParserState.Ground;
+                break;
+
             case (byte)'D': // IND — Index (move cursor down, scroll if at bottom)
                 ResetDelayedWrap();
                 LineFeed(wrapForced: false);
@@ -3256,6 +3266,11 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
             else if (p0 == 1) SetCharacterProtection(CharacterProtectionMode.Dec);
             return;
         }
+        if (_intermediateChar == '\'' && finalByte is '}' or '~')
+        {
+            if (_params.Count <= 1) EditColumns(Math.Max(1, p0), insert: finalByte == '}');
+            return;
+        }
         if (_intermediateChar != '\0') return;
 
         ResetDelayedWrapForCsi(finalByte);
@@ -4031,9 +4046,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
     private void ProcessSgr()
     {
         bool trackStyles = _screen.TracksSnapshotMetadata;
+        GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
         if (_params.Count == 0)
         {
-            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             ResetAttributes();
             if (trackStyles) RecordSnapshotPenChange(previous);
             return;
@@ -4041,11 +4056,9 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
 
         for (var i = 0; i < _params.Count; i++)
         {
-            GhosttySnapshotStyle previous = trackStyles ? CaptureSnapshotPen() : default;
             var p = _params[i];
             if (ProcessSgrParameterGroup(ref i))
             {
-                if (trackStyles) RecordSnapshotPenChange(previous);
                 continue;
             }
 
@@ -4119,8 +4132,8 @@ public sealed partial class BasicVtProcessor : IVtProcessor,
                     _currentHasUnderlineColor = false;
                     break;
             }
-            if (trackStyles) RecordSnapshotPenChange(previous);
         }
+        if (trackStyles) RecordSnapshotPenChange(previous);
     }
 
     private void RecordSnapshotPenChange(GhosttySnapshotStyle previous)

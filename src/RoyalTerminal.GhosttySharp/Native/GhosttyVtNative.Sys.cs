@@ -19,6 +19,11 @@ public static partial class GhosttyVtNative
         public delegate* unmanaged[Cdecl]<void*, void*, nuint, byte, nuint, nuint, byte> Resize;
         public delegate* unmanaged[Cdecl]<void*, void*, nuint, byte, nuint, nuint, void*> Remap;
         public delegate* unmanaged[Cdecl]<void*, void*, nuint, byte, nuint, void> Free;
+        /// <summary>Reserved ABI slots; callers must initialize these to zero.</summary>
+        public nint Reserved0;
+        public nint Reserved1;
+        public nint Reserved2;
+        public nint Reserved3;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -72,10 +77,12 @@ public static partial class GhosttyVtNative
 
     public enum GhosttySysOption : int
     {
-        Userdata = 0,
-        DecodePng = 1,
-        Log = 2,
-        RandomSecure = 3,
+        Userdata = 1,
+        DecodePng = 2,
+        Log = 3,
+        RandomSecure = 4,
+        /// <summary>Upstream INVALID value.</summary>
+        Invalid = 0,
     }
 
     [LibraryImport(LibName, EntryPoint = "ghostty_sys_set")]

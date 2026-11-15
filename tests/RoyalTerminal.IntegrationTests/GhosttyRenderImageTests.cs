@@ -61,7 +61,7 @@ public sealed class GhosttyRenderImageTests
         Assert.Equal((16u, 32u, 2u, 2u), (parent.PixelWidth, parent.PixelHeight, parent.GridColumns, parent.GridRows));
         Assert.Equal((0u, 0u, 1u, 1u), (parent.SourceX, parent.SourceY, parent.SourceWidth, parent.SourceHeight));
         Assert.Equal((3, 2), (child.ViewportColumn, child.ViewportRow));
-        Assert.Equal(GhosttyRenderStateImageLayer.AboveText, parent.Layer);
+        Assert.Equal(GhosttyImageLayer.AboveText, parent.Layer);
         ulong generation = state.GetImagePlacementsGeneration();
         state.Clean();
         terminal.Write("\x1b[6;1Hplain text"u8);

@@ -96,12 +96,14 @@ public sealed class ManagedSnapshotHyperlinkLifecycleTests
         int token = row.ReadOnlyCells[0].HyperlinkId;
         TerminalScreen retained = screen.CreateStateCopy();
         Process(processor, "B");
-        Assert.Equal((ushort)384, row.SnapshotAllocation!.Capacity.HyperlinkBytes);
+        Assert.Equal((ushort)192, row.SnapshotAllocation!.Capacity.HyperlinkBytes);
+        Assert.Equal((ushort)128, row.SnapshotAllocation.Capacity.HyperlinkCells);
         Assert.Equal(4096U, row.SnapshotAllocation.Capacity.StringBytes);
         Assert.Equal(token, row.ReadOnlyCells[102].HyperlinkId);
         Assert.Equal((1UL, 103UL, 1536UL), Usage(screen, row));
         Assert.Equal((1UL, 102UL, 1536UL), Usage(retained, retained.GetViewportRow(0)));
         Assert.Equal((ushort)192, retained.GetViewportRow(0).SnapshotAllocation!.Capacity.HyperlinkBytes);
+        Assert.Equal((ushort)64, retained.GetViewportRow(0).SnapshotAllocation!.Capacity.HyperlinkCells);
     }
 
     [Fact]
@@ -111,7 +113,8 @@ public sealed class ManagedSnapshotHyperlinkLifecycleTests
         using BasicVtProcessor processor = new(screen);
         Process(processor, Open("u", new string('i', 1984)) + new string('A', 103));
         TerminalRow row = screen.GetViewportRow(0);
-        Assert.Equal((ushort)384, row.SnapshotAllocation!.Capacity.HyperlinkBytes);
+        Assert.Equal((ushort)192, row.SnapshotAllocation!.Capacity.HyperlinkBytes);
+        Assert.Equal((ushort)128, row.SnapshotAllocation.Capacity.HyperlinkCells);
         Assert.Equal(2048U, row.SnapshotAllocation.Capacity.StringBytes);
         Assert.Equal((1UL, 102UL, 2016UL), Usage(screen, row));
         Assert.Equal(0, row.ReadOnlyCells[102].HyperlinkId);
@@ -307,7 +310,7 @@ public sealed class ManagedSnapshotHyperlinkLifecycleTests
             GhosttySnapshotScreen expected = reader.ReadReady().Screens[0];
             TerminalRow actual = managed.Screen.GetViewportRow(0);
             GhosttySnapshotPage page = expected.Pages[^1];
-            Assert.Equal(page.Capacity.HyperlinkBytes, actual.SnapshotAllocation!.Capacity.HyperlinkBytes);
+            Assert.Equal(page.Capacity.HyperlinkBytes, actual.SnapshotAllocation!.Capacity.HyperlinkWireBytes);
             Assert.Equal(page.Capacity.StringBytes, actual.SnapshotAllocation.Capacity.StringBytes);
             using GhosttySnapshotStateReader current = new(managed.Processor.GetBinarySnapshot(), new());
             GhosttySnapshotScreenState state = current.ReadReady().Screens[0].State;

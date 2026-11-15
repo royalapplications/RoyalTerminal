@@ -158,7 +158,6 @@ export fn ghostty_royal_grid_ref_hyperlink(
     id_capacity: usize,
 ) callconv(.c) c_int {
     const ref = reference orelse return -2;
-    if (ref.size < @sizeOf(@import("terminal/c/grid_ref.zig").CGridRef)) return -2;
     const result = output orelse return -2;
     if (result.size < @sizeOf(RoyalHyperlinkMetadata)) return -2;
     const pin = ref.toPin() orelse return -2;

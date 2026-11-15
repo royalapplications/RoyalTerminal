@@ -16,6 +16,15 @@ namespace RoyalTerminal.Tests;
 /// </summary>
 public sealed class TerminalLineSelectionTests(ITestOutputHelper output)
 {
+    [Fact]
+    public void UntrimmedBlankLogicalLineKeepsItsWholeRange()
+    {
+        TerminalScreen screen = new(20, 3);
+        Assert.False(TerminalLineSelection.TryResolve(screen, new(2, 1), [], true, out _));
+        Assert.True(TerminalLineSelection.TryResolve(screen, new(2, 1), [], true, out var extent, trimWhitespace: false));
+        Assert.Equal(new TerminalLineExtent(new(0, 1), new(20, 1)), extent);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

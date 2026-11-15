@@ -108,16 +108,16 @@ public class OscParserTests
             // Extract title string
             unsafe
             {
-                byte* titlePtr = null;
-                bool ok = GhosttyVtNative.OscCommandData(
+                GhosttyVtNative.GhosttyString titleValue = default;
+                GhosttyVtNative.GhosttyResult dataResult = GhosttyVtNative.OscCommandData(
                     command,
                     GhosttyOscCommandData.ChangeWindowTitleStr,
-                    &titlePtr);
+                    &titleValue);
 
-                Assert.True(ok);
-                Assert.True(titlePtr != null);
+                Assert.Equal(GhosttyVtNative.GhosttyResult.Success, dataResult);
+                Assert.False(titleValue.IsEmpty);
 
-                var title = Marshal.PtrToStringUTF8((nint)titlePtr);
+                var title = titleValue.ToUtf8String();
                 Assert.Equal("Hello Ghostty", title);
             }
         }

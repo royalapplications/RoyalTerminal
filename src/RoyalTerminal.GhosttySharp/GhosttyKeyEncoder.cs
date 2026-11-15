@@ -30,7 +30,7 @@ public sealed class GhosttyKeyEncoder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(terminal);
-        GhosttyVtNative.KeyEncoderSetoptFromTerminal(_handle, terminal.Handle);
+        ThrowIfFailed(GhosttyVtNative.KeyEncoderSetoptFromTerminal(_handle, terminal.Handle), "KeyEncoderSetoptFromTerminal");
     }
 
     /// <summary>Encodes the supplied key event as terminal input bytes.</summary>

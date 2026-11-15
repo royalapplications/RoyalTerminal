@@ -121,7 +121,7 @@ public sealed class ManagedSnapshotQuotaEvictionTests
     }
 
     [Fact]
-    public void PageGrowthRecyclesOnlyOnePageAndTailReuseDoesNotEnforceBytes()
+    public void PageGrowthEnforcesBytesAfterReplacingAnOversizedPage()
     {
         GhosttySnapshotAllocation layout = new(4096);
         TerminalScreen screen = Screen(1, Pages(new(80, 2, 0, 0, 0, 0), 2, 2, 2));
@@ -131,29 +131,29 @@ public sealed class ManagedSnapshotQuotaEvictionTests
         // byte-enforcement checkpoint. Keep that oversized page behind the first.
         GhosttySnapshotPageAllocation enlarged = new(new(80, 2, 0, 0, 0, 5_000_000));
         for (int index = 2; index < 4; index++) screen.GetSnapshotRows(0)![index].SnapshotAllocation = enlarged;
-        TerminalRow retained = screen.GetSnapshotRows(0)![2];
+        TerminalRow retained = screen.GetSnapshotRows(0)![4];
         screen.AddRow();
-        Assert.Equal(5, screen.TotalRows);
+        Assert.Equal(3, screen.TotalRows);
         Assert.Same(retained, screen.GetSnapshotRows(0)![0]);
         screen.SynchronizeSnapshotScrollbackQuota(quota); // Copying host policy is not another setter.
         screen.AddRow();
-        Assert.Equal(6, screen.TotalRows);
+        Assert.Equal(4, screen.TotalRows);
         Assert.Same(retained, screen.GetSnapshotRows(0)![0]);
         screen.SnapshotScrollbackQuota = quota; // Explicit same-value setter enforces immediately.
         Assert.Equal(4, screen.TotalRows);
-        Assert.NotSame(retained, screen.GetSnapshotRows(0)![0]);
+        Assert.Same(retained, screen.GetSnapshotRows(0)![0]);
     }
 
     [Fact]
-    public void ByteGrowthCannotRecycleTheSoleOldPage()
+    public void ByteGrowthEnforcesBytesAfterTheOldPageBecomesEntirelyHistorical()
     {
         TerminalScreen screen = Screen(1, Pages(new(80, 2, 0, 0, 0, 2_000_000), 2));
         GhosttySnapshotScrollbackQuota quota = new() { MaximumBytes = 0 };
         screen.SnapshotScrollbackQuota = quota;
         TerminalRow original = screen.GetSnapshotRows(0)![0];
         screen.AddRow();
-        Assert.Equal(3, screen.TotalRows);
-        Assert.Same(original, screen.GetSnapshotRows(0)![0]);
+        Assert.Equal(1, screen.TotalRows);
+        Assert.NotSame(original, screen.GetSnapshotRows(0)![0]);
         screen.SnapshotScrollbackQuota = quota;
         Assert.Equal(1, screen.TotalRows);
     }
@@ -278,7 +278,7 @@ public sealed class ManagedSnapshotQuotaEvictionTests
     }
 
     [Fact]
-    public void ByteGrowthDoesNotRecycleMultipleInterleavedOldPages()
+    public void ByteGrowthPrunesInterleavedHistoricalPagesAsOneComponent()
     {
         GhosttySnapshotAllocation layout = new(4096);
         TerminalRow[] grouped = Pages(new(80, 2, 0, 0, 0, 0), 2, 2, 2);
@@ -286,8 +286,8 @@ public sealed class ManagedSnapshotQuotaEvictionTests
         GhosttySnapshotScrollbackQuota quota = new() { PageAlignment = 4096, MaximumBytes = layout.StandardPageBytes * 3 };
         screen.SnapshotScrollbackQuota = quota;
         screen.AddRow();
-        Assert.Equal(7, screen.TotalRows);
-        Assert.Same(grouped[0], screen.GetSnapshotRows(0)![0]);
+        Assert.Equal(3, screen.TotalRows);
+        Assert.Same(grouped[4], screen.GetSnapshotRows(0)![0]);
         screen.SnapshotScrollbackQuota = quota;
         Assert.Equal(3, screen.TotalRows);
         Assert.Same(grouped[4], screen.GetSnapshotRows(0)![0]);

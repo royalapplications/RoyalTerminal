@@ -18,9 +18,10 @@ public static class TerminalLineSelection
     /// <param name="whitespace">Trim codepoints; empty uses NUL, ASCII space and tab.</param>
     /// <param name="semanticPromptBoundary">Whether changes in cell semantic content stop selection.</param>
     /// <param name="extent">Selected range with an exclusive end column, or default.</param>
-    /// <returns>Whether a non-whitespace line was found.</returns>
+    /// <param name="trimWhitespace">Whether to trim; false retains blank logical lines for line-selection dragging.</param>
+    /// <returns>Whether a line was found.</returns>
     public static bool TryResolve(TerminalScreen screen, TerminalGridPosition position,
-        ReadOnlySpan<uint> whitespace, bool semanticPromptBoundary, out TerminalLineExtent extent)
+        ReadOnlySpan<uint> whitespace, bool semanticPromptBoundary, out TerminalLineExtent extent, bool trimWhitespace = true)
     {
         ArgumentNullException.ThrowIfNull(screen);
         extent = default;
@@ -64,12 +65,12 @@ public static class TerminalLineSelection
             endColumn = 0;
         }
 
-        while (IsTrimmed(screen.GetRow(startRow).ReadOnlyCells[startColumn], whitespace))
+        while (trimWhitespace && IsTrimmed(screen.GetRow(startRow).ReadOnlyCells[startColumn], whitespace))
         {
             if (startRow == endRow && startColumn == endColumn) return false;
             if (++startColumn == screen.Columns) { startColumn = 0; startRow++; }
         }
-        while (IsTrimmed(screen.GetRow(endRow).ReadOnlyCells[endColumn], whitespace))
+        while (trimWhitespace && IsTrimmed(screen.GetRow(endRow).ReadOnlyCells[endColumn], whitespace))
         {
             if (endColumn-- == 0) { endColumn = screen.Columns - 1; endRow--; }
         }

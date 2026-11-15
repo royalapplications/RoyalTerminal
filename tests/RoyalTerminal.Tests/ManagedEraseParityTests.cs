@@ -270,7 +270,12 @@ public sealed partial class ManagedEraseParityTests
             GhosttySnapshotPageCapacity capacity = observed.SnapshotAllocation!.Capacity;
             Assert.True(capacity.Rows >= page.Capacity.Rows,
                 $"{context}, row={index - 1}: native used rows={page.Capacity.Rows}, managed capacity={capacity.Rows}");
-            Assert.Equal(page.Capacity with { Rows = capacity.Rows }, capacity);
+            // PAGE v1 combines independent hyperlink capacities into one lossy hint.
+            Assert.Equal(page.Capacity with { Rows = capacity.Rows }, capacity with
+            {
+                HyperlinkBytes = capacity.HyperlinkWireBytes,
+                HyperlinkCells = page.Capacity.HyperlinkCells,
+            });
             Assert.False(observed.SnapshotAllocation.MetadataOverflow);
             Assert.True((row.WrapsToNext, row.IsWrapContinuation, row.SemanticPrompt) ==
                 (observed.WrapsToNext, observed.IsWrapContinuation, observed.SemanticPrompt), $"{context}, row={index - 1}: row metadata differs");
