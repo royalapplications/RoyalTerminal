@@ -156,7 +156,7 @@ This follows [Avalonia's headless capture implementation](https://github.com/Ava
 which pumps dispatcher/render work but cannot wait for a background producer
 that has not yet posted its UI callback.
 
-The branch version is `0.8.0-preview.1`, reflecting the public ABI migration.
+The branch version is `0.8.0-preview.2`, reflecting the public ABI migration.
 The preview tag is created from the reviewed PR branch after its CI passes.
 The existing tag-driven release workflow rebuilds and tests the native/managed
 packages, validates runtime contents, publishes through NuGet trusted publishing,
