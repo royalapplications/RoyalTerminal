@@ -1,6 +1,7 @@
 // Copyright (c) Royal Apps. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
+using System.Runtime.CompilerServices;
 using Avalonia.Headless.XUnit;
 using RoyalTerminal.Avalonia.Services;
 using RoyalTerminal.Avalonia.Settings;
@@ -113,11 +114,20 @@ public sealed class TerminalWindowResizeHostTests
     public void WarmCoalescingDoesNotAllocatePerRequest()
     {
         TerminalWindowResizeQueue queue = new(_ => { }, _ => { });
-        for (int index = 0; index < 1000; index++) queue.Enqueue(new(80, 24));
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < 10000; index++) queue.Enqueue(new(100, 30));
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        queue.Enqueue(new(80, 24));
+        _ = MeasureCoalescingAllocations(queue);
+        long allocated = MeasureCoalescingAllocations(queue);
         Assert.Equal(0, allocated);
+    }
+
+    // Keep tiered compilation of the measurement loop out of the allocation count.
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static long MeasureCoalescingAllocations(TerminalWindowResizeQueue queue)
+    {
+        TerminalWindowResizeRequest request = new(100, 30);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 10000; index++) queue.Enqueue(request);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     [Theory]
